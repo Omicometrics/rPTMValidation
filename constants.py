@@ -1,6 +1,18 @@
 #! /usr/bin/env python3
+"""
+A module to define some constants used throughout peptide and mass spectrum
+analyses.
+
+"""
 
 import collections
+import enum
+
+
+class MassType(enum.Enum):
+    mono = enum.auto()
+    avg = enum.auto()
+
 
 Mass = collections.namedtuple('Mass', ['mono', 'avg'])
 
@@ -52,11 +64,17 @@ AA_SYMBOLS = {
     'Valine': 'V'
 }
 
+RESIDUES = set(AA_SYMBOLS.values())
+
 FIXED_MASSES = {
+    # iTRAQ tag
     "tag": 304.20536,
-    "h20": 18.006067,
-    "h": 1.0073,
-    "cys": 57.021464
+    "H2O": 18.006067,
+    "H": 1.0073,
+    "CO": 28.0101,
+    "NH3": 16.998767,
+    # Carbamidomethylation
+    "cys_c": 57.021464
 }
 
 ELEMENT_MASSES = {
@@ -98,3 +116,5 @@ ELEMENT_MASSES = {
     "Pd": Mass(105.903478, 106.42),
     "Al": Mass(26.9815386, 26.9815386)
 }
+
+ITRAQ_MASSES = [113.1, 114.1, 115.1, 116.1, 117.1, 118.1, 119.1, 121.1]
