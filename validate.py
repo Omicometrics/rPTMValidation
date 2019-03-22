@@ -15,13 +15,13 @@ import multiprocessing as mp
 import operator
 import os
 import sys
-import time
+from typing import List
 
 import numpy as np
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 
 from constants import AA_MASSES, FIXED_MASSES, RESIDUES
 import decoys
+import lda
 import modifications
 import peptides
 import proteolysis
@@ -38,14 +38,15 @@ SpecMatch = collections.namedtuple("SpecMatch",
                                    ["seq", "mods", "theor_z", "conf"])
 
 
-def get_decoys(decoy_db, residue):
+def get_decoys(decoy_db: str, residue: str) -> List:
     """
     Extracts decoy peptides from the database if they contain the specified
     residue.
 
     Args:
         decoy_db (str): The path to the decoy database.
-        residue (str): The residue by which to limit decoy sequences.
+        residue (str): The residue by which to limit decoy sequences. If None,
+                       no residue filter will be applied.
 
     Returns:
         List of matching decoy peptide sequences.
@@ -54,8 +55,35 @@ def get_decoys(decoy_db, residue):
     with open(decoy_db) as fh:
         rdr = csv.DictReader(fh, delimiter='\t')
         return list({
-            r['Sequence'] for r in rdr if residue in r['Sequence'] and
+            r['Sequence'] for r in rdr
+            if (residue is None or residue in r['Sequence']) and
             len(r['Sequence']) >= 7 and RESIDUES.issuperset(r['Sequence'])})
+            
+
+# TODO: config-based fixed modifications            
+def gen_fixed_mods(seq: str) -> List[modifications.ModSite]:
+    """
+    Generates the fixed modifications for the sequence.
+
+    Args:
+        seq (str): The peptide sequence.
+
+    Returns:
+        list of fixed ModSites.
+
+    """
+    mods = [modifications.ModSite(FIXED_MASSES["tag"], "nterm", "iTRAQ8plex")]
+    for ii, res in enumerate(seq):
+        # Resolve Lys tag modifications
+        if res == 'K':
+            mods.append(
+                modifications.ModSite(FIXED_MASSES["tag"], ii + 1, None))
+        # Resolve Cys carbamidomethylation modifications
+        elif res == "C":
+            mods.append(modifications.ModSite(FIXED_MASSES["cys_c"],
+                                              ii + 1, None))
+
+    return mods
 
 
 def modify_decoys(seqs, res_idxs, mod_name, mod_mass):
@@ -79,21 +107,8 @@ def modify_decoys(seqs, res_idxs, mod_name, mod_mass):
     for ii, seq in enumerate(seqs):
         # Calculate the mass of the decoy sequence and construct the
         # modifications
-        mass = FIXED_MASSES["H2O"] + FIXED_MASSES["tag"]
-        mods = [modifications.ModSite(FIXED_MASSES["tag"], "nterm",
-                                      "iTRAQ8plex")]
-        for jj, res in enumerate(seq):
-            mass += AA_MASSES[res].mono
-            # Resolve Lys tag modifications
-            if res == 'K':
-                mods.append(
-                    modifications.ModSite(FIXED_MASSES["tag"], jj + 1, None))
-                mass += FIXED_MASSES["tag"]
-            # Resolve Cys carbamidomethylation modifications
-            elif res == "C":
-                mods.append(modifications.ModSite(FIXED_MASSES["cys_c"],
-                                                  jj + 1, None))
-                mass += FIXED_MASSES["cys_c"]
+        mods = gen_fixed_mods(seq)
+        mass = FIXED_MASSES["H2O"] + sum(ms.mass for ms in mods)
 
         target_idxs = res_idxs[ii]
         # Generate target modification combinations, up to a maximum of 3
@@ -109,118 +124,68 @@ def modify_decoys(seqs, res_idxs, mod_name, mod_mass):
     return decoy_idxs, decoy_mods, decoy_seq_masses
 
 
-def slice_masses(masses, nslices=800):
-    """
-    Slices the list of masses into nslices segments.
-
-    Args:
-        masses (list): A list of float masses.
-        nslices (int, optional): The number of slices to split.
-
-    Returns:
-        tuple: index at which each slice begins in masses,
-               the mass at which each slice begins.
-
-    """
-    size = (masses[-1] - masses[0]) / nslices
-    # bounds contains the lower bound of each slice
-    idxs, bounds = [], []
-    for ii in range(nslices + 1):
-        pos = bisect_left(masses, size * ii + masses[0])
-        if pos == 0:
-            idxs.append(0)
-            bounds.append(masses[0])
-        elif pos < len(masses):
-            idxs.append(pos - 1)
-            bounds.append(masses[pos - 1])
-        else:
-            idxs.append(pos - 1)
-            bounds.append(masses[-1])
-
-    return idxs, bounds
-
-
-def _match_decoys_impl(peptide_mz, seqs, masses, mods, idxs,
-                       var_idxs, slice_idxs, slice_bounds, ptm_masses,
-                       ptm_max, ptm_min, tol_factor, charge):
+def match_decoys(peptide_mz, seqs, masses, mods, idxs,
+                 var_idxs, slice_idxs, slice_bounds, ptm_masses,
+                 ptm_max, ptm_min, tol_factor=0.01):
     """
     """
     candidates = []
+    for charge in range(2, 5):
+        pep_mass = peptide_mz * charge
+        tol = tol_factor * charge
 
-    pep_mass = peptide_mz * charge
-    tol = tol_factor * charge
+        # start and end are the beginning and ending indices of
+        # the slices within which the pep_mass (with a tolerance)
+        # falls
+        start = slice_idxs[bisect_left(slice_bounds, pep_mass - 1)]
+        end = slice_idxs[
+            min(bisect_left(slice_bounds, pep_mass + 1), len(slice_idxs) - 1)]
 
-    # start and end are the beginning and ending indices of
-    # the slices within which the pep_mass (with a tolerance)
-    # falls
-    start = slice_idxs[bisect_left(slice_bounds, pep_mass - 1)]
-    end = slice_idxs[
-        min(bisect_left(slice_bounds, pep_mass + 1), len(slice_idxs) - 1)]
+        # Find the decoy sequences which fall within the tolerance
+        seq_idxs, = np.asarray(
+            (masses[start:end] <= pep_mass + tol) &
+            (masses[start:end] >= pep_mass - tol)).nonzero()
+        # Shift the indices by the starting index
+        seq_idxs += start
 
-    # Find the decoy sequences which fall within the tolerance
-    seq_idxs, = np.asarray(
-        (masses[start:end] <= pep_mass + tol) &
-        (masses[start:end] >= pep_mass - tol)).nonzero()
-    # Shift the indices by the starting index
-    seq_idxs += start
+        # Add candidate decoy peptides
+        candidates.extend(
+            [Peptide(seqs[idxs[idx]], charge, mods[idx])
+             for idx in seq_idxs])
 
-    # Add candidate decoy peptides
-    candidates.extend(
-        [Peptide(seqs[idxs[idx]], charge, mods[idx])
-         for idx in seq_idxs])
+        # Get new start and end indices accounting for variable
+        # PTM masses
+        start = slice_idxs[max(
+            bisect_left(slice_bounds, pep_mass - ptm_max - 1) - 1, 0)]
+        end = slice_idxs[
+            min(bisect_left(slice_bounds, pep_mass - ptm_min + 1),
+                len(slice_idxs) - 1)]
 
-    # Get new start and end indices accounting for variable
-    # PTM masses
-    start = slice_idxs[max(
-        bisect_left(slice_bounds, pep_mass - ptm_max - 1) - 1, 0)]
-    end = slice_idxs[
-        min(bisect_left(slice_bounds, pep_mass - ptm_min + 1),
-            len(slice_idxs) - 1)]
+        # Subset the general decoy lists for the given slice ranges
+        r_mods = mods[start:end]
+        r_masses = masses[start:end]
+        r_seqs = [seqs[idx] for idx in idxs[start:end]]
+        r_var_idxs = [var_idxs[idx] for idx in idxs[start:end]]
 
-    # Subset the general decoy lists for the given slice ranges
-    r_mods = mods[start:end]
-    r_masses = masses[start:end]
-    r_seqs = [seqs[idx] for idx in idxs[start:end]]
-    r_var_idxs = [var_idxs[idx] for idx in idxs[start:end]]
+        for res, _masses in ptm_masses.items():
+            for mass in _masses:
+                # Find the decoy sequences within the tolerance
+                seq_idxs, = np.asarray((r_masses >= pep_mass - tol - mass) &
+                                       (r_masses <= pep_mass + tol - mass))\
+                                       .nonzero()
 
-    for res, _masses in ptm_masses.items():
-        for mass in _masses:
-            # Find the decoy sequences within the tolerance
-            seq_idxs, = np.asarray((r_masses >= pep_mass - tol - mass) &
-                                   (r_masses <= pep_mass + tol - mass))\
-                                   .nonzero()
+                # Find the indices of res in the sequences
+                seq_res_idxs = [(ii, jj) for ii in seq_idxs
+                                for jj in r_var_idxs[ii]
+                                if r_seqs[ii][jj] == res]
 
-            # Find the indices of res in the sequences
-            seq_res_idxs = [(ii, jj) for ii in seq_idxs
-                            for jj in r_var_idxs[ii]
-                            if r_seqs[ii][jj] == res]
+                candidates.extend([
+                    Peptide(r_seqs[ii],
+                            charge, r_mods[ii] +
+                            [modifications.ModSite(mass, jj + 1, None)])
+                    for ii, jj in seq_res_idxs])
 
-            candidates.extend([
-                Peptide(r_seqs[ii],
-                        charge, r_mods[ii] +
-                        [modifications.ModSite(mass, jj + 1, None)])
-                for ii, jj in seq_res_idxs])
-                
     return candidates
-
-
-def match_decoys(peptide_mz, seqs, masses, mods, idxs,
-                 var_idxs, slice_idxs, slice_bounds, ptm_masses,
-                 ptm_max, ptm_min, tol_factor=0.01, mppool=None):
-    """
-    """
-    match_func = functools.partial(_match_decoys_impl, peptide_mz, seqs,
-                                   masses, mods, idxs, var_idxs,
-                                   slice_idxs, slice_bounds, ptm_masses,
-                                   ptm_max, ptm_min, tol_factor)
-    # Search the decoy peptide slices with a tolerance to find the
-    # decoy peptide candidates
-    if mppool is not None:
-        candidates = mppool.map(match_func, range(2, 5))
-    else:
-        candidates = [match_func(charge) for charge in range(2, 5)]
-
-    return list(itertools.chain(*candidates))
 
 
 def count_matched_ions(peptide, spectrum):
@@ -259,7 +224,7 @@ def write_results(output_file, psms):
         writer = csv.writer(fh, delimiter="\t")
         # Write the header row
         writer.writerow(["Rawset", "SpectrumID", "Sequence", "Modifications",
-                         "Charge", "Features", "SimilarityScore",
+                         "Charge", "Features",
                          "DecoySequence", "DecoyModifications", "DecoyCharge",
                          "DecoyFeatures"])
 
@@ -273,9 +238,9 @@ def write_results(output_file, psms):
             dmod_strs = ["{:6f}|{}|{}".format(*ms)
                          for ms in psm.decoy_id.mods]
 
-            sim_str = ("none" if psm.similarity_scores is None
-                       else ";".join("{}#{}:{:.6f}".format(sim)
-                                     for sim in psm.similarity_scores))
+            #sim_str = ("none" if psm.similarity_scores is None
+            #           else ";".join("{}#{}:{:.6f}".format(sim)
+            #                         for sim in psm.similarity_scores))
 
             # TODO: this way of writing features is horrid,
             # especially since they're now stored in a dict
@@ -283,28 +248,10 @@ def write_results(output_file, psms):
                              psm.charge,
                              ",".join(f"{feat:.8f}"
                                       for feat in psm.features.values()),
-                             sim_str, psm.decoy_id.seq,
+                             psm.decoy_id.seq,
                              dmod_strs, psm.decoy_id.charge,
                              ",".join(f"{feat:.8f}" for feat in
                                       psm.decoy_id.features.values())])
-
-                                      
-def lda_validate(X, y):
-    """
-    """
-    pass
-    
-    
-def psms2df(psms):
-    """
-    Converts the psm features, including decoy, into a pandas dataframe,
-    including a flag indicating whether the features correspond to a
-    target or decoy peptide, the data set ID, the spectrum ID and the
-    peptide sequence.
-    
-    """
-    df = pd.dataframe()
-    pass
 
 
 def decoy_features(decoy_peptide, spec, target_mod, proteolyzer):
@@ -312,13 +259,44 @@ def decoy_features(decoy_peptide, spec, target_mod, proteolyzer):
     Calculates the PSM features for the decoy peptide and spectrum
     combination. This function is defined here in order to be picklable
     for multiprocessing.
-    
+
     """
     return PSM(None, None, decoy_peptide.seq, decoy_peptide.mods,
                decoy_peptide.charge, spectrum=spec).extract_features(
                     target_mod, proteolyzer)
+                    
+                    
+def test_matches_equal(matches, psm, peptide_str) -> bool:
+    """
+    Evaluates whether any one of a SpecMatch is to the same peptide,
+    in terms of sequence and modifications, as the given PSM.
 
-                                      
+    Args:
+        matches (list of SpecMatch): The matches to test.
+        psm (psm.PSM): The peptide against which to compare.
+        peptide_str (str): The peptide string including modifications.
+
+    Returns:
+        boolean: True if there is a match, False otherwise.
+
+    """
+    for match in matches:
+        if match.seq != psm.sequence and match.theor_z != psm.charge:
+            continue
+
+        mods = match.mods
+
+        if "Deamidated" in mods:
+            # Remove deamidation from the mods string
+            mods = ";".join(mod for mod in mods.split(";")
+                            if not mod.startswith("Deamidated"))
+
+        if peptides.merge_seq_mods(match.seq, mods) == peptide_str:
+            return True
+
+    return False
+
+
 class Validate():
     """
     """
@@ -340,7 +318,7 @@ class Validate():
         # Generate the full decoy protein sequence database file
         self.decoy_db_path = decoys.generate_decoy_file(self._target_db_path,
                                                         self.proteolyzer)
-                             
+
         # Used for multiprocessing throughout the class methods
         self.pool = mp.Pool()
 
@@ -384,6 +362,10 @@ class Validate():
         # List of residues bearing fixed modifications.
         self.fixed_residues = self.config["fixed_residues"]
 
+        # The minimum Fisher score for feature selection
+        self.fisher_threshold = self.config.get("fisher_score_threshold",
+                                                0.05)
+
     def validate(self):
         """
         """
@@ -394,12 +376,6 @@ class Validate():
         if not self.psms:
             print("No PSMs found matching the input. Exiting.")
             sys.exit()
-
-        self.pep_strs = [peptides.merge_seq_mods(psm.sequence, psm.mods)
-                         for psm in self.psms]
-
-        # Deduplicate peptide list
-        self.pep_strs_set = set(self.pep_strs)
 
         # Get the mass change associated with the target modification
         self.mod_mass = modifications.get_mod_mass(self.psms[0].mods,
@@ -416,16 +392,50 @@ class Validate():
         print(f"Total {len(self.psms)} identifications")
 
         self.psms = list(itertools.chain(
-            *[self._generate_decoy_matches(res)
+            *[self._generate_decoy_matches(res, self.psms)
               for res in self.target_residues]))
-
-        print("Calculating similarity scores")
-        calc_sim_score = functools.partial(
-            similarity.calculate_similarity_score, pp_res=self.pp_res,
-            target_mod=self.target_mod, data_sets=self.data_sets)
-        self.psms = self.pool.map(calc_sim_score, self.psms)
-
+              
+        # Write the results to a temporary file
+        # TODO: incorporate this properly into the process -
+        # if the temporary file exists, use it instead of reprocessing the
+        # data
         write_results("test.txt", self.psms)
+              
+        # Convert the PSMs to a pandas DataFrame, including a "target" column
+        # to distinguish target and decoy peptides
+        df = psm.psms2df(self.psms)
+
+        # Validate the PSMs using LDA
+        results = lda.lda_validate(df, list(self.psms[0].features.keys()),
+                                   self.fisher_threshold, cv=10, n_jobs=1)
+                                   
+        # TODO: only keep the psms whose scores exceed the threshold
+        
+        # --- Unmodified analogues --- #
+        # Get the unmodified peptide analogues
+        self.unmod_psms = self._find_unmod_analogues()
+        
+        # Calculate features for the unmodified peptide analogues
+        for psm in self.unmod_psms:
+            psm.extract_features(None, self.proteolyzer)
+        
+        # Add decoy identifications to the unmodified PSMs
+        self.unmod_psms = self._generate_decoy_matches(None, self.unmod_psms)
+        
+        # Validate the unmodified PSMs using LDA
+        unmod_df = psm.psms2df(self.unmod_psms)
+        unmod_results = lda.lda_validate(
+            unmod_df, list(self.unmod_psms[0].features.keys()),
+            self.fisher_threshold, cv=10, n_jobs=1)
+            
+        # TODO: filter unmod PSMs by their validation scores
+              
+        # --- Similarity Scores --- #
+        print("Calculating similarity scores")
+        # TODO: use the validated unmodified analogues
+        # Calculate the highest similarity score for each target peptide
+        self.psms = similarity.calculate_similarity_scores(
+            self.psms, self.pp_res, self.target_mod, self.data_sets)
 
     def _get_identifications(self):
         """
@@ -496,28 +506,79 @@ class Validate():
                     psm.spectrum = psm.spectrum.centroid().remove_itraq()
 
         return self.psms
-
-    def _generate_decoy_matches(self, target_res):
+        
+    def _find_unmod_analogues(self):
         """
+        Finds the unmodified analogues in the ProteinPilot search results.
+        
+        Returns:
+            
         """
-        print(f"Processing modification {self.target_mod} at residue "
-              f"{target_res}")
+        # TODO: store the unmod psms mapped to their corresponding mod psms
+        # TODO: store spectra in memory?
+        unmod_psms = []
+        for data_id, data in self.pp_res.items():
+            unmods = collections.defaultdict(list)
+            for spec_id, matches in data.items():
+                for psm in self.psms:
+                    mods = [ms for ms in psm.mods if ms.mod != self.target_mod]
+                    peptide_str = peptides.merge_seq_mods(psm.sequence, mods)
+                    if test_matches_equal(matches, psm, peptide_str):
+                        unmods[spec_id].append((psm, mods))
+                        
+            if not unmods:
+                continue
 
+            spec_file = os.path.join(self.data_sets[data_id]["data_dir"],
+                                     self.data_sets[data_id]["spectra_file"])
+
+            print(f"Reading {spec_file}")
+            spectra = readers.read_spectra_file(spec_file)
+            
+            print(f"Processing {len(unmods)} spectra")
+
+            for spec_id, _psms in unmods.items():
+                print(f"Processing {spec_id} with {_psms}")
+                spec = spectra[spec_id].centroid().remove_itraq()
+
+                for psm, mods in _psms:
+                    unmod_psms.append(PSM(data_id, spec_id, psm.sequence,
+                                          mods, psm.charge, spectrum=spec))
+                                          
+        return unmod_psms
+
+    def _generate_decoy_matches(self, target_res, psms):
+        """
+        
+        Args:
+            target_res (str): The target (fixed) residue. If None, all
+                              residues not contained in self.fixed_residues
+                              are subject to variable modifications.
+            psms (list of PSMs):
+
+        """
         # The residues bearing "fixed" modifications
-        fixed_aas = self.fixed_residues + [target_res]
+        fixed_aas = list(self.fixed_residues)  # list used to ensure copy
+        if target_res is not None:
+            fixed_aas.append(target_res)
 
-        # Generate the decoy sequences for the target residue
+        # Generate the decoy sequences, including the target_mod if
+        # target_residue is provided
         d_seqs, d_var_idxs, d_idxs, d_mods, d_masses = \
             self._generate_residue_decoys(target_res, fixed_aas)
 
         # Convert to numpy array for use with np.asarray
         d_masses = np.array(d_masses)
 
-        # Split the decoy mass range into slices to optimize the search
-        slice_idxs, slice_bounds = slice_masses(d_masses)
+        # Split the decoy mass range into slices of 500 peptides to optimize
+        # the search
+        slice_idxs, slice_bounds = \
+            utilities.slice_list(d_masses, nslices=int(len(d_masses) / 500))
 
-        print(f"Generated {len(d_seqs)} random sequences for target "
-              f"residue {target_res}")
+        msg = f"Generated {len(d_seqs)} random sequences"
+        if target_res is not None:
+            msg += f" for target residue {target_res}"
+        print(msg)
 
         # Dictionary of AA residue to list of possible modification masses
         var_ptm_masses = {res: list({m[1] for m in mods if m[1] is not None
@@ -531,35 +592,42 @@ class Validate():
             return match_decoys(peptide_mz, d_seqs, d_masses, d_mods, d_idxs,
                                 d_var_idxs, slice_idxs, slice_bounds,
                                 var_ptm_masses, var_ptm_max, var_ptm_min,
-                                tol_factor=tol_factor, mppool=self.pool)
+                                tol_factor=tol_factor)
+                                
+        pep_strs = [peptides.merge_seq_mods(psm.sequence, psm.mods)
+                    for psm in psms]
 
-        for ii, peptide in enumerate(self.pep_strs_set):
-            print(f"Processing peptide {ii} of {len(self.pep_strs_set)} - {peptide}")
+        # Deduplicate peptide list
+        pep_strs_set = set(pep_strs)
+
+        for ii, peptide in enumerate(pep_strs_set):
+            print(f"Processing peptide {ii} of {len(pep_strs_set)} "
+                  f"- {peptide}")
             # Find the indices of the peptide in peptides
-            pep_idxs = [idx for idx, pep in enumerate(self.pep_strs)
+            pep_idxs = [idx for idx, pep in enumerate(pep_strs)
                         if pep == peptide]
 
-            mods = self.psms[pep_idxs[0]].mods
+            mods = psms[pep_idxs[0]].mods
 
             # Find all of the charge states for the peptide
-            charge_states = {self.psms[idx].charge for idx in pep_idxs}
+            charge_states = {psms[idx].charge for idx in pep_idxs}
 
             for charge in charge_states:
                 # Find the indices of the matching peptides with the given
                 # charge state
                 charge_pep_idxs =\
-                    [jj for jj in pep_idxs if self.psms[jj].charge == charge]
+                    [jj for jj in pep_idxs if psms[jj].charge == charge]
 
                 # Calculate the mass/charge ratio of the peptide, using the PSM
                 # of the first instance of this peptide with this charge
                 pep_mz = peptides.calculate_mz(
-                    self.psms[charge_pep_idxs[0]].sequence, mods, charge)
+                    psms[charge_pep_idxs[0]].sequence, mods, charge)
 
                 # Get the spectra associated with the peptide
-                spectra = [(self.psms[idx].spectrum,
-                            self.psms[idx].spectrum.max_intensity(),
+                spectra = [(psms[idx].spectrum,
+                            psms[idx].spectrum.max_intensity(),
                             idx) for idx in charge_pep_idxs
-                           if self.psms[idx].spectrum]
+                           if psms[idx].spectrum]
 
                 if not spectra:
                     continue
@@ -569,8 +637,6 @@ class Validate():
 
                 # Generate decoy candidate peptides by searching the mass
                 # slices
-                print(f"Generating candidate decoy peptides for {peptide} with charge {charge}")
-                start = time.time()
                 d_candidates = _match_decoys(pep_mz, tol_factor=0.01)
 
                 if len(d_candidates) < 1000:
@@ -598,12 +664,11 @@ class Validate():
 
                 # For each spectrum, find the top matching decoy peptide
                 # and calculate the features for the match
-                print(f"Generation took {time.time() - start} s")
-                print("Searching spectra against decoy peptides")
-                start = time.time()
                 for jj, (spec, _, idx) in enumerate(spectra):
                     _decoy_features = functools.partial(
-                        decoy_features, spec=spec, target_mod=self.target_mod,
+                        decoy_features, spec=spec,
+                        target_mod=self.target_mod if target_res is not None
+                                   else None,
                         proteolyzer=self.proteolyzer)
                     dpsm_vars = self.pool.map(_decoy_features, d_candidates)
 
@@ -612,19 +677,30 @@ class Validate():
 
                     # If the decoy ID is better than the one already assigned
                     # to the PSM, then replace it
-                    if (self.psms[idx].decoy_id is None or
-                            self.psms[idx].decoy_id.features["MatchScore"] <
+                    if (psms[idx].decoy_id is None or
+                            psms[idx].decoy_id.features["MatchScore"] <
                             max_match["MatchScore"]):
                         d_peptide = d_candidates[dpsm_vars.index(max_match)]
-                        self.psms[idx].decoy_id = \
+                        psms[idx].decoy_id = \
                             DecoyID(d_peptide.seq, d_peptide.charge,
                                     d_peptide.mods, max_match)
-                print(f"Search took {time.time() - start} s")
 
-        return self.psms
+        return psms
 
     def _generate_residue_decoys(self, target_res, fixed_aas):
         """
+        Generate the base decoy peptides with fixed modifications applied,
+        including the target modification at target_res if specified.
+        
+        Args:
+            target_res (str): The target (fixed) residue. If None, all
+                              residues not contained in self.fixed_residues
+                              are subject to variable modifications.
+            fixed_aas (list): The amino acid residues which should bear fixed
+                              modifications.
+        
+        Returns:
+            
         """
         # Generate list of decoy peptides containing the residue of interest
         seqs = get_decoys(self.decoy_db_path, target_res)
@@ -635,13 +711,23 @@ class Validate():
             [idx for idx, res in enumerate(seq) if res not in fixed_aas]
             for seq in seqs]
 
-        # Find the sites of the target residue in the decoy peptides
-        res_idxs = [[idx for idx, res in enumerate(seq) if res == target_res]
-                    for seq in seqs]
+        if target_res is not None:
+            # Find the sites of the target residue in the decoy peptides
+            res_idxs = [[idx for idx, res in enumerate(seq) if res == target_res]
+                        for seq in seqs]
 
-        # Apply the target modification to the decoy peptides
-        idxs, mods, masses = modify_decoys(seqs, res_idxs, self.target_mod,
-                                           self.mod_mass)
+            # Apply the target modification to the decoy peptides
+            idxs, mods, masses = modify_decoys(seqs, res_idxs, self.target_mod,
+                                               self.mod_mass)
+        else:
+            # For unmodified analogues, apply the fixed modifications and
+            # calculate the peptide masses
+            idxs = list(range(len(seqs)))
+            mods, masses = [], []
+            for seq in seqs:
+                mods.append(gen_fixed_mods(seq))
+                masses.append(FIXED_MASSES["H2O"] +
+                              sum(ms.mass for ms in mods))
 
         # Sort the sequence masses, indices and mods according to the
         # sequence mass

@@ -6,8 +6,12 @@ Module contains a class to define a Peptide Spectrum Match (PSM).
 import bisect
 import collections
 import sys
+from typing import Dict, List
 
-#import peptides
+import pandas as pd
+
+import modifications
+import proteolysis
 import spectrum
 import utilities
 
@@ -30,7 +34,9 @@ class PSM():
     Spectrum object, while the peptide is a composed pepfrag.Peptide.
 
     """
-    def __init__(self, data_id, spec_id, seq, mods, charge, spectrum=None):
+    def __init__(self, data_id: str, spec_id: str, seq: str,
+                 mods: List[modifications.ModSite], charge: int,
+                 spectrum=None):
         """
         Initializes the PSM class using basic identifying information.
 
@@ -56,22 +62,25 @@ class PSM():
         self.decoy_id = None
 
         # The similarity scores to the (unmodified) spectra
-        self.similarity_scores = None
+        self.similarity_scores = []
+        
+        # The PSM features
+        self.features = {}
 
     @property
-    def sequence(self):
+    def sequence(self) -> str:
         return self.peptide.seq
 
     @property
-    def mods(self):
+    def mods(self) -> List[modifications.ModSite]:
         return self.peptide.mods
 
     @property
-    def charge(self):
+    def charge(self) -> int:
         return self.peptide.charge
 
     @property
-    def spectrum(self):
+    def spectrum(self) -> spectrum.Spectrum:
         return self.__spectrum
 
     @spectrum.setter
@@ -81,40 +90,7 @@ class PSM():
                 "Setting PSM.spectrum requires a spectrum.Spectrum")
         self.__spectrum = val
 
-    @property
-    def decoy_id(self):
-        return self.__decoy_id
-
-    @decoy_id.setter
-    def decoy_id(self, val):
-        if val is not None and not isinstance(val, DecoyID):
-            raise TypeError(
-                "Setting PSM.decoy_id requires a DecoyID object")
-        self.__decoy_id = val
-
-    @property
-    def features(self):
-        return self.__features
-
-    @features.setter
-    def features(self, val):
-        if not isinstance(val, dict):
-            raise TypeError(
-                "Setting PSM.features requires a dict object")
-        self.__features = val
-
-    @property
-    def similarity_scores(self):
-        return self.__similarity_scores
-
-    @similarity_scores.setter
-    def similarity_scores(self, val):
-        if val is not None and not isinstance(val, list):
-            raise TypeError(
-                "Setting PSM.features requires a list (of SimilarityScores)")
-        self.__similarity_scores = val
-
-    def __str__(self):
+    def __str__(self) -> str:
         """
         Implements the string conversion for the object.
 
@@ -124,7 +100,7 @@ class PSM():
         """
         return f"<{self.__class__.__name__} {self.__dict__}>"
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """
         Implements the repr conversion for the object.
 
@@ -146,7 +122,7 @@ class PSM():
         if self.spectrum is None:
             raise RuntimeError("PSM has not been assigned a Spectrum")
 
-    def denoise_spectrum(self):
+    def denoise_spectrum(self) -> dict:
         """
         Adaptively denoises the mass spectrum.
 
@@ -181,13 +157,18 @@ class PSM():
         return {l: (bisect.bisect_left(denoised_peaks, a.peak_num), a.ion_pos)
                 for l, a in anns.items() if a.peak_num in denoised_peaks}
 
-    def extract_features(self, target_mod, proteolyzer):
+    def extract_features(self, target_mod: str,
+                         proteolyzer: proteolysis.Proteolyzer) \
+                         -> Dict[str, str]:
         """
         Extracts possible machine learning features from the peptide spectrum
         match.
 
         Args:
-            target_mod (str): The modification type under validation.
+            target_mod (str): The modification type under validation. If this,
+                              is None, i.e. for unmodified analogues, then
+                              some modification-based features will not be
+                              calculated.
             proteolyzer (proteolysis.Proteolyzer): The enzymatic proteolyzer
                                                    for calculating the number
                                                    of missed cleavages.
@@ -207,14 +188,18 @@ class PSM():
 
         return self.features
 
-    def _calculate_features(self, ions, target_mod, tol):
+    def _calculate_features(self, ions: dict, target_mod: str,
+                            tol: float) -> Dict[str, str]:
         """
         Calculates potential machine learning features from the peptide
         spectrum match.
 
         Args:
             ions (dict): The theoretical ion peak annotations.
-            target_mod (str): The target modification type.
+            target_mod (str): The target modification type. If this, is None,
+                              i.e. for unmodified analogues, then some
+                              modification-based features will not be
+                              calculated.
             tol (float): The mass tolerance level to apply.
 
         """
@@ -233,12 +218,22 @@ class PSM():
         # The length of the peptide
         pep_len = len(self.sequence)
 
-        # The position from which b-/y-ions will contain the modified residue
-        mod_ion_start = {'b': min(ms.site for ms in self.mods
-                                  if ms.mod == target_mod),
-                         'y': min(pep_len - ms.site + 1
-                                  for ms in self.mods
-                                  if ms.mod == target_mod)}
+        if target_mod is not None:
+            # The position from which b-/y-ions will contain the modified
+            # residue
+            mod_ion_start = {'b': min(ms.site for ms in self.mods
+                                      if ms.mod == target_mod),
+                             'y': min(pep_len - ms.site + 1
+                                      for ms in self.mods
+                                      if ms.mod == target_mod)}
+                                      
+            # The sum of the modified ion intensities
+            features["TotalIntMod"] = \
+                sum(intensities[ions[l][0]] for l in ions.keys()
+                    if (l[0] == 'y' and '-' not in l and
+                        ions[l][1] >= mod_ion_start['y'])
+                    or (l[0] == 'b' and '-' not in l and
+                        ions[l][1] >= mod_ion_start['b']))
 
         # The number of peaks in the spectrum
         npeaks = float(len(self.spectrum))
@@ -259,21 +254,16 @@ class PSM():
         features["FracIon20%"] = (len(ions_20) / float(len(peaks_20))
                                   if peaks_20 else 0)
 
-        # The sum of the modified ion intensities
-        features["TotalIntMod"] = \
-            sum(intensities[ions[l][0]] for l in ions.keys()
-                if (l[0] == 'y' and '-' not in l and
-                    ions[l][1] >= mod_ion_start['y'])
-                or (l[0] == 'b' and '-' not in l and
-                    ions[l][1] >= mod_ion_start['b']))
-
         # Sequence coverage
         # The maximum number of fragments annotated by theoretical ions
         # across the charge states
         n_anns = 0
-        # The maximum number of fragments annotated by theoretical ions
-        # containing the modified residue across the charge states
-        n_mod_anns = 0
+
+        if target_mod is not None:
+            # The maximum number of fragments annotated by theoretical ions
+            # containing the modified residue across the charge states
+            n_mod_anns = 0
+
         # The longest consecutive ion sequence found among charge states
         max_ion_seq_len = 0
         # Across the charge states, the maximum number of each ion type
@@ -284,8 +274,11 @@ class PSM():
             c_str = '[+]' if _charge == 0 else f'[{_charge + 1}+]'
             # The number of annotated ions
             n_ions = 0
-            # The number of modification-containing annotated ions
-            n_mod_ions = 0
+
+            if target_mod is not None:
+                # The number of modification-containing annotated ions
+                n_mod_ions = 0
+
             for ion_type in 'yb':
                 # A list of b-/y-ion numbers (e.g. 2 for b2[+])
                 ion_nums = sorted(
@@ -293,9 +286,11 @@ class PSM():
                      for l in seq_ions if l[0] == ion_type and c_str in l])
                 ion_count = len(ion_nums)
 
-                # The number of ions of ion_type containing the modification
-                n_mod_ions += ion_count - \
-                    bisect.bisect_left(ion_nums, mod_ion_start[ion_type])
+                if target_mod is not None:
+                    # The number of ions of ion_type containing the
+                    # modification
+                    n_mod_ions += ion_count - \
+                        bisect.bisect_left(ion_nums, mod_ion_start[ion_type])
 
                 # Increment the number of ions annotated for the current charge
                 n_ions += ion_count
@@ -311,7 +306,7 @@ class PSM():
             if n_ions > n_anns:
                 n_anns = n_ions
 
-            if n_mod_ions > n_mod_anns:
+            if target_mod is not None and n_mod_ions > n_mod_anns:
                 n_mod_anns = n_mod_ions
 
         features["NumIonb"] = max_ion_counts['b']
@@ -331,8 +326,37 @@ class PSM():
         if n_bins > 0:
             p = npeaks / n_bins
             mp = utilities.log_binom_prob(n_anns, 2 * (pep_len - 1), p)
-            mp2 = utilities.log_binom_prob(n_mod_anns, pep_len - 1, p)
+
+            if target_mod is not None:
+                mp2 = utilities.log_binom_prob(n_mod_anns, pep_len - 1, p)
+
         features["MatchScore"] = mp / (float(pep_len) ** 0.5)
-        features["MatchScoreMod"] = mp2 / (float(pep_len) ** 0.5)
+
+        if target_mod is not None:
+            features["MatchScoreMod"] = mp2 / (float(pep_len) ** 0.5)
 
         return features
+
+
+def psms2df(psms: List[PSM]) -> pd.DataFrame:
+    """
+    Converts the psm features, including decoy, into a pandas dataframe,
+    including a flag indicating whether the features correspond to a
+    target or decoy peptide and the peptide sequence.
+
+    Args:
+        psms (list of psm.PSMs): The PSM entries to be merged to a DataFrame.
+
+    Returns:
+        pandas.DataFrame
+
+    """
+    rows = []
+    for psm in psms:
+        trow = {**{"seq": psm.seq, "target": True}, **psm.features}
+        drow = {**{"seq": psm.decoy_id.seq, "target": False},
+                **psm.decoy_id.features}
+        rows.append(trow)
+        rows.append(drow)
+
+    return pd.DataFrame(rows)

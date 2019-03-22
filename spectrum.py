@@ -6,6 +6,7 @@ This module provides functions for processing mass spectra.
 import bisect
 import collections
 import operator
+from typing import List
 
 import numpy as np
 
@@ -89,7 +90,7 @@ class Spectrum():
         self._peaks = self._peaks[self._peaks[:, 0].argsort()]
 
     @property
-    def mz(self):
+    def mz(self) -> np.array:
         """
         Retrieves the mass/charge ratios of the spectrum peaks.
 
@@ -97,14 +98,14 @@ class Spectrum():
         return self._peaks[:, 0]
 
     @property
-    def intensity(self):
+    def intensity(self) -> np.array:
         """
         Retrieves the intensities of the spectrum peaks.
 
         """
         return self._peaks[:, 1]
 
-    def select(self, peaks, col=None):
+    def select(self, peaks, col=None) -> np.array:
         """
         Extracts only those peak indices in the given list.
 
@@ -130,7 +131,7 @@ class Spectrum():
         self._peaks[:, 1] = self._peaks[:, 1] / self.max_intensity()
         return self
 
-    def max_intensity(self):
+    def max_intensity(self) -> float:
         """
         Finds the maximum intensity in the spectrum.
 
@@ -228,7 +229,7 @@ class Spectrum():
 
         return anns
 
-    def denoise(self, assigned_peaks, max_peaks_per_window=8):
+    def denoise(self, assigned_peaks, max_peaks_per_window=8) -> List[int]:
         """
         Denoises the mass spectrum using the annotated ions.
 

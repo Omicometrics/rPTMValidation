@@ -3,10 +3,43 @@
 A script providing utility functions for peptide modification validation.
 
 """
+from bisect import bisect_left
 import math
+from typing import List, Tuple
 
 
-def longest_sequence(seq):
+def slice_list(values, nslices=800) -> Tuple[List[int], List[float]]:
+    """
+    Slices the list of values into nslices segments.
+
+    Args:
+        values (list): A list of floats.
+        nslices (int, optional): The number of slices to split.
+
+    Returns:
+        tuple: index at which each slice begins in values,
+               the value at which each slice begins.
+
+    """
+    size = (values[-1] - values[0]) / nslices
+    # bounds contains the lower bound of each slice
+    idxs, bounds = [], []
+    for ii in range(nslices + 1):
+        pos = bisect_left(values, size * ii + values[0])
+        if pos == 0:
+            idxs.append(0)
+            bounds.append(values[0])
+        elif pos < len(values):
+            idxs.append(pos - 1)
+            bounds.append(values[pos - 1])
+        else:
+            idxs.append(pos - 1)
+            bounds.append(values[-1])
+
+    return idxs, bounds
+
+
+def longest_sequence(seq: List[int]) -> Tuple[int, List[int]]:
     """
     Finds the length (and subsequence) of the longest consecutive sequence
     of integers in a sorted list. This algorithm is O(n) in compexity.
@@ -29,7 +62,7 @@ def longest_sequence(seq):
     return max_len, list(range(max_num - max_len * 1 + 1, max_num + 1, 1))
 
 
-def sort_lists(key, *args):
+def sort_lists(key: int, *args):
     """
     Sorts the lists given in *args using the list indicated by key.
 
@@ -44,7 +77,7 @@ def sort_lists(key, *args):
     return zip(*sorted(zip(*args), key=lambda t: t[key]))
 
 
-def log_binom_prob(k, n, p):
+def log_binom_prob(k: int, n: int, p: float) -> float:
     """
     Calculates the negative base-10 log of the cumulative binomial
     probability.

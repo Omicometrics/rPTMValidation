@@ -6,64 +6,18 @@ ion annotations and intensities.
 """
 import collections
 import os
+from typing import Dict, List, Tuple
 
 import numpy as np
 
+from modifications import ModSite
 import peptides
 from psm import PSM
 import readers
+from spectrum import Spectrum
 
 
-def calculate_similarity_score(psm, pp_res, target_mod, data_sets):
-    """
-    Calculates the similarity score between the PSM spectrum and the
-    unmodified analogues in the database search results.
-
-    Args:
-        psm (psm.PSM): The modified PSM.
-        pp_res (dict): The ProteinPilot search results.
-        target_mod (str): The name of the target modification.
-        data_sets (dict): The config 'data_sets' dictionary.
-
-    Returns:
-        psm.PSM: The input PSM with the similarity_scores property updated.
-
-    """
-    # Remove the target modification from the PSM mods
-    mods = [ms for ms in psm.mods if ms.mod != target_mod]
-    peptide_str = peptides.merge_seq_mods(psm.sequence, mods)
-
-    # Find the data_id/spec_id combinations which match the given PSM peptide
-    match_ids = collections.defaultdict(list)
-    for data_id, data in pp_res.items():
-        for spec_id, matches in data.items():
-            if test_matches_equal(matches, psm, peptide_str):
-                match_ids[data_id].append(spec_id)
-
-    similarities = []
-    for data_id, spec_ids in match_ids.items():
-        spec_file = os.path.join(data_sets[data_id]["data_dir"],
-                                 data_sets[data_id]["spectra_file"])
-
-        spectra = readers.read_spectra_file(spec_file)
-
-        for spec_id in spec_ids:
-            spec = spectra[spec_id].centroid().remove_itraq()
-
-            # Calculate the similarity between the unmodified and modified
-            # spectra
-            unmod_psm = PSM(data_id, spec_id, psm.sequence, mods, psm.charge,
-                            spectrum=spec)
-            similarities.append(
-                (data_id, spec_id,
-                 calculate_spectral_similarity(psm, unmod_psm)))
-
-    psm.similarity_scores = similarities
-
-    return psm
-
-
-def test_matches_equal(matches, psm, peptide_str):
+def test_matches_equal(matches, psm, peptide_str) -> bool:
     """
     Evaluates whether any one of a SpecMatch is to the same peptide,
     in terms of sequence and modifications, as the given PSM.
@@ -94,7 +48,47 @@ def test_matches_equal(matches, psm, peptide_str):
     return False
 
 
-def calculate_spectral_similarity(psm1, psm2):
+def calculate_similarity_scores(psms, pp_res, target_mod, data_sets) -> \
+        List[PSM]:
+    """
+    """
+    for data_id, data in pp_res.items():
+        print(f"Processing data set {data_id}")
+        unmods = collections.defaultdict(list)
+        for spec_id, matches in data.items():
+            for psm in psms:
+                mods = [ms for ms in psm.mods if ms.mod != target_mod]
+                peptide_str = peptides.merge_seq_mods(psm.sequence, mods)
+                if test_matches_equal(matches, psm, peptide_str):
+                    unmods[spec_id].append((psm, mods))
+
+        if not unmods:
+            continue
+
+        spec_file = os.path.join(data_sets[data_id]["data_dir"],
+                                 data_sets[data_id]["spectra_file"])
+
+        print(f"Reading {spec_file}")
+        spectra = readers.read_spectra_file(spec_file)
+        
+        print(f"Processing {len(unmods)} spectra")
+
+        for spec_id, _psms in unmods.items():
+            print(f"Processing {spec_id} with {_psms}")
+            spec = spectra[spec_id].centroid().remove_itraq()
+
+            for psm, mods in _psms:
+                unmod_psm = PSM(data_id, spec_id, psm.sequence, mods,
+                                psm.charge, spectrum=spec)
+
+                psm.similarity_scores.append(
+                    (data_id, spec_id,
+                     calculate_spectral_similarity(psm, unmod_psm)))
+
+    return psms
+
+
+def calculate_spectral_similarity(psm1: PSM, psm2: PSM) -> float:
     """
     Calculates the similarity between two spectra based on their annotations
     and intensities. This function computes the dot product of the two
@@ -130,7 +124,8 @@ def calculate_spectral_similarity(psm1, psm2):
     return int_product / (sqrt_sum_ints1 * sqrt_sum_ints2)
 
 
-def match_spectra(spectrum1, spectrum2):
+def match_spectra(spectrum1: Tuple[Spectrum, dict],
+                  spectrum2: Tuple[Spectrum, dict]) -> List[Tuple[int, int]]:
     """
     Finds the indices of the matching peaks between two mass spectra.
 
@@ -152,8 +147,10 @@ def match_spectra(spectrum1, spectrum2):
     bym2, neutrals2 = _annotation_names(ions2)
 
     # Get the peak indices of the matched fragments
+    print(list(_matched_peak_indices(ions1, ions2, bym1 & bym2)))
     matched_by1, matched_by2 = \
         _matched_peak_indices(ions1, ions2, bym1 & bym2)
+    print(list(_matched_peak_indices(ions1, ions2, neutrals1 & neutrals2)), neutrals1 & neutrals2)
     matched_neut1, matched_neut2 = \
         _matched_peak_indices(ions1, ions2, neutrals1 & neutrals2)
 
@@ -161,18 +158,22 @@ def match_spectra(spectrum1, spectrum2):
     matched_by = _merged_matches(matched_by1, matched_by2, spec2)
     idx_set1 = {ii for ii, _ in matched_by}
     idx_set2 = {ii for _, ii in matched_by}
+    
+    # Combine the common indices
+    matched_idxs = matched_by
 
     # Find the non b, y or precursor fragments
-    neut1, neut2 = \
-        zip(*[(ii, jj) for ii, jj in zip(matched_neut1, matched_neut2)
-              if ii not in idx_set1 and jj not in idx_set2])
-
-    matched_neut = _merged_matches(neut1, neut2, spec2)
-    idx_set1.update(ii for ii, _ in matched_neut)
-    idx_set2.update(ii for _, ii in matched_neut)
-
-    # Combine the common indices
-    matched_idxs = matched_by + matched_neut
+    try:
+        neut1, neut2 = \
+            zip(*[(ii, jj) for ii, jj in zip(matched_neut1, matched_neut2)
+                  if ii not in idx_set1 and jj not in idx_set2])
+    except ValueError:
+        pass
+    else:
+        matched_neut = _merged_matches(neut1, neut2, spec2)
+        idx_set1.update(ii for ii, _ in matched_neut)
+        idx_set2.update(ii for _, ii in matched_neut)
+        matched_idxs += matched_neut
 
     # Unmatched annotated fragments are left unmatched
     matched_idxs += [(idx, None) for idx, _ in ions1.values()
