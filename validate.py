@@ -108,7 +108,9 @@ def modify_decoys(seqs, res_idxs, mod_name, mod_mass):
         # Calculate the mass of the decoy sequence and construct the
         # modifications
         mods = gen_fixed_mods(seq)
-        mass = FIXED_MASSES["H2O"] + sum(ms.mass for ms in mods)
+        mass = (FIXED_MASSES["H2O"] +
+                sum(AA_MASSES[res].mono for res in seq) +
+                sum(ms.mass for ms in mods))
 
         target_idxs = res_idxs[ii]
         # Generate target modification combinations, up to a maximum of 3
@@ -727,6 +729,7 @@ class Validate():
             for seq in seqs:
                 mods.append(gen_fixed_mods(seq))
                 masses.append(FIXED_MASSES["H2O"] +
+                              sum(AA_MASSES[res].mono for res in seq) +
                               sum(ms.mass for ms in mods))
 
         # Sort the sequence masses, indices and mods according to the
