@@ -25,7 +25,7 @@ import lda
 import modifications
 import peptides
 import proteolysis
-from psm import DecoyID, PSM
+from psm import DecoyID, PSM, psms2df
 import readers
 import similarity
 import utilities
@@ -222,23 +222,23 @@ def write_results(output_file, psms):
         psms (list of psm.PSMs): The resulting PSMs.
 
     """
-    with open(output_file, 'w') as fh:
+    feature_names = list(psms[0].features.keys())
+    with open(output_file, 'w', newline='') as fh:
         writer = csv.writer(fh, delimiter="\t")
         # Write the header row
         writer.writerow(["Rawset", "SpectrumID", "Sequence", "Modifications",
-                         "Charge", "Features",
+                         "Charge", *[f"Feature_{f}" for f in feature_names],
                          "DecoySequence", "DecoyModifications", "DecoyCharge",
-                         "DecoyFeatures"])
+                         *[f"DecoyFeature_{f}" for f in feature_names]])
 
         # Write the PSM results
         for psm in psms:
             if psm.decoy_id is None:
                 continue
 
-            mod_strs = ["{:6f}|{}|{}".format(*ms)
-                        for ms in psm.mods]
-            dmod_strs = ["{:6f}|{}|{}".format(*ms)
-                         for ms in psm.decoy_id.mods]
+            mod_str = ",".join("{:6f}|{}|{}".format(*ms) for ms in psm.mods)
+            dmod_str = ",".join("{:6f}|{}|{}".format(*ms)
+                                for ms in psm.decoy_id.mods)
 
             #sim_str = ("none" if psm.similarity_scores is None
             #           else ";".join("{}#{}:{:.6f}".format(sim)
@@ -246,14 +246,14 @@ def write_results(output_file, psms):
 
             # TODO: this way of writing features is horrid,
             # especially since they're now stored in a dict
-            writer.writerow([psm.data_id, psm.spec_id, psm.seq, mod_strs,
+            writer.writerow([psm.data_id, psm.spec_id, psm.seq, mod_str,
                              psm.charge,
-                             ",".join(f"{feat:.8f}"
-                                      for feat in psm.features.values()),
+                             *[f"{psm.features[f]:.8f}"
+                               for f in feature_names],
                              psm.decoy_id.seq,
-                             dmod_strs, psm.decoy_id.charge,
-                             ",".join(f"{feat:.8f}" for feat in
-                                      psm.decoy_id.features.values())])
+                             dmod_str, psm.decoy_id.charge,
+                             *[f"{psm.decoy_id.features[f]:.8f}"
+                               for f in feature_names]])
 
 
 def decoy_features(decoy_peptide, spec, target_mod, proteolyzer):
@@ -283,7 +283,7 @@ def test_matches_equal(matches, psm, peptide_str) -> bool:
 
     """
     for match in matches:
-        if match.seq != psm.sequence and match.theor_z != psm.charge:
+        if match.seq != psm.seq and match.theor_z != psm.charge:
             continue
 
         mods = match.mods
@@ -405,7 +405,7 @@ class Validate():
               
         # Convert the PSMs to a pandas DataFrame, including a "target" column
         # to distinguish target and decoy peptides
-        df = psm.psms2df(self.psms)
+        df = psms2df(self.psms)
 
         # Validate the PSMs using LDA
         results = lda.lda_validate(df, list(self.psms[0].features.keys()),
@@ -425,7 +425,7 @@ class Validate():
         self.unmod_psms = self._generate_decoy_matches(None, self.unmod_psms)
         
         # Validate the unmodified PSMs using LDA
-        unmod_df = psm.psms2df(self.unmod_psms)
+        unmod_df = psms2df(self.unmod_psms)
         unmod_results = lda.lda_validate(
             unmod_df, list(self.unmod_psms[0].features.keys()),
             self.fisher_threshold, cv=10, n_jobs=1)
@@ -524,7 +524,7 @@ class Validate():
             for spec_id, matches in data.items():
                 for psm in self.psms:
                     mods = [ms for ms in psm.mods if ms.mod != self.target_mod]
-                    peptide_str = peptides.merge_seq_mods(psm.sequence, mods)
+                    peptide_str = peptides.merge_seq_mods(psm.seq, mods)
                     if test_matches_equal(matches, psm, peptide_str):
                         unmods[spec_id].append((psm, mods))
                         
@@ -544,7 +544,7 @@ class Validate():
                 spec = spectra[spec_id].centroid().remove_itraq()
 
                 for psm, mods in _psms:
-                    unmod_psms.append(PSM(data_id, spec_id, psm.sequence,
+                    unmod_psms.append(PSM(data_id, spec_id, psm.seq,
                                           mods, psm.charge, spectrum=spec))
                                           
         return unmod_psms
@@ -596,14 +596,14 @@ class Validate():
                                 var_ptm_masses, var_ptm_max, var_ptm_min,
                                 tol_factor=tol_factor)
                                 
-        pep_strs = [peptides.merge_seq_mods(psm.sequence, psm.mods)
+        pep_strs = [peptides.merge_seq_mods(psm.seq, psm.mods)
                     for psm in psms]
 
         # Deduplicate peptide list
         pep_strs_set = set(pep_strs)
 
         for ii, peptide in enumerate(pep_strs_set):
-            print(f"Processing peptide {ii} of {len(pep_strs_set)} "
+            print(f"Processing peptide {ii + 1} of {len(pep_strs_set)} "
                   f"- {peptide}")
             # Find the indices of the peptide in peptides
             pep_idxs = [idx for idx, pep in enumerate(pep_strs)
@@ -623,7 +623,7 @@ class Validate():
                 # Calculate the mass/charge ratio of the peptide, using the PSM
                 # of the first instance of this peptide with this charge
                 pep_mz = peptides.calculate_mz(
-                    psms[charge_pep_idxs[0]].sequence, mods, charge)
+                    psms[charge_pep_idxs[0]].seq, mods, charge)
 
                 # Get the spectra associated with the peptide
                 spectra = [(psms[idx].spectrum,

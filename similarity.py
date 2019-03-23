@@ -32,7 +32,7 @@ def test_matches_equal(matches, psm, peptide_str) -> bool:
 
     """
     for match in matches:
-        if match.seq != psm.sequence and match.theor_z != psm.charge:
+        if match.seq != psm.seq and match.theor_z != psm.charge:
             continue
 
         mods = match.mods
@@ -58,7 +58,7 @@ def calculate_similarity_scores(psms, pp_res, target_mod, data_sets) -> \
         for spec_id, matches in data.items():
             for psm in psms:
                 mods = [ms for ms in psm.mods if ms.mod != target_mod]
-                peptide_str = peptides.merge_seq_mods(psm.sequence, mods)
+                peptide_str = peptides.merge_seq_mods(psm.seq, mods)
                 if test_matches_equal(matches, psm, peptide_str):
                     unmods[spec_id].append((psm, mods))
 
@@ -78,7 +78,7 @@ def calculate_similarity_scores(psms, pp_res, target_mod, data_sets) -> \
             spec = spectra[spec_id].centroid().remove_itraq()
 
             for psm, mods in _psms:
-                unmod_psm = PSM(data_id, spec_id, psm.sequence, mods,
+                unmod_psm = PSM(data_id, spec_id, psm.seq, mods,
                                 psm.charge, spectrum=spec)
 
                 psm.similarity_scores.append(

@@ -68,7 +68,7 @@ class PSM():
         self.features = {}
 
     @property
-    def sequence(self) -> str:
+    def seq(self) -> str:
         return self.peptide.seq
 
     @property
@@ -132,10 +132,10 @@ class PSM():
         """
         self._check_spectrum_initialized()
 
-        # pep_mass = peptides.calculate_peptide_mass(self.sequence, self.mods)
+        # pep_mass = peptides.calculate_peptide_mass(self.seq, self.mods)
 
         # Get the theoretical ions for the peptide
-        # ions = peptides.get_all_ions(pep_mass, self.sequence,
+        # ions = peptides.get_all_ions(pep_mass, self.seq,
         #                             self.mods, self.charge)
 
         ions = self.peptide.fragment(
@@ -184,7 +184,12 @@ class PSM():
         self.features = self._calculate_features(ions, target_mod, 0.2)
         # Use the proteolyzer to determine the number of missed cleavages
         self.features['n_missed_cleavages'] =\
-            proteolyzer.count_missed_cleavages(self.sequence)
+            proteolyzer.count_missed_cleavages(self.seq)
+            
+        self.features["PepMass"] = self.peptide.mass
+        self.features["ErrPepMass"] = abs(self.features["PepMass"] -
+                                          self.spectrum.mass)
+        self.features["Charge"] = self.spectrum.charge
 
         return self.features
 
@@ -204,19 +209,16 @@ class PSM():
 
         """
         features = {}
+        
+        # The length of the peptide
+        pep_len = len(self.seq)
+        features["PepLen"] = pep_len
 
         # The intensity of the base peak
         max_int = self.spectrum.max_intensity()
 
         # Intensities from the spectrum
         intensities = list(self.spectrum.intensity)
-
-        # The peaks with intensity >= 20% of the base peak intensity
-        peaks_20 = {ii for ii, peak in enumerate(intensities)
-                    if peak >= max_int * 0.2 and peak >= 300}
-
-        # The length of the peptide
-        pep_len = len(self.sequence)
 
         if target_mod is not None:
             # The position from which b-/y-ions will contain the modified
@@ -247,6 +249,10 @@ class PSM():
         features["FracIon"] = len(ann_peaks) / npeaks
         features["FracIonInt"] =\
             sum(intensities[idx] for idx in ann_peaks) / sum(intensities)
+            
+        # The peaks with intensity >= 20% of the base peak intensity
+        peaks_20 = {ii for ii, peak in enumerate(self.spectrum)
+                    if peak[1] >= max_int * 0.2 and peak[0] >= 300}
 
         # The fraction of peaks with intensities greater than 20% of the base
         # peak annotated by the theoretical ions
