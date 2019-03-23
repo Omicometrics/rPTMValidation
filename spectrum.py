@@ -10,7 +10,7 @@ from typing import List
 
 import numpy as np
 
-from constants import ITRAQ_MASSES
+from constants import FIXED_MASSES, ITRAQ_MASSES
 
 
 Annotation = collections.namedtuple("Annotation",
@@ -24,17 +24,26 @@ class Spectrum():
     exploring the mass spectrum.
 
     """
-    def __init__(self, peak_list):
+    def __init__(self, peak_list, mz, charge):
         """
         Initializes the class.
 
         Args:
             peak_list (list): A list of lists containing m/z, intensity pairs.
+            mz (float): The mass/charge ratio of the spectrum precursor.
+            charge (int): The charge state of the spectrum precursor.
 
         """
         self._peaks = np.array(peak_list)
+        self._mz = mz
+        self.charge = charge
+        
         # Sort the spectrum by the m/z ratios
         self._mz_sort()
+        
+    @property
+    def mass(self):
+        return self._mz * self.charge - self.charge * FIXED_MASSES["H"]
 
     def __iter__(self):
         """
