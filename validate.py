@@ -321,6 +321,12 @@ class Validate():
         self.decoy_db_path = decoys.generate_decoy_file(self._target_db_path,
                                                         self.proteolyzer)
 
+        # To be set later
+        self.mod_mass = None
+        self.psms = None
+        self.unmod_psms = None
+        self.pp_res = None
+
         # Used for multiprocessing throughout the class methods
         self.pool = mp.Pool()
 
@@ -727,10 +733,11 @@ class Validate():
             idxs = list(range(len(seqs)))
             mods, masses = [], []
             for seq in seqs:
-                mods.append(gen_fixed_mods(seq))
+                _mods = gen_fixed_mods(seq)
+                mods.append(_mods)
                 masses.append(FIXED_MASSES["H2O"] +
                               sum(AA_MASSES[res].mono for res in seq) +
-                              sum(ms.mass for ms in mods))
+                              sum(ms.mass for ms in _mods))
 
         # Sort the sequence masses, indices and mods according to the
         # sequence mass

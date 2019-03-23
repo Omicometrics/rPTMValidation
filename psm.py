@@ -6,7 +6,7 @@ Module contains a class to define a Peptide Spectrum Match (PSM).
 import bisect
 import collections
 import sys
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import pandas as pd
 
@@ -34,8 +34,8 @@ class PSM():
     Spectrum object, while the peptide is a composed pepfrag.Peptide.
 
     """
-    def __init__(self, data_id: str, spec_id: str, seq: str,
-                 mods: List[modifications.ModSite], charge: int,
+    def __init__(self, data_id: Optional[str], spec_id: Optional[str],
+                 seq: str, mods: List[modifications.ModSite], charge: int,
                  spectrum=None):
         """
         Initializes the PSM class using basic identifying information.
@@ -157,7 +157,7 @@ class PSM():
         return {l: (bisect.bisect_left(denoised_peaks, a.peak_num), a.ion_pos)
                 for l, a in anns.items() if a.peak_num in denoised_peaks}
 
-    def extract_features(self, target_mod: str,
+    def extract_features(self, target_mod: Optional[str],
                          proteolyzer: proteolysis.Proteolyzer) \
                          -> Dict[str, str]:
         """
