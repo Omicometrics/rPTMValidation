@@ -49,9 +49,9 @@ def calc_fisher_scores(df: pd.DataFrame, features: List[str],
     """
     scores = {}
     for feature in features:
-        vals1 = df.loc[df[class_col], df[feature]]
-        vals2 = df.loc[df[~class_col], df[feature]]
-        scores[feature] = ((vals1.mean() - vals2.mean) ** 2) / \
+        vals1 = df[feature].loc[df[class_col]]
+        vals2 = df[feature].loc[~df[class_col]]
+        scores[feature] = ((vals1.mean() - vals2.mean()) ** 2) / \
                           (vals1.std() ** 2 + vals2.std() ** 2)
     return scores
 
