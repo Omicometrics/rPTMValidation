@@ -35,25 +35,21 @@ class PSM():
 
     """
     def __init__(self, data_id: Optional[str], spec_id: Optional[str],
-                 seq: str, mods: List[modifications.ModSite], charge: int,
-                 spectrum=None):
+                 peptide: Peptide, spectrum=None):
         """
         Initializes the PSM class using basic identifying information.
 
         Args:
             data_id (str): The ID of the source data file.
             spec_id (str): The ID associated with the matched spectrum.
-            seq (str): The matched peptide sequence.
-            mods (list of ModSites): The modifications applied to the matched
-                                     peptide.
-            charge (int): The charge state of the matched peptide.
+            peptide (pepfrag.Peptide): The peptide matched to the spectrum.
             spectrum (Spectrum, optional): The Spectrum matched to the
                                            peptide. This is usually set later.
 
         """
         self.data_id = data_id
         self.spec_id = spec_id
-        self.peptide = Peptide(seq, charge, mods)
+        self.peptide = peptide
 
         # This can be set later before processing occurs
         self.__spectrum = spectrum
@@ -224,15 +220,11 @@ class PSM():
 
         ions = self.denoise_spectrum()
         self.spectrum.normalize()
-        self.features = self._calculate_features(ions, target_mod, 0.2)
+        self._calculate_features(ions, target_mod, 0.2)
+
         # Use the proteolyzer to determine the number of missed cleavages
         self.features['n_missed_cleavages'] =\
             proteolyzer.count_missed_cleavages(self.seq)
-
-        self.features["PepMass"] = self.peptide.mass
-        self.features["ErrPepMass"] = abs(self.features["PepMass"] -
-                                          self.spectrum.mass)
-        self.features["Charge"] = self.spectrum.charge
 
         return self.features
 
@@ -251,11 +243,14 @@ class PSM():
             tol (float): The mass tolerance level to apply.
 
         """
-        features = {}
-
         # The length of the peptide
         pep_len = len(self.seq)
-        features["PepLen"] = pep_len
+        self.features["PepLen"] = pep_len
+
+        self.features["PepMass"] = self.peptide.mass
+        self.features["ErrPepMass"] = abs(self.features["PepMass"] -
+                                          self.spectrum.mass)
+        self.features["Charge"] = self.spectrum.charge
 
         # Intensities from the spectrum
         intensities = list(self.spectrum.intensity)
@@ -270,15 +265,12 @@ class PSM():
                                       if ms.mod == target_mod)}
 
             # The sum of the modified ion intensities
-            features["TotalIntMod"] = \
+            self.features["TotalIntMod"] = \
                 sum(intensities[ions[l][0]] for l in ions.keys()
                     if (l[0] == 'y' and '-' not in l and
                         ions[l][1] >= mod_ion_start['y'])
                     or (l[0] == 'b' and '-' not in l and
                         ions[l][1] >= mod_ion_start['b']))
-
-        # The number of peaks in the spectrum
-        npeaks = float(len(self.spectrum))
 
         # The regular b-/y-ions annotated for the PSM
         seq_ions = [l for l in ions.keys() if l[0] in 'yb' and '-' not in l]
@@ -286,8 +278,9 @@ class PSM():
         # The peaks annotated by theoretical ions
         ann_peaks = {v[0] for v in ions.values()}
 
-        features["FracIon"] = len(ann_peaks) / npeaks
-        features["FracIonInt"] =\
+        # The number of annotated peaks divided by the total number of peaks
+        self.features["FracIon"] = len(ann_peaks) / float(len(self.spectrum))
+        self.features["FracIonInt"] =\
             sum(intensities[idx] for idx in ann_peaks) / sum(intensities)
 
         # The intensity of the base peak
@@ -300,56 +293,58 @@ class PSM():
         # The fraction of peaks with intensities greater than 20% of the base
         # peak annotated by the theoretical ions
         ions_20 = {ions[l][0] for l in seq_ions if ions[l][0] in peaks_20}
-        features["FracIon20%"] = (len(ions_20) / float(len(peaks_20))
-                                  if peaks_20 else 0)
+        self.features["FracIon20%"] = \
+            (len(ions_20) / float(len(peaks_20)) if peaks_20 else 0)
 
         # Sequence coverage
-        n_anns, n_mod_anns, max_ion_counts, max_ion_seq_len = \
-            self._calculate_sequence_coverage(target_mod, seq_ions,
-                                              mod_ion_start)
+        n_anns = self._calculate_sequence_coverage(target_mod, seq_ions,
+                                                   mod_ion_start)
 
-        features["NumIonb"] = max_ion_counts['b']
-        features["NumIony"] = max_ion_counts['y']
-
-        # The longest sequence tag found divided by the peptide length
-        features["SeqTagm"] = max_ion_seq_len / float(pep_len)
         # The fraction of b-ions annotated by theoretical ions
-        features["NumIonb2L"] = features["NumIonb"] / float(pep_len)
+        self.features["NumIonb2L"] = self.features["NumIonb"] / float(pep_len)
         # The fraction of y-ions annotated by theoretical ions
-        features["NumIony2L"] = features["NumIony"] / float(pep_len)
+        self.features["NumIony2L"] = self.features["NumIony"] / float(pep_len)
 
         # Ion score
+        self._calculate_ion_scores(n_anns, target_mod, tol)
+
+        return self.features
+
+    def _calculate_ion_scores(self, n_anns, target_mod, tol):
+        """
+        Calculates the ion score features.
+
+        """
         mzs = self.spectrum.mz
-        n_bins = float(round((max(mzs) - min(mzs))/tol))
+        n_bins = float(round((max(mzs) - min(mzs)) / tol))
         prob, mod_prob = 0., 0.
         if n_bins > 0:
-            success_prob = npeaks / n_bins
-            prob = utilities.log_binom_prob(n_anns, 2 * (pep_len - 1),
-                                            success_prob)
+            success_prob = float(len(self.spectrum)) / n_bins
+            prob = utilities.log_binom_prob(
+                n_anns["all"], 2 * (len(self.seq) - 1), success_prob)
 
             if target_mod is not None:
                 mod_prob = utilities.log_binom_prob(
-                    n_mod_anns, pep_len - 1, success_prob)
+                    n_anns["mod"], len(self.seq) - 1, success_prob)
 
-        features["MatchScore"] = prob / (float(pep_len) ** 0.5)
+        self.features["MatchScore"] = prob / (float(len(self.seq)) ** 0.5)
 
         if target_mod is not None:
-            features["MatchScoreMod"] = mod_prob / (float(pep_len) ** 0.5)
-
-        return features
+            self.features["MatchScoreMod"] = \
+                mod_prob / (float(len(self.seq)) ** 0.5)
 
     def _calculate_sequence_coverage(self, target_mod, seq_ions,
                                      mod_ion_start):
         """
+        Calculates features related to the sequence coverage by the ion
+        annotations.
+
+        Args:
         """
         # The maximum number of fragments annotated by theoretical ions
-        # across the charge states
-        n_anns = 0
-
-        if target_mod is not None:
-            # The maximum number of fragments annotated by theoretical ions
-            # containing the modified residue across the charge states
-            n_mod_anns = 0
+        # across the charge states. mod is the maximum number of fragments
+        # containing the modified residue
+        n_anns = {"all": 0, "mod": 0}
 
         # The longest consecutive ion sequence found among charge states
         max_ion_seq_len = 0
@@ -360,43 +355,44 @@ class PSM():
         for _charge in range(self.charge):
             c_str = '[+]' if _charge == 0 else f'[{_charge + 1}+]'
             # The number of annotated ions
-            n_ions = 0
-
-            if target_mod is not None:
-                # The number of modification-containing annotated ions
-                n_mod_ions = 0
+            n_ions = {"all": 0, "mod": 0}
 
             for ion_type in 'yb':
                 # A list of b-/y-ion numbers (e.g. 2 for b2[+])
                 ion_nums = sorted(
                     [int(l.split('[')[0][1:])
                      for l in seq_ions if l[0] == ion_type and c_str in l])
-                ion_count = len(ion_nums)
 
                 if target_mod is not None:
                     # The number of ions of ion_type containing the
                     # modification
-                    n_mod_ions += ion_count - \
+                    n_ions["mod"] += len(ion_nums) - \
                         bisect.bisect_left(ion_nums, mod_ion_start[ion_type])
 
                 # Increment the number of ions annotated for the current charge
-                n_ions += ion_count
+                n_ions["all"] += len(ion_nums)
 
                 # Update the max number of annotated ions if appropriate
-                if ion_count > max_ion_counts[ion_type]:
-                    max_ion_counts[ion_type] = ion_count
+                if len(ion_nums) > max_ion_counts[ion_type]:
+                    max_ion_counts[ion_type] = len(ion_nums)
 
                 ion_seq_len, _ = utilities.longest_sequence(ion_nums)
                 if ion_seq_len > max_ion_seq_len:
                     max_ion_seq_len = ion_seq_len
 
-            if n_ions > n_anns:
-                n_anns = n_ions
+            if n_ions["all"] > n_anns["all"]:
+                n_anns["all"] = n_ions["all"]
 
-            if target_mod is not None and n_mod_ions > n_mod_anns:
-                n_mod_anns = n_mod_ions
+            if target_mod is not None and n_ions["mod"] > n_anns["mod"]:
+                n_anns["mod"] = n_ions["mod"]
 
-        return n_anns, n_mod_anns, max_ion_counts, max_ion_seq_len
+        self.features["NumIonb"] = max_ion_counts['b']
+        self.features["NumIony"] = max_ion_counts['y']
+
+        # The longest sequence tag found divided by the peptide length
+        self.features["SeqTagm"] = max_ion_seq_len / float(len(self.seq))
+
+        return n_anns
 
 
 class UnmodPSM(PSM):

@@ -274,9 +274,8 @@ def decoy_features(decoy_peptide, spec, target_mod, proteolyzer):
     for multiprocessing.
 
     """
-    return PSM(None, None, decoy_peptide.seq, decoy_peptide.mods,
-               decoy_peptide.charge, spectrum=spec).extract_features(
-                   target_mod, proteolyzer)
+    return PSM(None, None, decoy_peptide, spectrum=spec).extract_features(
+        target_mod, proteolyzer)
 
 
 def test_matches_equal(matches, psm, peptide_str) -> bool:
@@ -447,7 +446,7 @@ class Validate():
             summary_files = [os.path.join(data_dir, f)
                              for f in os.listdir(data_dir)
                              if 'PeptideSummary' in f and f.endswith('.txt')]
-                             
+
             if not summary_files:
                 continue
 
@@ -466,12 +465,16 @@ class Validate():
                 if any(f"{self.target_mod}({tr})" in summary.mods
                        for tr in self.target_residues):
                     psms.append(
-                        PSM(set_id, summary.spec, summary.seq,
-                            parsed_mods, summary.theor_z))
+                        PSM(set_id, summary.spec,
+                            Peptide(summary.seq, summary.theor_z,
+                                    parsed_mods)))
 
                 pp_res[set_id][summary.spec].append(
                     SpecMatch(summary.seq, parsed_mods, summary.theor_z,
                               summary.conf))
+
+        # Deduplicate PSMs
+        psms = list(set(psms))
 
         return psms, pp_res
 
@@ -535,7 +538,8 @@ class Validate():
 
                 for psm, mods in _psms:
                     mod_unmod_psms[psm].append(
-                        PSM(data_id, spec_id, psm.seq, mods, psm.charge,
+                        PSM(data_id, spec_id,
+                            Peptide(psm.seq, psm.charge, mods),
                             spectrum=spec))
 
         return mod_unmod_psms
