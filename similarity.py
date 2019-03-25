@@ -4,17 +4,13 @@ A module for evaluating the similarity of two MS/MS spectra, based on their
 ion annotations and intensities.
 
 """
-import collections
-import os
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 
 import numpy as np
 
-from modifications import ModSite
 import peptides
-from psm import PSM
-import readers
-from spectrum import Spectrum
+from psm import PSM, UnmodPSM
+from mass_spectrum import Spectrum
 
 
 def test_matches_equal(matches, psm, peptide_str) -> bool:
@@ -47,45 +43,28 @@ def test_matches_equal(matches, psm, peptide_str) -> bool:
 
     return False
 
-
-def calculate_similarity_scores(psms, pp_res, target_mod, data_sets) -> \
-        List[PSM]:
+def calculate_similarity_scores(mod_psms: List[PSM],
+                                unmod_psms: List[UnmodPSM]) -> List[PSM]:
     """
+    Calculates the similarity between the mass spectra of modified and
+    unmodified peptides.
+
+    Args:
+        mod_psms (list of PSMs): The modified PSMs.
+        unmod_psms (list of UnmodPSMs): The unmodified PSMs.
+
+    Returns:
+        The modified PSMs, with their similarity scores now set.
+
     """
-    for data_id, data in pp_res.items():
-        print(f"Processing data set {data_id}")
-        unmods = collections.defaultdict(list)
-        for spec_id, matches in data.items():
-            for psm in psms:
-                mods = [ms for ms in psm.mods if ms.mod != target_mod]
-                peptide_str = peptides.merge_seq_mods(psm.seq, mods)
-                if test_matches_equal(matches, psm, peptide_str):
-                    unmods[spec_id].append((psm, mods))
-
-        if not unmods:
-            continue
-
-        spec_file = os.path.join(data_sets[data_id]["data_dir"],
-                                 data_sets[data_id]["spectra_file"])
-
-        print(f"Reading {spec_file}")
-        spectra = readers.read_spectra_file(spec_file)
-        
-        print(f"Processing {len(unmods)} spectra")
-
-        for spec_id, _psms in unmods.items():
-            print(f"Processing {spec_id} with {_psms}")
-            spec = spectra[spec_id].centroid().remove_itraq()
-
-            for psm, mods in _psms:
-                unmod_psm = PSM(data_id, spec_id, psm.seq, mods,
-                                psm.charge, spectrum=spec)
-
+    for unmod_psm in unmod_psms:
+        for psm in mod_psms:
+            if unmod_psm.mod_psm_uid == psm.uid:
                 psm.similarity_scores.append(
-                    (data_id, spec_id,
-                     calculate_spectral_similarity(psm, unmod_psm)))
-
-    return psms
+                    [(upsm.data_id, upsm.spec_id,
+                      calculate_spectral_similarity(psm, upsm))
+                     for upsm in unmod_psms])
+    return mod_psms
 
 
 def calculate_spectral_similarity(psm1: PSM, psm2: PSM) -> float:
@@ -158,7 +137,7 @@ def match_spectra(spectrum1: Tuple[Spectrum, dict],
     matched_by = _merged_matches(matched_by1, matched_by2, spec2)
     idx_set1 = {ii for ii, _ in matched_by}
     idx_set2 = {ii for _, ii in matched_by}
-    
+
     # Combine the common indices
     matched_idxs = matched_by
 

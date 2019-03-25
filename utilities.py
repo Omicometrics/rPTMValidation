@@ -4,11 +4,15 @@ A script providing utility functions for peptide modification validation.
 
 """
 from bisect import bisect_left
+import collections
 import math
 from typing import List, Tuple
 
 
-def slice_list(values, nslices=800) -> Tuple[List[int], List[float]]:
+Slices = collections.namedtuple("Slices", ["idxs", "bounds"])
+
+
+def slice_list(values, nslices=800) -> Slices:
     """
     Slices the list of values into nslices segments.
 
@@ -17,8 +21,8 @@ def slice_list(values, nslices=800) -> Tuple[List[int], List[float]]:
         nslices (int, optional): The number of slices to split.
 
     Returns:
-        tuple: index at which each slice begins in values,
-               the value at which each slice begins.
+        Slices: index at which each slice begins in values,
+                the value at which each slice begins.
 
     """
     size = (values[-1] - values[0]) / nslices
@@ -36,7 +40,7 @@ def slice_list(values, nslices=800) -> Tuple[List[int], List[float]]:
             idxs.append(pos - 1)
             bounds.append(values[-1])
 
-    return idxs, bounds
+    return Slices(idxs, bounds)
 
 
 def longest_sequence(seq: List[int]) -> Tuple[int, List[int]]:

@@ -10,6 +10,10 @@ import enum
 
 
 class MassType(enum.Enum):
+    """
+    An enumeration representing the possible mass types.
+
+    """
     mono = enum.auto()
     avg = enum.auto()
 

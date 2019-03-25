@@ -10,9 +10,9 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
+import mass_spectrum
 import modifications
 import proteolysis
-import spectrum
 import utilities
 
 sys.path.append("../pepfrag")
@@ -56,39 +56,67 @@ class PSM():
         self.peptide = Peptide(seq, charge, mods)
 
         # This can be set later before processing occurs
-        self.spectrum = spectrum
+        self.__spectrum = spectrum
 
         # The decoy peptide matched to the spectrum
         self.decoy_id = None
 
         # The similarity scores to the (unmodified) spectra
         self.similarity_scores = []
-        
+
         # The PSM features
         self.features = {}
 
     @property
     def seq(self) -> str:
+        """
+        Returns the peptide sequence.
+
+        """
         return self.peptide.seq
 
     @property
     def mods(self) -> List[modifications.ModSite]:
+        """
+        Returns the peptide modifications list.
+
+        """
         return self.peptide.mods
 
     @property
     def charge(self) -> int:
+        """
+        Returns the peptide charge state.
+
+        """
         return self.peptide.charge
 
     @property
-    def spectrum(self) -> spectrum.Spectrum:
+    def spectrum(self) -> mass_spectrum.Spectrum:
+        """
+        Returns the composed mass_spectrum.Spectrum.
+
+        """
         return self.__spectrum
 
     @spectrum.setter
     def spectrum(self, val):
-        if val is not None and not isinstance(val, spectrum.Spectrum):
+        """
+        Sets the composed mass_spectrum.Spectrum.
+
+        """
+        if val is not None and not isinstance(val, mass_spectrum.Spectrum):
             raise TypeError(
-                "Setting PSM.spectrum requires a spectrum.Spectrum")
+                "Setting PSM.spectrum requires a mass_spectrum.Spectrum")
         self.__spectrum = val
+        
+    @property
+    def uid(self):
+        """
+        Returns the unique identifier for the PSM.
+
+        """
+        return f"{self.data_id}_{self.spec_id}"
 
     def __str__(self) -> str:
         """
@@ -159,7 +187,7 @@ class PSM():
 
     def extract_features(self, target_mod: Optional[str],
                          proteolyzer: proteolysis.Proteolyzer) \
-                         -> Dict[str, str]:
+            -> Dict[str, str]:
         """
         Extracts possible machine learning features from the peptide spectrum
         match.
@@ -185,7 +213,7 @@ class PSM():
         # Use the proteolyzer to determine the number of missed cleavages
         self.features['n_missed_cleavages'] =\
             proteolyzer.count_missed_cleavages(self.seq)
-            
+
         self.features["PepMass"] = self.peptide.mass
         self.features["ErrPepMass"] = abs(self.features["PepMass"] -
                                           self.spectrum.mass)
@@ -209,13 +237,10 @@ class PSM():
 
         """
         features = {}
-        
+
         # The length of the peptide
         pep_len = len(self.seq)
         features["PepLen"] = pep_len
-
-        # The intensity of the base peak
-        max_int = self.spectrum.max_intensity()
 
         # Intensities from the spectrum
         intensities = list(self.spectrum.intensity)
@@ -228,7 +253,7 @@ class PSM():
                              'y': min(pep_len - ms.site + 1
                                       for ms in self.mods
                                       if ms.mod == target_mod)}
-                                      
+
             # The sum of the modified ion intensities
             features["TotalIntMod"] = \
                 sum(intensities[ions[l][0]] for l in ions.keys()
@@ -249,7 +274,10 @@ class PSM():
         features["FracIon"] = len(ann_peaks) / npeaks
         features["FracIonInt"] =\
             sum(intensities[idx] for idx in ann_peaks) / sum(intensities)
-            
+
+        # The intensity of the base peak
+        max_int = self.spectrum.max_intensity()
+
         # The peaks with intensity >= 20% of the base peak intensity
         peaks_20 = {ii for ii, peak in enumerate(self.spectrum)
                     if peak[1] >= max_int * 0.2 and peak[0] >= 300}
@@ -321,27 +349,48 @@ class PSM():
         # The longest sequence tag found divided by the peptide length
         features["SeqTagm"] = max_ion_seq_len / float(pep_len)
         # The fraction of b-ions annotated by theoretical ions
-        features["NumIonb2L"] = max_ion_counts['b'] / float(pep_len)
+        features["NumIonb2L"] = features["NumIonb"] / float(pep_len)
         # The fraction of y-ions annotated by theoretical ions
-        features["NumIony2L"] = max_ion_counts['y'] / float(pep_len)
+        features["NumIony2L"] = features["NumIony"] / float(pep_len)
 
         # Ion score
         mzs = self.spectrum.mz
         n_bins = float(round((max(mzs) - min(mzs))/tol))
-        mp, mp2 = 0., 0.
+        prob, mod_prob = 0., 0.
         if n_bins > 0:
-            p = npeaks / n_bins
-            mp = utilities.log_binom_prob(n_anns, 2 * (pep_len - 1), p)
+            success_prob = npeaks / n_bins
+            prob = utilities.log_binom_prob(n_anns, 2 * (pep_len - 1),
+                                            success_prob)
 
             if target_mod is not None:
-                mp2 = utilities.log_binom_prob(n_mod_anns, pep_len - 1, p)
+                mod_prob = utilities.log_binom_prob(
+                    n_mod_anns, pep_len - 1, success_prob)
 
-        features["MatchScore"] = mp / (float(pep_len) ** 0.5)
+        features["MatchScore"] = prob / (float(pep_len) ** 0.5)
 
         if target_mod is not None:
-            features["MatchScoreMod"] = mp2 / (float(pep_len) ** 0.5)
+            features["MatchScoreMod"] = mod_prob / (float(pep_len) ** 0.5)
 
         return features
+        
+        
+class UnmodPSM(PSM):
+    """
+    A simple subclass of PSM to represent an unmodified PSM. This includes
+    an identifier which makes the unmodified PSM to its modified counterpart.
+    
+    """
+    def __init__(self, mod_psm_uid: str, *args, **kwargs) -> None:
+        """
+        Initialize the UnmodPSM object by storing the modified PSM ID and
+        passing the remaining arguments to the base class initializer.
+        
+        Args:
+            mod_psm_uid (str): The modified counterpart identifier.
+
+        """
+        self.mod_psm_uid = mod_psm_uid
+        super().__init__(*args, **kwargs)
 
 
 def psms2df(psms: List[PSM]) -> pd.DataFrame:

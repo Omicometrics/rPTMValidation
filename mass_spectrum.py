@@ -37,12 +37,16 @@ class Spectrum():
         self._peaks = np.array(peak_list)
         self._mz = mz
         self.charge = charge
-        
+
         # Sort the spectrum by the m/z ratios
         self._mz_sort()
-        
+
     @property
     def mass(self):
+        """
+        Return the precursor mass.
+
+        """
         return self._mz * self.charge - self.charge * FIXED_MASSES["H"]
 
     def __iter__(self):
@@ -177,14 +181,14 @@ class Spectrum():
                 centroided.append(peak)
             else:
                 peak_cluster = [peak]
-                df = 0
-                while df <= 0.1:
+                _diff = 0
+                while _diff <= 0.1:
                     idx += 1
                     peak = self._peaks[idx]
                     peak_cluster.append(peak)
                     if idx == len(mz_diffs):
                         break
-                    df = mz_diffs[idx]
+                    _diff = mz_diffs[idx]
                 if len({p[1] for p in peak_cluster}) == 1:
                     centroided.append(np.array(
                         [sum(p[0] for p in peak_cluster) /
@@ -202,6 +206,8 @@ class Spectrum():
     def remove_itraq(self, tol=0.1):
         """
         Removes the iTRAQ fragment peaks from the spectrum.
+        https://stackoverflow.com/questions/51744613/numpy-setdiff1d-with-
+        tolerance-comparing-a-numpy-array-to-another-and-saving-o.
 
         Args:
             tol (float, optional): The mass tolerance.
@@ -210,7 +216,9 @@ class Spectrum():
             Spectrum object minus any iTRAQ peaks.
 
         """
-        self._peaks = self._peaks[~np.isin(self._peaks[:, 0], ITRAQ_MASSES)]
+        self._peaks = self._peaks[
+            (np.abs(np.subtract.outer(self._peaks[:, 0], ITRAQ_MASSES))
+             > tol).all(1)]
         return self
 
     def annotate(self, theor_ions, tol=0.2):

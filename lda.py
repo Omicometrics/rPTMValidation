@@ -5,20 +5,27 @@ of PSMS.
 
 """
 import itertools
-from typing import Dict, List
+from typing import List
+import warnings
 
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
+from sklearn.exceptions import DataConversionWarning
 from sklearn.model_selection import cross_val_predict
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 
-class LDA(LinearDiscriminantAnalysis):
+# Silence this since it arises when converting ints to float in StandardScaler
+warnings.filterwarnings(action='ignore', category=DataConversionWarning)
+
+
+class CustomPipeline(Pipeline):
     """
-    A simple subclass of sklearn's LinearDiscriminantAnalysis to allow
-    cross_val_predict to return the combined results of multiple base class
-    methods.
+    A simple subclass of sklearn's Pipeline to allow cross_val_predict to
+    return the combined results of multiple base class methods.
 
     """
     def decide_predict(self, X):
@@ -32,28 +39,64 @@ class LDA(LinearDiscriminantAnalysis):
         ])
 
 
-def calc_fisher_scores(df: pd.DataFrame, features: List[str],
-                       class_col: str) -> Dict[str, float]:
+class FisherScoreSelector():
     """
-    Calculates the Fisher scores the features in the DataFrame.
-
-    Args:
-        df (pandas.DataFrame): The feature DataFrame.
-        features (list): The list of feature names.
-        class_col (str): The name of the column corresponding to the class
-                         label.
-
-    Returns:
-        dict: A map of feature name to Fisher score.
+    A custom feature selector for use with sklearn.Pipeline. This selector
+    will extract the features whose Fisher scores exceed the specified
+    threshold.
 
     """
-    scores = {}
-    for feature in features:
-        vals1 = df[feature].loc[df[class_col]]
-        vals2 = df[feature].loc[~df[class_col]]
-        scores[feature] = ((vals1.mean() - vals2.mean()) ** 2) / \
-                          (vals1.std() ** 2 + vals2.std() ** 2)
-    return scores
+    def __init__(self, threshold):
+        """
+        Initialize the selector with the desired score threshold.
+
+        Args:
+            threshold (float): The minimum Fisher score to retain features.
+
+        """
+        self.threshold = threshold
+
+        self._features = []
+
+    def transform(self, X):
+        """
+        Transform the input by extracting the data for the features whose
+        Fisher scores exceeded the threshold.
+
+        """
+        return X[self._features]
+
+    def fit(self, X, y):
+        """
+        Fit the selector by calculating the Fisher scores for each feature
+        and storing those which exceed the threshold.
+
+        """
+        for col in X.columns:
+            vals1 = X[col].loc[y]
+            vals2 = X[col].loc[~y]
+            score = ((vals1.mean() - vals2.mean()) ** 2) / \
+                    (vals1.std() ** 2 + vals2.std() ** 2)
+            if score > self.threshold:
+                self._features.append(col)
+        return self
+
+
+'''def ldaperm(Xf, Xrandf, sampleix):
+    """
+    Linear discriminant analysis
+    """
+    medianxv = np.median(np.array(Xf)[sampleix], axis=0)
+    medianxv[medianxv == 0] = 1.
+    Xm = Xf / medianxv
+    Xn = Xrandf / medianxv
+    y = np.concatenate((np.ones(sum(sampleix)), np.zeros(sum(sampleix))))
+    X = np.concatenate((Xm[sampleix], Xn[sampleix]))
+    err, ys, probs, _ = lda_validate(X, y, 10)
+    model = LDA().fit(X, y)
+    print(err, sum(probs[1][:sum(sampleix)] >= 0.99),
+          sum(probs[1][sum(sampleix):] >= 0.99))
+    return ys, probs[1], model, medianxv'''
 
 
 def lda_validate(df: pd.DataFrame, features: List[str],
@@ -71,24 +114,28 @@ def lda_validate(df: pd.DataFrame, features: List[str],
     Returns:
 
     """
-    # Calculate the Fisher scores of the features
-    fisher_scores = calc_fisher_scores(df, features, "target")
-
-    # Split out the machine learning features and the target/decoy label,
-    # retaining only those features with Fisher scores exceeding the threshold
-    X = df[[f for f in features if fisher_scores[f] > fisher_threshold]]
+    X = df[features]
     y = df["target"]
+
+    pipeline = CustomPipeline(
+        [
+            # Fisher score selection of features is included in the piepline
+            # since it should be performed independently on each cross
+            # validation fold
+            ("fisher_selection", FisherScoreSelector(fisher_threshold)),
+            # Scale the features to have mean 0 and unit variance
+            ("scaler", StandardScaler()),
+            # Perform LDA
+            ("lda", LDA())
+        ])
 
     # Perform cross validation using the custom LDA class to generate the
     # combined output for LDA.decision_function and LDA.predict.
-    results = cross_val_predict(LDA(), X, y, method="decide_predict",
+    results = cross_val_predict(pipeline, X, y, method="decide_predict",
                                 **kwargs)
 
     # Retrieve the decision_function scores and the y label predictions
     scores, preds = results[:, 0], results[:, 1]
-
-    # Find the number of incorrect predicts
-    nerr = sum(y != preds)
 
     # Compute calibrated probabilities
     probs = {}
@@ -96,10 +143,16 @@ def lda_validate(df: pd.DataFrame, features: List[str],
     stats = [(np.mean(scores[preds == cl]), np.std(scores[preds == cl]))
              for cl in y.unique()]
     # Calculate probabilities based on the normal distribution
-    for ii, cl in enumerate(y.unique()):
-        probs[int(cl)] = norm.pdf((scores - stats[ii][0]) / stats[ii][1]) /\
+    for ii, _class in enumerate(y.unique()):
+        probs[int(_class)] = \
+            norm.pdf((scores - stats[ii][0]) / stats[ii][1]) /\
             sum(norm.pdf((scores - mean) / std) for mean, std in stats)
 
-    bprob = probs[1] / sum(itertools.chain(*probs.values()))
+    #bprob = probs[1] / sum(itertools.chain(*probs.values()))
+    
+    df["score"] = scores
+    df["prob"] = probs[1]
 
-    return nerr / len(y), scores, probs, bprob
+    # Return the fraction of incorrect predictions
+    #return sum(y != preds) / len(y), scores, probs#, bprob
+    return sum(y != preds) / len(y), df

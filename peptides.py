@@ -1,5 +1,7 @@
 #! /usr/bin/env python3
 """
+A set of functions to be used for processing peptide sequences.
+
 """
 import collections
 import sys
@@ -46,7 +48,7 @@ def merge_seq_mods(seq, mods):
 
     """
     if isinstance(mods, str):
-        mod_str = modifications._preparse_mod_string(mods)
+        mod_str = modifications.preparse_mod_string(mods)
         mods = [modifications.ModSite(None, *m.split("@")[::-1])
                 for m in mod_str.split(";") if m]
 
@@ -77,8 +79,10 @@ def merge_seq_mods(seq, mods):
 
 
 def get_by_ion_mzs(peptide):
-    '''
-    '''
+    """
+    Get the b/y-type fragment ions for the peptide.
+
+    """
     return [ion.mass for ion in peptide.fragment(
         ion_types={
             IonType.precursor: {"neutral_losses": [], "itraq": True},
