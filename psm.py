@@ -109,7 +109,7 @@ class PSM():
             raise TypeError(
                 "Setting PSM.spectrum requires a mass_spectrum.Spectrum")
         self.__spectrum = val
-        
+
     @property
     def uid(self):
         """
@@ -137,6 +137,21 @@ class PSM():
 
         """
         return str(self)
+
+    def __hash__(self):
+        """
+        Implements the hash function for the object.
+
+        """
+        return hash((self.data_id, self.spec_id, self.peptide))
+
+    def __eq__(self, other):
+        """
+        Implements the equality test for the object.
+
+        """
+        return (self.data_id, self.spec_id, self.peptide) == \
+               (other.data_id, other.spec_id, other.peptide)
 
     def _check_spectrum_initialized(self):
         """
@@ -289,6 +304,44 @@ class PSM():
                                   if peaks_20 else 0)
 
         # Sequence coverage
+        n_anns, n_mod_anns, max_ion_counts, max_ion_seq_len = \
+            self._calculate_sequence_coverage(target_mod, seq_ions,
+                                              mod_ion_start)
+
+        features["NumIonb"] = max_ion_counts['b']
+        features["NumIony"] = max_ion_counts['y']
+
+        # The longest sequence tag found divided by the peptide length
+        features["SeqTagm"] = max_ion_seq_len / float(pep_len)
+        # The fraction of b-ions annotated by theoretical ions
+        features["NumIonb2L"] = features["NumIonb"] / float(pep_len)
+        # The fraction of y-ions annotated by theoretical ions
+        features["NumIony2L"] = features["NumIony"] / float(pep_len)
+
+        # Ion score
+        mzs = self.spectrum.mz
+        n_bins = float(round((max(mzs) - min(mzs))/tol))
+        prob, mod_prob = 0., 0.
+        if n_bins > 0:
+            success_prob = npeaks / n_bins
+            prob = utilities.log_binom_prob(n_anns, 2 * (pep_len - 1),
+                                            success_prob)
+
+            if target_mod is not None:
+                mod_prob = utilities.log_binom_prob(
+                    n_mod_anns, pep_len - 1, success_prob)
+
+        features["MatchScore"] = prob / (float(pep_len) ** 0.5)
+
+        if target_mod is not None:
+            features["MatchScoreMod"] = mod_prob / (float(pep_len) ** 0.5)
+
+        return features
+
+    def _calculate_sequence_coverage(self, target_mod, seq_ions,
+                                     mod_ion_start):
+        """
+        """
         # The maximum number of fragments annotated by theoretical ions
         # across the charge states
         n_anns = 0
@@ -343,48 +396,20 @@ class PSM():
             if target_mod is not None and n_mod_ions > n_mod_anns:
                 n_mod_anns = n_mod_ions
 
-        features["NumIonb"] = max_ion_counts['b']
-        features["NumIony"] = max_ion_counts['y']
+        return n_anns, n_mod_anns, max_ion_counts, max_ion_seq_len
 
-        # The longest sequence tag found divided by the peptide length
-        features["SeqTagm"] = max_ion_seq_len / float(pep_len)
-        # The fraction of b-ions annotated by theoretical ions
-        features["NumIonb2L"] = features["NumIonb"] / float(pep_len)
-        # The fraction of y-ions annotated by theoretical ions
-        features["NumIony2L"] = features["NumIony"] / float(pep_len)
 
-        # Ion score
-        mzs = self.spectrum.mz
-        n_bins = float(round((max(mzs) - min(mzs))/tol))
-        prob, mod_prob = 0., 0.
-        if n_bins > 0:
-            success_prob = npeaks / n_bins
-            prob = utilities.log_binom_prob(n_anns, 2 * (pep_len - 1),
-                                            success_prob)
-
-            if target_mod is not None:
-                mod_prob = utilities.log_binom_prob(
-                    n_mod_anns, pep_len - 1, success_prob)
-
-        features["MatchScore"] = prob / (float(pep_len) ** 0.5)
-
-        if target_mod is not None:
-            features["MatchScoreMod"] = mod_prob / (float(pep_len) ** 0.5)
-
-        return features
-        
-        
 class UnmodPSM(PSM):
     """
     A simple subclass of PSM to represent an unmodified PSM. This includes
     an identifier which makes the unmodified PSM to its modified counterpart.
-    
+
     """
     def __init__(self, mod_psm_uid: str, *args, **kwargs) -> None:
         """
         Initialize the UnmodPSM object by storing the modified PSM ID and
         passing the remaining arguments to the base class initializer.
-        
+
         Args:
             mod_psm_uid (str): The modified counterpart identifier.
 
