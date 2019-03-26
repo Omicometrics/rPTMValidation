@@ -35,6 +35,9 @@ class Proteolyzer():
         if self.enzyme not in enzymes:
             raise KeyError(f'Undefined or unsupported enzyme type: {enzyme}!')
 
+        self.proteolytic_regex = None
+        self._site_terminal = None
+
         self._cleavage_site = enzymes[self.enzyme]['Sites']
         self._removenaa()
         self._exceptions = enzymes[self.enzyme]['Except']
@@ -72,7 +75,7 @@ class Proteolyzer():
             if self._exceptions[ii]:
                 rulej = r'(?<![%s])' % self._exceptions[ii] + rulej \
                     if self._terminal[ii] == 'N' else\
-                    rulej+r'(?![%s])' % self._exceptions[ii]
+                    rulej + r'(?![%s])' % self._exceptions[ii]
             enzrules.append(rulej)
             # get the combine direction
             for rk in sk:
@@ -80,7 +83,7 @@ class Proteolyzer():
         self._cleavage_site = tuple(csx)
         self._exceptions = tuple(excepts)
         self._terminal = tuple(termins)
-        self.proteolytic_regex = re.compile('|'.join(enzrules))
+        self.proteolytic_regex = re.compile("|".join(enzrules))
         self._site_terminal = siteterminal
 
     def _split_sequence(self, sequence):
@@ -107,7 +110,12 @@ class Proteolyzer():
             An integer number of missed cleavages.
 
         """
-        return len(self._split_sequence(sequence))
+        # Subtract one for the main sequence itself and another one for the
+        # cleavage residue at the terminus
+        missed = len(re.findall(self.proteolytic_regex, sequence))
+        if any(sequence[-1] in cs for cs in self._cleavage_site):
+            missed -= 1
+        return missed
 
     def cleave(self, sequence, numbermissed=1, lenrange=(7, 60)):
         """
