@@ -7,6 +7,7 @@ spectra.
 import argparse
 from bisect import bisect_left
 import collections
+import copy
 import csv
 import functools
 import itertools
@@ -68,72 +69,6 @@ def get_decoys(decoy_db: str, residue: str) -> List:
             r['Sequence'] for r in rdr
             if (residue is None or residue in r['Sequence']) and
             len(r['Sequence']) >= 7 and RESIDUES.issuperset(r['Sequence'])})
-
-
-# TODO: config-based fixed modifications
-def gen_fixed_mods(seq: str) -> List[modifications.ModSite]:
-    """
-    Generates the fixed modifications for the sequence.
-
-    Args:
-        seq (str): The peptide sequence.
-
-    Returns:
-        list of fixed ModSites.
-
-    """
-    mods = [modifications.ModSite(FIXED_MASSES["tag"], "nterm", "iTRAQ8plex")]
-    for ii, res in enumerate(seq):
-        # Resolve Lys tag modifications
-        if res == 'K':
-            mods.append(
-                modifications.ModSite(FIXED_MASSES["tag"], ii + 1, None))
-        # Resolve Cys carbamidomethylation modifications
-        elif res == "C":
-            mods.append(modifications.ModSite(FIXED_MASSES["cys_c"],
-                                              ii + 1, None))
-
-    return mods
-
-
-def modify_decoys(seqs, res_idxs, mod_name, mod_mass):
-    """
-    Applies the target modification to the decoy peptide sequences.
-
-    Args:
-        seqs (list): The decoy peptide sequences.
-        res_idxs (list of lists): A list of the indices of the residue
-                                  targeted by the modification in the peptide.
-        mod_name (str): The name of the modification to apply.
-        mod_mass (float): The mass associated with the modification.
-
-    Returns:
-        tuple: (The indices of the decoy peptides,
-                The modifications applied to the decoy peptide,
-                The masses of the decoy peptides)
-
-    """
-    decoy_idxs, decoy_mods, decoy_seq_masses = [], [], []
-    for ii, seq in enumerate(seqs):
-        # Calculate the mass of the decoy sequence and construct the
-        # modifications
-        mods = gen_fixed_mods(seq)
-        mass = (FIXED_MASSES["H2O"] +
-                sum(AA_MASSES[res].mono for res in seq) +
-                sum(ms.mass for ms in mods))
-
-        target_idxs = res_idxs[ii]
-        # Generate target modification combinations, up to a maximum of 3
-        # instances of the modification
-        for jj in range(min(len(target_idxs), 3)):
-            for idxs in itertools.combinations(target_idxs, jj + 1):
-                decoy_idxs.append(ii)
-                decoy_seq_masses.append(mass + mod_mass * len(idxs))
-                decoy_mods.append(
-                    mods + [modifications.ModSite(mod_mass, kk + 1, mod_name)
-                            for kk in idxs])
-
-    return decoy_idxs, decoy_mods, decoy_seq_masses
 
 
 def match_decoys(peptide_mz, decoys, slices, var_ptms, tol_factor=0.01):
@@ -274,8 +209,8 @@ def decoy_features(decoy_peptide, spec, target_mod, proteolyzer):
     for multiprocessing.
 
     """
-    return PSM(None, None, decoy_peptide, spectrum=spec).extract_features(
-        target_mod, proteolyzer)
+    return PSM(None, None, decoy_peptide, spectrum=copy.deepcopy(spec))\
+        .extract_features(target_mod, proteolyzer)
 
 
 def test_matches_equal(matches, psm, peptide_str) -> bool:
@@ -340,6 +275,7 @@ class Validate():
         # Cache these config options since they are used regularly
         self.target_mod = self.config.target_mod
         self.target_residues = self.config.target_residues
+        self.fixed_residues = self.config.fixed_residues
 
         # To be set later
         self.mod_mass = None
@@ -369,7 +305,7 @@ class Validate():
                                                    self.target_mod)
 
         # Read the tandem mass spectra from the raw input files
-        # After this call, all PSMs should have their associated mass spectrum
+        # After this call, all PSMs will have their associated mass spectrum
         self.psms = self._process_mass_spectra()
 
         # Calculate the PSM quality features for each PSM
@@ -383,10 +319,8 @@ class Validate():
               for res in self.target_residues]))
 
         # Write the results to a temporary file
-        # TODO: incorporate this properly into the process -
-        # if the temporary file exists, use it instead of reprocessing the
-        # data
-        write_results("test.txt", self.psms)
+        # TODO: remove this
+        #write_results("test.txt", self.psms)
 
         # Convert the PSMs to a pandas DataFrame, including a "target" column
         # to distinguish target and decoy peptides
@@ -450,6 +384,7 @@ class Validate():
             if not summary_files:
                 continue
 
+            # Apply database search FDR control to the results
             summaries = readers.read_peptide_summary(
                 summary_files[0],
                 condition=lambda r, cf=conf: float(r["Conf"]) >= cf)
@@ -555,9 +490,15 @@ class Validate():
 
         """
         # The residues bearing "fixed" modifications
-        fixed_aas = list(self.config.fixed_residues)  # list used to ensure copy
+        fixed_aas = list(self.fixed_residues.keys())
         if target_res is not None:
             fixed_aas.append(target_res)
+        # Remove termini
+        try:
+            fixed_aas.remove("nterm")
+            fixed_aas.remove("cterm")
+        except ValueError:
+            pass
 
         # Generate the decoy sequences, including the target_mod if
         # target_residue is provided
@@ -680,6 +621,8 @@ class Validate():
                             DecoyID(d_peptide.seq, d_peptide.charge,
                                     d_peptide.mods, max_match)
 
+            print("Finished processing")
+
         return psms
 
     def _generate_residue_decoys(self, target_res, fixed_aas) -> DecoyPeptides:
@@ -713,15 +656,14 @@ class Validate():
                         for seq in seqs]
 
             # Apply the target modification to the decoy peptides
-            idxs, mods, masses = modify_decoys(seqs, res_idxs, self.target_mod,
-                                               self.mod_mass)
+            idxs, mods, masses = self.modify_decoys(seqs, res_idxs)
         else:
             # For unmodified analogues, apply the fixed modifications and
             # calculate the peptide masses
             idxs = list(range(len(seqs)))
             mods, masses = [], []
             for seq in seqs:
-                _mods = gen_fixed_mods(seq)
+                _mods = self.gen_fixed_mods(seq)
                 mods.append(_mods)
                 masses.append(FIXED_MASSES["H2O"] +
                               sum(AA_MASSES[res].mono for res in seq) +
@@ -732,6 +674,69 @@ class Validate():
         masses, idxs, mods = utilities.sort_lists(0, masses, idxs, mods)
 
         return DecoyPeptides(seqs, var_idxs, idxs, mods, np.array(masses))
+
+    def modify_decoys(self, seqs, res_idxs):
+        """
+        Applies the target modification to the decoy peptide sequences.
+
+        Args:
+            seqs (list): The decoy peptide sequences.
+            res_idxs (list of lists): A list of the indices of the residue
+                                      targeted by the modification in the peptide.
+
+        Returns:
+            tuple: (The indices of the decoy peptides,
+                    The modifications applied to the decoy peptide,
+                    The masses of the decoy peptides)
+
+        """
+        decoy_idxs, decoy_mods, decoy_seq_masses = [], [], []
+        for ii, seq in enumerate(seqs):
+            # Calculate the mass of the decoy sequence and construct the
+            # modifications
+            mods = self.gen_fixed_mods(seq)
+            mass = (FIXED_MASSES["H2O"] +
+                    sum(AA_MASSES[res].mono for res in seq) +
+                    sum(ms.mass for ms in mods))
+
+            target_idxs = res_idxs[ii]
+            # Generate target modification combinations, up to a maximum of 3
+            # instances of the modification
+            for jj in range(min(len(target_idxs), 3)):
+                for idxs in itertools.combinations(target_idxs, jj + 1):
+                    decoy_idxs.append(ii)
+                    decoy_seq_masses.append(mass + self.mod_mass * len(idxs))
+                    decoy_mods.append(
+                        mods + [modifications.ModSite(self.mod_mass, kk + 1,
+                                                      self.target_mod)
+                                for kk in idxs])
+
+        return decoy_idxs, decoy_mods, decoy_seq_masses
+
+    def gen_fixed_mods(self, seq: str) -> List[modifications.ModSite]:
+        """
+        Generates the fixed modifications for the sequence, based on the
+        input configuration.
+
+        Args:
+            seq (str): The peptide sequence.
+
+        Returns:
+            list of fixed ModSites.
+
+        """
+        nterm_mod = self.fixed_residues.get("nterm", None)
+        mods = ([modifications.ModSite(self.unimod.get_mass(nterm_mod),
+                                       "nterm", nterm_mod)]
+                if nterm_mod is not None else [])
+        for ii, res in enumerate(seq):
+            if res in self.fixed_residues:
+                mod_name = self.fixed_residues[res]
+                mods.append(
+                    modifications.ModSite(self.unimod.get_mass(mod_name),
+                                          ii + 1, mod_name))
+
+        return mods
 
 
 def parse_args():
