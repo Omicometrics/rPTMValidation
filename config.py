@@ -9,7 +9,6 @@ import os
 from typing import Any, Dict, List
 
 
-# TODO: check required options at initialization time
 class Config():
     """
     This class represents the configuration options for rPTMDetermine. Its
@@ -23,6 +22,8 @@ class Config():
 
         """
         self.json_config = json_config
+
+        self._check_required()
 
     @property
     def data_sets(self) -> Dict[str, Dict[str, Any]]:
@@ -114,3 +115,16 @@ class Config():
         if not os.path.exists(path):
             raise FileNotFoundError(f"UniProt PTM file not found at {path}")
         return path
+
+    def _check_required(self):
+        """
+        Checks that the required options have been set in the configuration
+        file.
+
+        """
+        for attr in ["data_sets", "fixed_residues", "target_db_path",
+                     "target_mod", "target_residues"]:
+            try:
+                getattr(self, attr)
+            except KeyError:
+                print(f"Missing required config option: {attr}")
