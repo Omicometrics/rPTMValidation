@@ -153,13 +153,13 @@ class PTMDB():
             self._data[key][entry[key]] = pos
         self._data[PTMDB._desc_key][entry[key].replace(' ', '').lower()] = pos
 
-    def get_mass(self, name, mass_type):
+    def get_mass(self, name, mass_type=MassType.mono):
         """
         Retrieves the mass of the specified modification.
 
         Args:
             name (str): The name of the modification.
-            mass_type (MassType): The type of mass to retrieve.
+            mass_type (MassType, optional): The type of mass to retrieve.
 
         Returns:
             The mass as a float or None.
@@ -235,23 +235,21 @@ def read_mgf_file(spec_file):
     spectra = {}
     spec_id = None
     with open(spec_file) as fh:
-        peaks = []
-        mz = None
-        charge = 1
+        peaks, mz, charge = [], None, None
         for line in fh:
             if line.startswith("END IONS"):
                 if spec_id is None:
                     raise ParserException(
                         f"No spectrum ID found in MGF block in {spec_file}")
                 spectra[spec_id] = mass_spectrum.Spectrum(peaks, float(mz),
-                                                          int(charge))
-                peaks, spec_id, mz, charge = [], None, None, 1
+                                                          charge)
+                peaks, spec_id, mz, charge = [], None, None, None
             elif line.startswith('TITLE'):
                 spec_id = MGF_TITLE_REGEX.match(line).group(1)
             elif line.startswith("PEPMASS"):
                 mz = line.rstrip().split("=")[1]
             elif line.startswith("CHARGE"):
-                charge = line.rstrip().rstrip("+").split("=")[1]
+                charge = int(line.rstrip().rstrip("+").split("=")[1])
             elif '=' not in line and not line.startswith('BEGIN IONS'):
                 peaks.append([float(n) for n in line.split()[:2]])
 
