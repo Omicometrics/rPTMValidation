@@ -27,7 +27,7 @@ import lda
 import modifications
 import peptides
 import proteolysis
-from psm import DecoyID, PSM, psms2df
+from psm import DecoyID, PSM, psms2df, UnmodPSM
 import readers
 import similarity
 import utilities
@@ -88,7 +88,8 @@ def match_decoys(peptide_mz, decoys, slices, var_ptms, tol_factor=0.01):
         # falls
         start = slices.idxs[bisect_left(slices.bounds, pep_mass - 1)]
         end = slices.idxs[
-            min(bisect_left(slices.bounds, pep_mass + 1), len(slices.idxs) - 1)]
+            min(bisect_left(slices.bounds, pep_mass + 1),
+                len(slices.idxs) - 1)]
 
         # Find the decoy sequences which fall within the tolerance
         seq_idxs, = np.asarray(
@@ -177,7 +178,8 @@ def write_results(output_file, psms):
         writer.writerow(["Rawset", "SpectrumID", "Sequence", "Modifications",
                          "Charge", *[f"Feature_{f}" for f in feature_names],
                          "DecoySequence", "DecoyModifications", "DecoyCharge",
-                         *[f"DecoyFeature_{f}" for f in feature_names]])
+                         *[f"DecoyFeature_{f}" for f in feature_names],
+                         "Similarity"])
 
         # Write the PSM results
         for psm in psms:
@@ -188,9 +190,9 @@ def write_results(output_file, psms):
             dmod_str = ",".join("{:6f}|{}|{}".format(*ms)
                                 for ms in psm.decoy_id.mods)
 
-            #sim_str = ("none" if psm.similarity_scores is None
-            #           else ";".join("{}#{}:{:.6f}".format(sim)
-            #                         for sim in psm.similarity_scores))
+            sim_str = ("none" if not psm.similarity_scores
+                       else ";".join("{}#{}:{:.6f}".format(*sim)
+                                     for sim in psm.similarity_scores))
 
             writer.writerow([psm.data_id, psm.spec_id, psm.seq, mod_str,
                              psm.charge,
@@ -199,7 +201,7 @@ def write_results(output_file, psms):
                              psm.decoy_id.seq,
                              dmod_str, psm.decoy_id.charge,
                              *[f"{psm.decoy_id.features[f]:.8f}"
-                               for f in feature_names]])
+                               for f in feature_names], sim_str])
 
 
 def decoy_features(decoy_peptide, spec, target_mod, proteolyzer):
@@ -244,6 +246,25 @@ def test_matches_equal(matches, psm, peptide_str) -> bool:
     return False
 
 
+def filter_psms(psms: List[PSM], lda_results) -> List[PSM]:
+    """
+    Filters the PSMs to only those target PSMs with a probability of being
+    correct greater than 0.99.
+
+    Args:
+        psms (list of PSMs): The PSM list to filter.
+        lda_results (pandas.DataFrame): The LDA validation results.
+
+    Returns:
+        Filtered PSM list.
+
+    """
+    ids = [f"{row.data_id}_{row.spec_id}"
+           for _, row in lda_results[(lda_results.target) &
+                                     (lda_results.prob > 0.99)].iterrows()]
+    return [p for p in psms if p.uid in ids]
+
+
 class Validate():
     """
     The main rPTMDetermine class. The validate method of this class
@@ -286,7 +307,6 @@ class Validate():
         # Used for multiprocessing throughout the class methods
         self.pool = mp.Pool()
 
-
     def validate(self):
         """
         Validates the identifications in the input data files.
@@ -318,20 +338,17 @@ class Validate():
             *[self._generate_decoy_matches(res, self.psms)
               for res in self.target_residues]))
 
-        # Write the results to a temporary file
-        # TODO: remove this
-        #write_results("test.txt", self.psms)
-
         # Convert the PSMs to a pandas DataFrame, including a "target" column
         # to distinguish target and decoy peptides
-        df = psms2df(self.psms)
+        mod_df = psms2df(self.psms)
 
         # Validate the PSMs using LDA
-        results = lda.lda_validate(df, list(self.psms[0].features.keys()),
-                                   self.config.fisher_threshold, cv=10,
-                                   n_jobs=1)
+        _, results = lda.lda_validate(mod_df,
+                                      list(self.psms[0].features.keys()),
+                                      self.config.fisher_threshold, cv=10)
 
-        # TODO: only keep the psms whose scores exceed the threshold
+        # Retain the psms whose probabilities exceed 0.99
+        self.psms = filter_psms(self.psms, results)
 
         # --- Unmodified analogues --- #
         # Get the unmodified peptide analogues
@@ -346,15 +363,16 @@ class Validate():
 
         # Validate the unmodified PSMs using LDA
         unmod_df = psms2df(self.unmod_psms)
-        unmod_results = lda.lda_validate(
-            unmod_df, list(self.unmod_psms[0].features.keys()),
-            self.config.fisher_threshold, cv=10, n_jobs=1)
 
-        # TODO: filter unmod PSMs by their validation scores
+        _, unmod_results = lda.lda_validate(
+            unmod_df, list(self.unmod_psms[0].features.keys()),
+            self.config.fisher_threshold, cv=10)
+
+        # Filter the unmodified analogues according to their probabilities
+        self.unmod_psms = filter_psms(self.unmod_psms, unmod_results)
 
         # --- Similarity Scores --- #
         print("Calculating similarity scores")
-        # TODO: use the validated unmodified analogues
         # Calculate the highest similarity score for each target peptide
         self.psms = similarity.calculate_similarity_scores(self.psms,
                                                            self.unmod_psms)
@@ -369,7 +387,7 @@ class Validate():
 
         """
         # Target modification identifications
-        psms = []
+        psms = set()
         # All ProteinPilot results
         pp_res = collections.defaultdict(lambda: collections.defaultdict(list))
 
@@ -399,7 +417,7 @@ class Validate():
 
                 if any(f"{self.target_mod}({tr})" in summary.mods
                        for tr in self.target_residues):
-                    psms.append(
+                    psms.add(
                         PSM(set_id, summary.spec,
                             Peptide(summary.seq, summary.theor_z,
                                     parsed_mods)))
@@ -408,10 +426,7 @@ class Validate():
                     SpecMatch(summary.seq, parsed_mods, summary.theor_z,
                               summary.conf))
 
-        # Deduplicate PSMs
-        psms = list(set(psms))
-
-        return psms, pp_res
+        return list(psms), pp_res
 
     def _process_mass_spectra(self):
         """
@@ -444,7 +459,7 @@ class Validate():
         Returns:
 
         """
-        mod_unmod_psms = collections.defaultdict(list)
+        unmod_psms = set()
 
         for data_id, data in self.pp_res.items():
             unmods = collections.defaultdict(list)
@@ -468,16 +483,15 @@ class Validate():
             print(f"Processing {len(unmods)} spectra")
 
             for spec_id, _psms in unmods.items():
-                #print(f"Processing {spec_id} with {_psms}")
                 spec = spectra[spec_id].centroid().remove_itraq()
 
                 for psm, mods in _psms:
-                    mod_unmod_psms[psm].append(
-                        PSM(data_id, spec_id,
-                            Peptide(psm.seq, psm.charge, mods),
-                            spectrum=spec))
+                    unmod_psms.add(
+                        UnmodPSM(psm.uid, data_id, spec_id,
+                                 Peptide(psm.seq, psm.charge, mods),
+                                 spectrum=spec))
 
-        return mod_unmod_psms
+        return list(unmod_psms)
 
     def _generate_decoy_matches(self, target_res, psms):
         """
@@ -621,8 +635,6 @@ class Validate():
                             DecoyID(d_peptide.seq, d_peptide.charge,
                                     d_peptide.mods, max_match)
 
-            print("Finished processing")
-
         return psms
 
     def _generate_residue_decoys(self, target_res, fixed_aas) -> DecoyPeptides:
@@ -652,7 +664,8 @@ class Validate():
 
         if target_res is not None:
             # Find the sites of the target residue in the decoy peptides
-            res_idxs = [[idx for idx, res in enumerate(seq) if res == target_res]
+            res_idxs = [[idx for idx, res in enumerate(seq)
+                         if res == target_res]
                         for seq in seqs]
 
             # Apply the target modification to the decoy peptides
@@ -682,7 +695,8 @@ class Validate():
         Args:
             seqs (list): The decoy peptide sequences.
             res_idxs (list of lists): A list of the indices of the residue
-                                      targeted by the modification in the peptide.
+                                      targeted by the modification in the
+                                      peptide.
 
         Returns:
             tuple: (The indices of the decoy peptides,

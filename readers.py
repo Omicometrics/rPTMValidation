@@ -235,21 +235,18 @@ def read_mgf_file(spec_file):
     spectra = {}
     spec_id = None
     with open(spec_file) as fh:
-        peaks, mz, charge = [], None, None
+        peaks, mz = [], None
         for line in fh:
             if line.startswith("END IONS"):
                 if spec_id is None:
                     raise ParserException(
                         f"No spectrum ID found in MGF block in {spec_file}")
-                spectra[spec_id] = mass_spectrum.Spectrum(peaks, float(mz),
-                                                          charge)
-                peaks, spec_id, mz, charge = [], None, None, None
+                spectra[spec_id] = mass_spectrum.Spectrum(peaks, float(mz))
+                peaks, spec_id, mz = [], None, None
             elif line.startswith('TITLE'):
                 spec_id = MGF_TITLE_REGEX.match(line).group(1)
             elif line.startswith("PEPMASS"):
                 mz = line.rstrip().split("=")[1]
-            elif line.startswith("CHARGE"):
-                charge = int(line.rstrip().rstrip("+").split("=")[1])
             elif '=' not in line and not line.startswith('BEGIN IONS'):
                 peaks.append([float(n) for n in line.split()[:2]])
 

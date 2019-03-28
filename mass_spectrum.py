@@ -6,7 +6,7 @@ This module provides functions for processing mass spectra.
 import bisect
 import collections
 import operator
-from typing import List
+from typing import List, Tuple
 
 import numpy as np
 
@@ -24,30 +24,21 @@ class Spectrum():
     exploring the mass spectrum.
 
     """
-    def __init__(self, peak_list, mz, charge):
+    def __init__(self, peak_list, prec_mz):
         """
         Initializes the class.
 
         Args:
             peak_list (list): A list of lists containing m/z, intensity pairs.
-            mz (float): The mass/charge ratio of the spectrum precursor.
+            prec_mz (float): The mass/charge ratio of the spectrum precursor.
             charge (int): The charge state of the spectrum precursor.
 
         """
         self._peaks = np.array(peak_list)
-        self._mz = mz
-        self.charge = charge
+        self.prec_mz = prec_mz
 
         # Sort the spectrum by the m/z ratios
         self._mz_sort()
-
-    @property
-    def mass(self):
-        """
-        Return the precursor mass.
-
-        """
-        return self._mz * self.charge - self.charge * FIXED_MASSES["H"]
 
     def __iter__(self):
         """
@@ -131,7 +122,8 @@ class Spectrum():
             Current Spectrum object filtered by the given indices.
 
         """
-        return self._peaks[peaks, col if col is not None else ":"]
+        return (self._peaks[peaks, :] if col is None
+                else self._peaks[peaks, col])
 
     def normalize(self):
         """
@@ -246,7 +238,7 @@ class Spectrum():
 
         return anns
 
-    def denoise(self, assigned_peaks, max_peaks_per_window=8) -> List[int]:
+    def denoise(self, assigned_peaks, max_peaks_per_window=8):
         """
         Denoises the mass spectrum using the annotated ions.
 
@@ -257,7 +249,7 @@ class Spectrum():
                                                   to include per 100 Da window.
 
         Returns:
-            The denoised peak indexes as a list.
+            Tuple: The denoised peak indexes as a list, The denoised spectrum
 
         """
         npeaks = len(self._peaks)
@@ -299,4 +291,4 @@ class Spectrum():
 
             start_idx = end_idx
 
-        return peaks
+        return peaks, Spectrum(self._peaks[peaks, :], self.prec_mz)

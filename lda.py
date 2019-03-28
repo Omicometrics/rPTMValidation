@@ -56,6 +56,7 @@ class FisherScoreSelector():
         """
         self.threshold = threshold
 
+        self.scores = {}
         self._features = []
 
     def transform(self, X):
@@ -79,24 +80,19 @@ class FisherScoreSelector():
                     (vals1.std() ** 2 + vals2.std() ** 2)
             if score > self.threshold:
                 self._features.append(col)
+            self.scores[col] = score
+        print(self.scores)
         return self
+        
+    def get_scores(self):
+        """
+        Returns the Fisher scores calculated during feature selection.
+        
+        Returns:
+            dictionary of feature to score.
 
-
-'''def ldaperm(Xf, Xrandf, sampleix):
-    """
-    Linear discriminant analysis
-    """
-    medianxv = np.median(np.array(Xf)[sampleix], axis=0)
-    medianxv[medianxv == 0] = 1.
-    Xm = Xf / medianxv
-    Xn = Xrandf / medianxv
-    y = np.concatenate((np.ones(sum(sampleix)), np.zeros(sum(sampleix))))
-    X = np.concatenate((Xm[sampleix], Xn[sampleix]))
-    err, ys, probs, _ = lda_validate(X, y, 10)
-    model = LDA().fit(X, y)
-    print(err, sum(probs[1][:sum(sampleix)] >= 0.99),
-          sum(probs[1][sum(sampleix):] >= 0.99))
-    return ys, probs[1], model, medianxv'''
+        """
+        return self.scores
 
 
 def lda_validate(df: pd.DataFrame, features: List[str],
@@ -114,8 +110,14 @@ def lda_validate(df: pd.DataFrame, features: List[str],
     Returns:
 
     """
+    for feature in ["PepLen", "ErrPepMass", "Charge", "PepMass"]:
+        features.remove(feature)
+    
     X = df[features]
     y = df["target"]
+    
+    selector = FisherScoreSelector(fisher_threshold).fit(X, y)
+    X = selector.transform(X)
 
     pipeline = CustomPipeline(
         [
@@ -133,6 +135,12 @@ def lda_validate(df: pd.DataFrame, features: List[str],
     # combined output for LDA.decision_function and LDA.predict.
     results = cross_val_predict(pipeline, X, y, method="decide_predict",
                                 **kwargs)
+                                
+    # Look at the features which were selected
+    # TODO: output averaged Fisher scores
+    feature_scores = pd.DataFrame(pipeline.named_steps["fisher_selection"].get_scores())
+    print(feature_scores)
+    #print(pipeline.named_steps["fisher_selection"].scores)
 
     # Retrieve the decision_function scores and the y label predictions
     scores, preds = results[:, 0], results[:, 1]
@@ -147,12 +155,10 @@ def lda_validate(df: pd.DataFrame, features: List[str],
         probs[int(_class)] = \
             norm.pdf((scores - stats[ii][0]) / stats[ii][1]) /\
             sum(norm.pdf((scores - mean) / std) for mean, std in stats)
-
-    #bprob = probs[1] / sum(itertools.chain(*probs.values()))
     
     df["score"] = scores
     df["prob"] = probs[1]
 
-    # Return the fraction of incorrect predictions
-    #return sum(y != preds) / len(y), scores, probs#, bprob
+    # Return the fraction of incorrect predictions and the dataframe
+    # with results
     return sum(y != preds) / len(y), df

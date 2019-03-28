@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
+from constants import FIXED_MASSES
 import mass_spectrum
 import modifications
 import proteolysis
@@ -171,12 +172,7 @@ class PSM():
         """
         self._check_spectrum_initialized()
 
-        # pep_mass = peptides.calculate_peptide_mass(self.seq, self.mods)
-
         # Get the theoretical ions for the peptide
-        # ions = peptides.get_all_ions(pep_mass, self.seq,
-        #                             self.mods, self.charge)
-
         ions = self.peptide.fragment(
             ion_types={
                 IonType.precursor: {"neutral_losses": ["H2O", "NH3"],
@@ -190,11 +186,15 @@ class PSM():
         # The spectrum annotations
         anns = self.spectrum.annotate(ions)
         ann_peak_nums = {an.peak_num for an in anns.values()}
-        denoised_peaks = self.spectrum.denoise(
+        denoised_peaks, denoised_spec = self.spectrum.denoise(
             [idx in ann_peak_nums for idx in range(len(self.spectrum))])
+            
+        denoised_peaks = sorted(denoised_peaks)
+            
+        ion_anns = {l: (bisect.bisect_left(denoised_peaks, a.peak_num), a.ion_pos)
+                    for l, a in anns.items() if a.peak_num in denoised_peaks}
 
-        return {l: (bisect.bisect_left(denoised_peaks, a.peak_num), a.ion_pos)
-                for l, a in anns.items() if a.peak_num in denoised_peaks}
+        return ion_anns, denoised_spec
 
     def extract_features(self, target_mod: Optional[str],
                          proteolyzer: proteolysis.Proteolyzer) \
@@ -218,9 +218,10 @@ class PSM():
         """
         self._check_spectrum_initialized()
 
-        ions = self.denoise_spectrum()
+        ions, denoised_spectrum = self.denoise_spectrum()
         self.spectrum.normalize()
-        self._calculate_features(ions, target_mod, 0.2)
+        denoised_spectrum.normalize()
+        self._calculate_features(ions, denoised_spectrum, target_mod, 0.2)
 
         # Use the proteolyzer to determine the number of missed cleavages
         self.features['n_missed_cleavages'] =\
@@ -228,14 +229,15 @@ class PSM():
 
         return self.features
 
-    def _calculate_features(self, ions: dict, target_mod: str,
-                            tol: float) -> Dict[str, str]:
+    def _calculate_features(self, ions: dict, denoised_spectrum: mass_spectrum.Spectrum,
+                            target_mod: str, tol: float) -> Dict[str, str]:
         """
         Calculates potential machine learning features from the peptide
         spectrum match.
 
         Args:
             ions (dict): The theoretical ion peak annotations.
+            denoised_spectrum (Spectrum): The denoised mass spectrum.
             target_mod (str): The target modification type. If this, is None,
                               i.e. for unmodified analogues, then some
                               modification-based features will not be
@@ -248,13 +250,15 @@ class PSM():
         self.features["PepLen"] = pep_len
 
         self.features["PepMass"] = self.peptide.mass
-        self.features["ErrPepMass"] = abs(self.features["PepMass"] -
-                                          self.spectrum.mass)
-        self.features["Charge"] = self.spectrum.charge
+        self.features["Charge"] = self.charge
+        self.features["ErrPepMass"] = abs(
+            self.features["PepMass"] - denoised_spectrum.prec_mz * self.charge
+            + self.charge * FIXED_MASSES["H"])
 
         # Intensities from the spectrum
-        intensities = list(self.spectrum.intensity)
+        intensities = list(denoised_spectrum.intensity)
 
+        mod_ion_start = None
         if target_mod is not None:
             # The position from which b-/y-ions will contain the modified
             # residue
@@ -279,15 +283,15 @@ class PSM():
         ann_peaks = {v[0] for v in ions.values()}
 
         # The number of annotated peaks divided by the total number of peaks
-        self.features["FracIon"] = len(ann_peaks) / float(len(self.spectrum))
+        self.features["FracIon"] = len(ann_peaks) / float(len(denoised_spectrum))
         self.features["FracIonInt"] =\
             sum(intensities[idx] for idx in ann_peaks) / sum(intensities)
 
         # The intensity of the base peak
-        max_int = self.spectrum.max_intensity()
+        max_int = denoised_spectrum.max_intensity()
 
         # The peaks with intensity >= 20% of the base peak intensity
-        peaks_20 = {ii for ii, peak in enumerate(self.spectrum)
+        peaks_20 = {ii for ii, peak in enumerate(denoised_spectrum)
                     if peak[1] >= max_int * 0.2 and peak[0] >= 300}
 
         # The fraction of peaks with intensities greater than 20% of the base
@@ -306,20 +310,20 @@ class PSM():
         self.features["NumIony2L"] = self.features["NumIony"] / float(pep_len)
 
         # Ion score
-        self._calculate_ion_scores(n_anns, target_mod, tol)
+        self._calculate_ion_scores(denoised_spectrum, n_anns, target_mod, tol)
 
         return self.features
 
-    def _calculate_ion_scores(self, n_anns, target_mod, tol):
+    def _calculate_ion_scores(self, denoised_spectrum, n_anns, target_mod, tol):
         """
         Calculates the ion score features.
 
         """
-        mzs = self.spectrum.mz
+        mzs = denoised_spectrum.mz
         n_bins = float(round((max(mzs) - min(mzs)) / tol))
         prob, mod_prob = 0., 0.
         if n_bins > 0:
-            success_prob = float(len(self.spectrum)) / n_bins
+            success_prob = float(len(denoised_spectrum)) / n_bins
             prob = utilities.log_binom_prob(
                 n_anns["all"], 2 * (len(self.seq) - 1), success_prob)
 
@@ -429,9 +433,10 @@ def psms2df(psms: List[PSM]) -> pd.DataFrame:
     """
     rows = []
     for psm in psms:
-        trow = {**{"seq": psm.seq, "target": True}, **psm.features}
-        drow = {**{"seq": psm.decoy_id.seq, "target": False},
-                **psm.decoy_id.features}
+        trow = {**{"data_id": psm.data_id, "spec_id": psm.spec_id,
+                   "seq": psm.seq, "target": True}, **psm.features}
+        drow = {**{"data_id": "", "spec_id": "", "seq": psm.decoy_id.seq,
+                   "target": False}, **psm.decoy_id.features}
         rows.append(trow)
         rows.append(drow)
 
