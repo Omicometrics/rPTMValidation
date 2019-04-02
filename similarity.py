@@ -61,9 +61,8 @@ def calculate_similarity_scores(mod_psms: List[PSM],
         for psm in mod_psms:
             if unmod_psm.mod_psm_uid == psm.uid:
                 psm.similarity_scores.append(
-                    [(upsm.data_id, upsm.spec_id,
-                      calculate_spectral_similarity(psm, upsm))
-                     for upsm in unmod_psms])
+                    (unmod_psm.data_id, unmod_psm.spec_id,
+                     calculate_spectral_similarity(psm, unmod_psm)))
     return mod_psms
 
 
