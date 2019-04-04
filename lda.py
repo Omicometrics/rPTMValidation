@@ -4,7 +4,7 @@ A module to provide functions for the LDA (machine learning) validation
 of PSMS.
 
 """
-import itertools
+import copy
 from typing import List
 import warnings
 
@@ -17,6 +17,7 @@ from sklearn.model_selection import cross_val_predict
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from psm import PSM, psms2df
 
 # Silence this since it arises when converting ints to float in StandardScaler
 warnings.filterwarnings(action='ignore', category=DataConversionWarning)
@@ -81,45 +82,13 @@ class FisherScoreSelector():
             if score > self.threshold:
                 self._features.append(col)
             self.scores[col] = score
-        print(self.scores)
         return self
-        
-    def get_scores(self):
-        """
-        Returns the Fisher scores calculated during feature selection.
-        
-        Returns:
-            dictionary of feature to score.
-
-        """
-        return self.scores
 
 
-def lda_validate(df: pd.DataFrame, features: List[str],
-                 fisher_threshold: float, **kwargs):
+def _lda_pipeline(fisher_threshold: float):
     """
-    Trains and uses an LDA validation model using cross-validation.
-
-    Args:
-        df (pandas.DataFrame): The features and target labels for the PSMs.
-        features (list): The names of the feature columns.
-        fisher_threshold (float): The minimum required Fisher score for
-                                  feature selection.
-        **kwargs: Extra keyword arguments are passed to cross_val_predict.
-
-    Returns:
-
     """
-    for feature in ["PepLen", "ErrPepMass", "Charge", "PepMass"]:
-        features.remove(feature)
-    
-    X = df[features]
-    y = df["target"]
-    
-    selector = FisherScoreSelector(fisher_threshold).fit(X, y)
-    X = selector.transform(X)
-
-    pipeline = CustomPipeline(
+    return CustomPipeline(
         [
             # Fisher score selection of features is included in the piepline
             # since it should be performed independently on each cross
@@ -131,34 +100,172 @@ def lda_validate(df: pd.DataFrame, features: List[str],
             ("lda", LDA())
         ])
 
-    # Perform cross validation using the custom LDA class to generate the
-    # combined output for LDA.decision_function and LDA.predict.
-    results = cross_val_predict(pipeline, X, y, method="decide_predict",
-                                **kwargs)
-                                
-    # Look at the features which were selected
-    # TODO: output averaged Fisher scores
-    feature_scores = pd.DataFrame(pipeline.named_steps["fisher_selection"].get_scores())
-    print(feature_scores)
-    #print(pipeline.named_steps["fisher_selection"].scores)
+
+def lda_model(df: pd.DataFrame, features: List[str],
+              fisher_threshold: float):
+    """
+    Trains and returns an LDA validation model.
+
+    Args:
+        df (pandas.DataFrame): The features and target labels for the PSMs.
+        features (list): The names of the feature columns.
+        fisher_threshold (float): The minimum required Fisher score for
+                                  feature selection.
+
+    Returns:
+
+    """
+    # TODO
+    for feature in ["PepLen", "ErrPepMass", "Charge", "PepMass"]:
+        features.remove(feature)
+
+    pipeline = _lda_pipeline(fisher_threshold)
+
+    return pipeline.fit(df[features], df["target"])
+
+
+def calculate_probs(classes, preds, scores):
+    """
+    Calculates the normal distribution probabilities for the predictions.
+
+    Args:
+        classes (list): The possible categorization classes.
+        preds (list): The class predictions.
+        scores (list): The corresponding prediction scores.
+
+    Returns:
+        Dictionary mapping class to prediction probabilities.
+
+    """
+    probs = {}
+
+    # Calculate the mean and standard deviation for each class
+    stats = [(np.mean(scores[preds == cl]), np.std(scores[preds == cl]))
+             for cl in classes]
+
+    # Calculate probabilities based on the normal distribution
+    for ii, _class in enumerate(classes):
+        probs[int(_class)] = \
+            norm.pdf((scores - stats[ii][0]) / stats[ii][1]) /\
+            sum(norm.pdf((scores - mean) / std) for mean, std in stats)
+
+    return probs
+
+
+def lda_validate(df: pd.DataFrame, features: List[str],
+                 fisher_threshold: float, kfold=True, **kwargs):
+    """
+    Trains and uses an LDA validation model using cross-validation.
+
+    Args:
+        df (pandas.DataFrame): The features and target labels for the PSMs.
+        features (list): The names of the feature columns.
+        fisher_threshold (float): The minimum required Fisher score for
+                                  feature selection.
+        kfold (bool): If True, k-fold cross-validation is used.
+        **kwargs: Extra keyword arguments are passed to cross_val_predict.
+
+    Returns:
+
+    """
+    # TODO
+    for feature in ["PepLen", "ErrPepMass", "Charge", "PepMass"]:
+        features.remove(feature)
+
+    X = df[features]
+    y = df["target"]
+
+    pipeline = _lda_pipeline(fisher_threshold)
+
+    if kfold:
+        # Perform cross validation using the custom LDA class to generate the
+        # combined output for LDA.decision_function and LDA.predict.
+        results = cross_val_predict(pipeline, X, y, method="decide_predict",
+                                    **kwargs)
+    else:
+        # Train the model on the whole data set
+        results = pipeline.fit(X, y).decide_predict(X)
 
     # Retrieve the decision_function scores and the y label predictions
     scores, preds = results[:, 0], results[:, 1]
 
     # Compute calibrated probabilities
-    probs = {}
-    # Calculate the mean and standard deviation for each class
-    stats = [(np.mean(scores[preds == cl]), np.std(scores[preds == cl]))
-             for cl in y.unique()]
-    # Calculate probabilities based on the normal distribution
-    for ii, _class in enumerate(y.unique()):
-        probs[int(_class)] = \
-            norm.pdf((scores - stats[ii][0]) / stats[ii][1]) /\
-            sum(norm.pdf((scores - mean) / std) for mean, std in stats)
-    
+    probs = calculate_probs(y.unique(), preds, scores)
+
     df["score"] = scores
     df["prob"] = probs[1]
 
     # Return the fraction of incorrect predictions and the dataframe
     # with results
     return sum(y != preds) / len(y), df
+
+
+def merge_lda_results(psms: List[PSM], lda_results) -> List[PSM]:
+    """
+    Merges the LDA results (score and probability) to the PSM objects.
+
+    Args:
+        psms (list of PSMs): The PSM list to filter.
+        lda_results (pandas.DataFrame): The LDA validation results.
+
+    Returns:
+        PSMs with their lda_score and lda_prob attributes set.
+
+    """
+    lda_results["uid"] = lda_results.data_id + "_" + lda_results.spec_id + \
+        "_" + lda_results.seq
+    for psm in psms:
+        idx = lda_results.index[
+            (lda_results.target) & (lda_results.uid == psm.uid)].tolist()[0]
+        trow = lda_results.loc[idx]
+        drow = lda_results.loc[idx + 1]
+        psm.lda_score, psm.lda_prob = trow.score, trow.prob
+        psm.decoy_lda_score, psm.decoy_lda_prob = drow.score, drow.prob
+
+    return psms
+
+
+def apply_deamidation_correction(pipeline, psms, features, target_mod,
+                                 proteolyzer):
+    """
+    Removes the deamidation modification from applicable peptide
+    identifications and revalides using the trained LDA model. If the score
+    for the non-deamidated analogue is greater than that for the deamidated
+    peptide, the non-deamidated analogue is assigned as the peptide match for
+    that spectrum.
+
+    Args:
+        pipeline (sklearn.Pipeline): The trained LDA pipeline.
+        psms (list): The validated PSMs.
+        features (list): The names of the model features.
+        target_mod (str): The modification under validation.
+        proteolyzer (proteolysis.Proteolyzer)
+
+    Returns:
+        The input list of PSMs, with deamidated PSMs replaced by their
+        non-deamidated counterparts if their LDA scores are higher.
+
+        """
+    corrected = 0
+    for ii, psm in enumerate(psms):
+        if not any(ms.mod == "Deamidated" for ms in psm.mods):
+            continue
+        nondeam_psm = copy.deepcopy(psm)
+        nondeam_psm.peptide.mods = [ms for ms in nondeam_psm.mods
+                                    if ms.mod != "Deamidated"]
+        # Calculate new features
+        nondeam_psm.extract_features(target_mod, proteolyzer)
+        score = pipeline.decide_predict(
+            psms2df([nondeam_psm])[features])[0, 0]
+        if score > psm.lda_score:
+            corrected += 1
+
+            nondeam_psm.lda_score = score
+
+            # Reset the PSM validation attributes back to None
+            for attr in ["lda_prob", "decoy_lda_score", "decoy_lda_prob"]:
+                setattr(nondeam_psm, attr, None)
+
+            psms[ii] = nondeam_psm
+
+    return psms, corrected

@@ -12,6 +12,7 @@ import csv
 import functools
 import itertools
 import json
+import math
 import multiprocessing as mp
 import operator
 import os
@@ -30,6 +31,7 @@ import proteolysis
 from psm import DecoyID, PSM, psms2df, UnmodPSM
 import readers
 import similarity
+import spectra_readers
 import utilities
 
 sys.path.append("../pepfrag")
@@ -179,7 +181,7 @@ def write_results(output_file, psms):
                          "Charge", *[f"Feature_{f}" for f in feature_names],
                          "DecoySequence", "DecoyModifications", "DecoyCharge",
                          *[f"DecoyFeature_{f}" for f in feature_names],
-                         "Similarity"])
+                         "LDAScore", "Similarity"])
 
         # Write the PSM results
         for psm in psms:
@@ -190,9 +192,9 @@ def write_results(output_file, psms):
             dmod_str = ",".join("{:6f}|{}|{}".format(*ms)
                                 for ms in psm.decoy_id.mods)
 
-            sim_str = ("none" if not psm.similarity_scores
-                       else ";".join("{}#{}:{:.6f}".format(*sim)
-                                     for sim in psm.similarity_scores))
+            sim_score = (0. if not psm.similarity_scores
+                         else max(psm.similarity_scores,
+                                  key=operator.itemgetter(2))[2])
 
             writer.writerow([psm.data_id, psm.spec_id, psm.seq, mod_str,
                              psm.charge,
@@ -201,7 +203,9 @@ def write_results(output_file, psms):
                              psm.decoy_id.seq,
                              dmod_str, psm.decoy_id.charge,
                              *[f"{psm.decoy_id.features[f]:.8f}"
-                               for f in feature_names], sim_str])
+                               for f in feature_names],
+                             psm.lda_score,
+                             sim_score])
 
 
 def decoy_features(decoy_peptide, spec, target_mod, proteolyzer):
@@ -230,7 +234,7 @@ def test_matches_equal(matches, psm, peptide_str) -> bool:
 
     """
     for match in matches:
-        if match.seq != psm.seq and match.theor_z != psm.charge:
+        if match.seq != psm.seq or match.theor_z != psm.charge:
             continue
 
         mods = match.mods
@@ -246,23 +250,20 @@ def test_matches_equal(matches, psm, peptide_str) -> bool:
     return False
 
 
-def filter_psms(psms: List[PSM], lda_results) -> List[PSM]:
+def site_probability(score, all_scores):
     """
-    Filters the PSMs to only those target PSMs with a probability of being
-    correct greater than 0.99.
+    Computes the probability that the site combination with score is the
+    correct combination.
 
     Args:
-        psms (list of PSMs): The PSM list to filter.
-        lda_results (pandas.DataFrame): The LDA validation results.
+        score (float): The current combination LDA score.
+        all_scores (list): All of the combination LDA scores.
 
     Returns:
-        Filtered PSM list.
+        The site probability as a float.
 
-    """
-    ids = [f"{row.data_id}_{row.spec_id}"
-           for _, row in lda_results[(lda_results.target) &
-                                     (lda_results.prob > 0.99)].iterrows()]
-    return [p for p in psms if p.uid in ids]
+        """
+    return 1 / sum(math.exp(s) / math.exp(score) for s in all_scores)
 
 
 class Validate():
@@ -304,6 +305,10 @@ class Validate():
         self.unmod_psms = None
         self.pp_res = None
 
+        # The LDA validation model for scoring
+        self.model = None
+        self.mod_features = None
+
         # Used for multiprocessing throughout the class methods
         self.pool = mp.Pool()
 
@@ -343,12 +348,28 @@ class Validate():
         mod_df = psms2df(self.psms)
 
         # Validate the PSMs using LDA
-        _, results = lda.lda_validate(mod_df,
-                                      list(self.psms[0].features.keys()),
+        self.mod_features = list(self.psms[0].features.keys())
+        _, results = lda.lda_validate(mod_df, self.mod_features,
                                       self.config.fisher_threshold, cv=10)
 
+        # Merge the LDA results to the PSM objects
+        self.psms = lda.merge_lda_results(self.psms, results)
+
+        # Apply a deamidation removal: test whether the non-deamidated
+        # peptide has a higher score for the identification
+        self.model = lda.lda_model(mod_df, self.mod_features,
+                                   self.config.fisher_threshold)
+        if self.config.correct_deamidation:
+            self.psms, _ = lda.apply_deamidation_correction(
+                self.model, self.psms, self.mod_features, self.target_mod,
+                self.proteolyzer)
+
+        # Identify the PSMs whose peptides are benchmarks
+        if self.config.benchmark_file is not None:
+            self._identify_benchmarks()
+
         # Retain the psms whose probabilities exceed 0.99
-        self.psms = filter_psms(self.psms, results)
+        #self.psms = [p for p in self.psms if p.lda_prob > 0.99]
 
         # --- Unmodified analogues --- #
         # Get the unmodified peptide analogues
@@ -364,18 +385,81 @@ class Validate():
         # Validate the unmodified PSMs using LDA
         unmod_df = psms2df(self.unmod_psms)
 
-        _, unmod_results = lda.lda_validate(
-            unmod_df, list(self.unmod_psms[0].features.keys()),
-            self.config.fisher_threshold, cv=10)
+        unmod_features = list(self.unmod_psms[0].features.keys())
+        _, unmod_results = lda.lda_validate(unmod_df, unmod_features,
+                                            self.config.fisher_threshold,
+                                            cv=10)
+
+        self.unmod_psms = lda.merge_lda_results(self.unmod_psms,
+                                                unmod_results)
+
+        if self.config.correct_deamidation:
+            unmod_model = lda.lda_model(unmod_df, unmod_features,
+                                        self.config.fisher_threshold)
+            self.unmod_psms, _ = lda.apply_deamidation_correction(
+                unmod_model, self.unmod_psms, unmod_features, None,
+                self.proteolyzer)
 
         # Filter the unmodified analogues according to their probabilities
-        self.unmod_psms = filter_psms(self.unmod_psms, unmod_results)
+        #self.unmod_psms = [p for p in self.unmod_psms if p.lda_prob > 0.99]
 
         # --- Similarity Scores --- #
         print("Calculating similarity scores")
         # Calculate the highest similarity score for each target peptide
         self.psms = similarity.calculate_similarity_scores(self.psms,
                                                            self.unmod_psms)
+
+    def localize(self):
+        """
+        For peptide identifications with multiple possible modification sites,
+        localizes the modification site by computing site probabilities.
+
+        """
+        for ii, psm in enumerate(self.psms):
+            # Count instances of the free (non-modified) target residues in
+            # the peptide sequence
+            target_idxs = [ii for ii, res in enumerate(psm.seq)
+                           if res in self.target_residues]
+
+            # Count the number of instances of the modification
+            mod_count = sum(ms.mod == self.target_mod for ms in psm.mods)
+
+            if len(target_idxs) == mod_count:
+                # No alternative modification sites exist
+                continue
+
+            isoform_score_map = {}
+
+            for mod_comb in itertools.combinations(target_idxs, mod_count):
+                # Construct a new PSM with the given combination of modified
+                # sites
+                new_psm = copy.deepcopy(psm)
+
+                # Update the modification list to use the new target sites
+                new_psm.mods = [ms for ms in psm.mods
+                                if ms.mod != self.target_mod]
+                for idx in mod_comb:
+                    new_psm.mods.append(
+                        modifications.ModSite(
+                            self.mod_mass, idx + 1, self.target_mod))
+
+                # Compute the PSM features using the new modification site(s)
+                new_psm.extract_features(self.target_mod, self.proteolyzer)
+
+                # Get the target score for the new PSM
+                isoform_score_map[new_psm] = self.model.decide_predict(
+                    psms2df([new_psm])[self.mod_features])[0, 0]
+
+            all_scores = list(isoform_score_map.values())
+
+            localized_isoform = None
+            for isoform, score in isoform_score_map.items():
+                prob = site_probability(score, all_scores)
+                if prob >= 0.99:
+                    localized_isoform = isoform
+                    break
+
+            self.psms[ii] = localized_isoform
 
     def _get_identifications(self):
         """
@@ -443,7 +527,7 @@ class Validate():
             if not os.path.isfile(spec_file):
                 raise FileNotFoundError(f"Spectra file {spec_file} not found")
 
-            spectra = readers.read_spectra_file(spec_file)
+            spectra = spectra_readers.read_spectra_file(spec_file)
 
             for psm in self.psms:
                 if psm.data_id == set_id and psm.spec_id in spectra:
@@ -451,6 +535,19 @@ class Validate():
                     psm.spectrum = psm.spectrum.centroid().remove_itraq()
 
         return self.psms
+
+    def _identify_benchmarks(self):
+        """
+        Labels the PSMs which are in the benchmark set of peptides.
+
+        """
+        # Parse the benchmark sequences
+        with open(self.config.benchmark_file) as fh:
+            benchmarks = [l.rstrip() for l in fh]
+
+        for psm in self.psms:
+            psm.benchmark = (peptides.merge_seq_mods(psm.seq, psm.mods)
+                             in benchmarks)
 
     def _find_unmod_analogues(self):
         """
@@ -478,7 +575,7 @@ class Validate():
                 self.config.data_sets[data_id]["spectra_file"])
 
             print(f"Reading {spec_file}")
-            spectra = readers.read_spectra_file(spec_file)
+            spectra = spectra_readers.read_spectra_file(spec_file)
 
             print(f"Processing {len(unmods)} spectra")
 
@@ -778,7 +875,9 @@ def main():
     with open(args.config) as handle:
         conf = json.load(handle)
 
-    Validate(conf).validate()
+    validator = Validate(conf)
+    validator.validate()
+    validator.localize()
 
 
 if __name__ == '__main__':

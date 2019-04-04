@@ -6,7 +6,7 @@ rPTMDetermine.
 """
 
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 class Config():
@@ -115,6 +115,23 @@ class Config():
         if not os.path.exists(path):
             raise FileNotFoundError(f"UniProt PTM file not found at {path}")
         return path
+    
+    @property 
+    def correct_deamidation(self) -> bool:
+        """
+        Whether or not to apply the deamidation correction.
+
+        """
+        return self.json_config.get("correct_deamidation", False)
+        
+    @property
+    def benchmark_file(self) -> Optional[str]:
+        """
+        The file containing benchmark peptides for similarity scoring
+        criterion.
+
+        """
+        return self.json_config.get("benchmark_file", None)
 
     def _check_required(self):
         """

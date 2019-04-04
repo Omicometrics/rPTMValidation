@@ -57,12 +57,22 @@ class PSM():
 
         # The decoy peptide matched to the spectrum
         self.decoy_id = None
+        
+        # Whether the spectrum has been assigned a peptide considered to be
+        # a benchmark peptide
+        self.benchmark = False
 
         # The similarity scores to the (unmodified) spectra
         self.similarity_scores = []
 
         # The PSM features
         self.features = {}
+
+        # The results of LDA validation
+        self.lda_score = None
+        self.lda_prob = None
+        self.decoy_lda_score = None
+        self.decoy_lda_prob = None
 
     @property
     def seq(self) -> str:
@@ -79,6 +89,14 @@ class PSM():
 
         """
         return self.peptide.mods
+
+    @mods.setter
+    def mods(self, val):
+        """
+        Sets the peptide modifications list.
+
+        """
+        self.peptide.mods = val
 
     @property
     def charge(self) -> int:
@@ -113,7 +131,7 @@ class PSM():
         Returns the unique identifier for the PSM.
 
         """
-        return f"{self.data_id}_{self.spec_id}"
+        return f"{self.data_id}_{self.spec_id}_{self.seq}"
 
     def __str__(self) -> str:
         """
@@ -188,10 +206,11 @@ class PSM():
         ann_peak_nums = {an.peak_num for an in anns.values()}
         denoised_peaks, denoised_spec = self.spectrum.denoise(
             [idx in ann_peak_nums for idx in range(len(self.spectrum))])
-            
+
         denoised_peaks = sorted(denoised_peaks)
-            
-        ion_anns = {l: (bisect.bisect_left(denoised_peaks, a.peak_num), a.ion_pos)
+
+        ion_anns = {l: (bisect.bisect_left(denoised_peaks, a.peak_num),
+                        a.ion_pos)
                     for l, a in anns.items() if a.peak_num in denoised_peaks}
 
         return ion_anns, denoised_spec
@@ -229,7 +248,8 @@ class PSM():
 
         return self.features
 
-    def _calculate_features(self, ions: dict, denoised_spectrum: mass_spectrum.Spectrum,
+    def _calculate_features(self, ions: dict,
+                            denoised_spectrum: mass_spectrum.Spectrum,
                             target_mod: str, tol: float) -> Dict[str, str]:
         """
         Calculates potential machine learning features from the peptide
@@ -283,7 +303,8 @@ class PSM():
         ann_peaks = {v[0] for v in ions.values()}
 
         # The number of annotated peaks divided by the total number of peaks
-        self.features["FracIon"] = len(ann_peaks) / float(len(denoised_spectrum))
+        self.features["FracIon"] = len(ann_peaks) /\
+            float(len(denoised_spectrum))
         self.features["FracIonInt"] =\
             sum(intensities[idx] for idx in ann_peaks) / sum(intensities)
 
@@ -314,7 +335,8 @@ class PSM():
 
         return self.features
 
-    def _calculate_ion_scores(self, denoised_spectrum, n_anns, target_mod, tol):
+    def _calculate_ion_scores(self, denoised_spectrum, n_anns, target_mod,
+                              tol):
         """
         Calculates the ion score features.
 
@@ -416,6 +438,46 @@ class UnmodPSM(PSM):
         """
         self.mod_psm_uid = mod_psm_uid
         super().__init__(*args, **kwargs)
+
+    def __hash__(self):
+        """
+        Implements the hash function for the object.
+
+        """
+        return hash((self.mod_psm_uid, self.data_id, self.spec_id,
+                     self.peptide))
+
+    def __eq__(self, other):
+        """
+        Implements the equality test for the object.
+
+        """
+        return (self.mod_psm_uid, self.data_id, self.spec_id,
+                self.peptide) == \
+               (other.mod_psm_uid, other.data_id, other.spec_id,
+                other.peptide)
+
+
+def unique_unmod_psms(psms: List[UnmodPSM]) -> List[UnmodPSM]:
+    """
+    Generates a list of the unique UnmodPSMs, in terms of their underlying
+    PSM only. If the mod_psm_uid is to be included in the uniqueness
+    categorization, then set can be used directly.
+
+    Args:
+        psms (list): The unmodified PSMs.
+
+    Returns:
+        The list of unique unmodified PSMs.
+
+    """
+    uids, unique = set(), []
+    for psm in psms:
+        if psm.uid in uids:
+            continue
+        uids.add(psm.uid)
+        unique.append(psm)
+    return unique
 
 
 def psms2df(psms: List[PSM]) -> pd.DataFrame:

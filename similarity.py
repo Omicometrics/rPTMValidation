@@ -8,40 +8,9 @@ from typing import List, Tuple
 
 import numpy as np
 
-import peptides
 from psm import PSM, UnmodPSM
 from mass_spectrum import Spectrum
 
-
-def test_matches_equal(matches, psm, peptide_str) -> bool:
-    """
-    Evaluates whether any one of a SpecMatch is to the same peptide,
-    in terms of sequence and modifications, as the given PSM.
-
-    Args:
-        matches (list of SpecMatch): The matches to test.
-        psm (psm.PSM): The peptide against which to compare.
-        peptide_str (str): The peptide string including modifications.
-
-    Returns:
-        boolean: True if there is a match, False otherwise.
-
-    """
-    for match in matches:
-        if match.seq != psm.seq and match.theor_z != psm.charge:
-            continue
-
-        mods = match.mods
-
-        if "Deamidated" in mods:
-            # Remove deamidation from the mods string
-            mods = ";".join(mod for mod in mods.split(";")
-                            if not mod.startswith("Deamidated"))
-
-        if peptides.merge_seq_mods(match.seq, mods) == peptide_str:
-            return True
-
-    return False
 
 def calculate_similarity_scores(mod_psms: List[PSM],
                                 unmod_psms: List[UnmodPSM]) -> List[PSM]:
@@ -80,11 +49,13 @@ def calculate_spectral_similarity(psm1: PSM, psm2: PSM) -> float:
         float: The dot product similarity of the spectra.
 
     """
-    # Ensure that the spectra have been denoised
+    # Ensure that the spectra have been denoised and get the ion annotations
     ions1, spec1 = psm1.denoise_spectrum()
     ions2, spec2 = psm2.denoise_spectrum()
-
-    #spec1, spec2 = psm1.spectrum, psm2.spectrum
+    print(len(psm1.spectrum), len(spec1))
+    print(len(psm2.spectrum), len(spec2))
+    print(ions1)
+    print(ions2)
 
     # Get the peak indices of the peaks which match between the two spectra
     matched_idxs = match_spectra((spec1, ions1), (spec2, ions2))
@@ -129,14 +100,13 @@ def match_spectra(spectrum1: Tuple[Spectrum, dict],
         _matched_peak_indices(ions1, ions2, bym1 & bym2)
     matched_neut1, matched_neut2 = \
         _matched_peak_indices(ions1, ions2, neutrals1 & neutrals2)
+        
+    print(matched_by1)
 
     # Remove replicate indices
-    matched_by = _merged_matches(matched_by1, matched_by2, spec2)
-    idx_set1 = {ii for ii, _ in matched_by}
-    idx_set2 = {ii for _, ii in matched_by}
-
-    # Combine the common indices
-    matched_idxs = matched_by
+    matched_idxs = _merged_matches(matched_by1, matched_by2, spec2)
+    idx_set1 = {ii for ii, _ in matched_idxs}
+    idx_set2 = {ii for _, ii in matched_idxs}
 
     # Find the non b, y or precursor fragments
     try:
