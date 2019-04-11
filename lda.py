@@ -197,7 +197,7 @@ def lda_validate(df: pd.DataFrame, features: List[str],
 
     # Return the fraction of incorrect predictions and the dataframe
     # with results
-    return sum(y != preds) / len(y), df
+    return sum(y != preds) / len(y), df, pipeline
 
 
 def merge_lda_results(psms: List[PSM], lda_results) -> List[PSM]:
@@ -225,8 +225,7 @@ def merge_lda_results(psms: List[PSM], lda_results) -> List[PSM]:
     return psms
 
 
-def apply_deamidation_correction(pipeline, psms, features, target_mod,
-                                 proteolyzer):
+def apply_deamidation_correction(pipeline, psms, target_mod, proteolyzer):
     """
     Removes the deamidation modification from applicable peptide
     identifications and revalides using the trained LDA model. If the score
@@ -237,7 +236,6 @@ def apply_deamidation_correction(pipeline, psms, features, target_mod,
     Args:
         pipeline (sklearn.Pipeline): The trained LDA pipeline.
         psms (list): The validated PSMs.
-        features (list): The names of the model features.
         target_mod (str): The modification under validation.
         proteolyzer (proteolysis.Proteolyzer)
 
@@ -246,7 +244,6 @@ def apply_deamidation_correction(pipeline, psms, features, target_mod,
         non-deamidated counterparts if their LDA scores are higher.
 
         """
-    corrected = 0
     for ii, psm in enumerate(psms):
         if not any(ms.mod == "Deamidated" for ms in psm.mods):
             continue
@@ -256,9 +253,9 @@ def apply_deamidation_correction(pipeline, psms, features, target_mod,
         # Calculate new features
         nondeam_psm.extract_features(target_mod, proteolyzer)
         score = pipeline.decide_predict(
-            psms2df([nondeam_psm])[features])[0, 0]
+            psms2df([nondeam_psm]))[0, 0]
         if score > psm.lda_score:
-            corrected += 1
+            nondeam_psm.corrected = True
 
             nondeam_psm.lda_score = score
 
@@ -268,4 +265,4 @@ def apply_deamidation_correction(pipeline, psms, features, target_mod,
 
             psms[ii] = nondeam_psm
 
-    return psms, corrected
+    return psms
