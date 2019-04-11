@@ -52,10 +52,6 @@ def calculate_spectral_similarity(psm1: PSM, psm2: PSM) -> float:
     # Ensure that the spectra have been denoised and get the ion annotations
     ions1, spec1 = psm1.denoise_spectrum()
     ions2, spec2 = psm2.denoise_spectrum()
-    print(len(psm1.spectrum), len(spec1))
-    print(len(psm2.spectrum), len(spec2))
-    print(ions1)
-    print(ions2)
 
     # Get the peak indices of the peaks which match between the two spectra
     matched_idxs = match_spectra((spec1, ions1), (spec2, ions2))
@@ -100,8 +96,6 @@ def match_spectra(spectrum1: Tuple[Spectrum, dict],
         _matched_peak_indices(ions1, ions2, bym1 & bym2)
     matched_neut1, matched_neut2 = \
         _matched_peak_indices(ions1, ions2, neutrals1 & neutrals2)
-        
-    print(matched_by1)
 
     # Remove replicate indices
     matched_idxs = _merged_matches(matched_by1, matched_by2, spec2)
