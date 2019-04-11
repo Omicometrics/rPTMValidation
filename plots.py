@@ -60,12 +60,12 @@ def get_validation_threshold(val_results: List[Tuple[float, float]],
 
     """
     val_results = sorted(val_results, key=operator.itemgetter(0))
-    idx = bisect.bisect_left([r[1] for r in val_results], prob_threshold) + 1
+    idx = bisect.bisect_left([r[1] for r in val_results], prob_threshold)
     return val_results[idx][0]
 
 
 def plot_scores(psms: List[PSM], prob_threshold=0.99, label_prefix="",
-                save_path=None, **kwargs):
+                save_path=None):
     """
     Plots the score distributions of the target and decoy peptide
     identifications.
@@ -100,11 +100,11 @@ def plot_scores(psms: List[PSM], prob_threshold=0.99, label_prefix="",
 
     plt.xlabel("Spectrum No.", fontproperties=FONT)
     plt.ylabel("rPTMDetermine Score", fontproperties=FONT)
-    
+
     # Calculate the x-position for the score annotation
     ann_x_pos = ([(ii, ds) for ii, ds in enumerate(decoy_scores)
                   if ds > val_score][-1][0] + 0.05 * len(decoy_scores))
-    
+
     plt.annotate(f"$s_{{PD}}$={val_score:.2f}",
                  (ann_x_pos, val_score + 0.05 * max(target_scores)),
                  fontproperties=FONT)
@@ -117,12 +117,15 @@ def plot_scores(psms: List[PSM], prob_threshold=0.99, label_prefix="",
     ax.legend(prop=FONT, frameon=False, loc=1, handletextpad=0.01)
 
     if save_path is not None:
-        plt.savefig(save_path, **kwargs)
+        plt.savefig(save_path)
 
     plt.show()
 
+    return val_score
 
-def plot_score_similarity(psms: List[PSM], prob_threshold=0.99):
+
+def plot_score_similarity(psms: List[PSM], prob_threshold=0.99,
+                          save_path=None):
     """
     Plots the rPTMDetermine scores against the unmodified/modified spectrum
     similarity scores.
@@ -132,32 +135,77 @@ def plot_score_similarity(psms: List[PSM], prob_threshold=0.99):
 
     """
     bench_sims, bench_ldas, sims, ldas = [], [], [], []
-    for ii, psm in enumerate(psms):
-        sim = (max(s[2] for s in psm.similarity_scores)
-               if psm.similarity_scores else 0.)
+    for psm in psms:
         if psm.benchmark:
-            bench_sims.append(sim)
+            bench_sims.append(psm.max_similarity)
             bench_ldas.append(psm.lda_score)
         else:
-            sims.append(sim)
+            sims.append(psm.max_similarity)
             ldas.append(psm.lda_score)
-            
-    print(psms[46])
+
+    val_score = get_validation_threshold(split_target_decoy_scores(psms)[0],
+                                         prob_threshold)
+    sim_score = min(bench_sims)
+
+    plt.scatter(bench_sims, bench_ldas, marker="o", facecolors=TARGET_COLOR,
+                label="Benchmark Identifications")
 
     plt.scatter(sims, ldas, marker="^",
-                facecolors="grey", linewidths=1)
-                
-    plt.scatter(bench_sims, bench_ldas, marker="o", facecolors=TARGET_COLOR)
+                facecolors="grey", linewidths=1,
+                label="Other Identifications")
 
     plt.xlabel("Similarity Score", fontproperties=FONT)
     plt.ylabel("rPTMDetermine Score", fontproperties=FONT)
 
     ax = plt.gca()
-    ax.axhline(get_validation_threshold(split_target_decoy_scores(psms)[0],
-                                        prob_threshold),
-               color=THRESHOLD_COLOR, linestyle="--")
+    ax.axhline(val_score, color=THRESHOLD_COLOR, linestyle="--", linewidth=2)
 
-    ax.axvline(min(bench_sims), color=THRESHOLD_COLOR, linestyle="--")
-    ax.axvline(0.55, color="red", linestyle="--")
+    ax.axvline(sim_score, color=THRESHOLD_COLOR, linestyle="--",
+               linewidth=2)
+
+    ax.legend(prop=FONT, frameon=False, loc=0,
+              bbox_to_anchor=(0.14, 0.5, 0.5, 0.5), handletextpad=0.01)
+
+    max_lda = max(bench_ldas + ldas)
+    plt.annotate(f"$s_{{PD}}$={val_score:.2f}",
+                 (0.05, val_score + 0.05 * max_lda),
+                 fontproperties=FONT)
+
+    plt.annotate(f"$s_{{similarity}}$={sim_score:.2f}",
+                 (sim_score - 0.1, 1.1 * max_lda), fontproperties=FONT,
+                 annotation_clip=False)
+
+    if save_path is not None:
+        plt.savefig(save_path)
+
+    plt.show()
+
+
+def plot_site_probabilities(psms: List[PSM], threshold=0.99, save_path=None):
+    """
+    Plots the site localization probabilities for the given PSMs.
+
+    Args:
+        psms (list): The list of validated and localized PSMs.
+        threshold (float): The site probability threshold for localization.
+
+    """
+    probs = [p.site_prob for p in psms if p.site_prob is not None]
+    probs = sorted(probs)
+
+    plt.scatter(range(len(probs)), probs, color=TARGET_COLOR, marker="x",
+                linewidth=2, s=100)
+
+    plt.xlabel("Identification No.", fontproperties=FONT)
+    plt.ylabel("Site Probability", fontproperties=FONT)
+
+    ax = plt.gca()
+    ax.axhline(threshold, color=THRESHOLD_COLOR, linestyle="--", linewidth=2)
+
+    plt.annotate(f"$p_{{site}}$={threshold}",
+                 (0.75 * len(probs), threshold - 0.03), fontproperties=FONT)
+
+    if save_path is not None:
+        plt.savefig(save_path)
 
     plt.show()
