@@ -119,3 +119,19 @@ def log_binom_prob(k: int, n: int, p: float) -> float:
         pbk2 = [x - m for x in pbk]
         m2 = max(pbk2)
         return - m - m2 - math.log10(sum(10 ** (x - m2) for x in pbk2))
+
+
+def deduplicate(items):
+    """
+    Deduplicates a list, retaining the order of the elements.
+
+    Args:
+        items (list): The items to deduplicate.
+
+    Returns:
+        The deduplicated list of items, retaining the order.
+
+    """
+    seen = set()
+    seen_add = seen.add
+    return [x for x in items if not (x in seen or seen_add(x))]
