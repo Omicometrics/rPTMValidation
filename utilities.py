@@ -81,46 +81,6 @@ def sort_lists(key: int, *args):
     return zip(*sorted(zip(*args), key=lambda t: t[key]))
 
 
-def log_binom_prob(k: int, n: int, p: float) -> float:
-    """
-    Calculates the negative base-10 log of the cumulative binomial
-    probability.
-
-    Args:
-        k (int): The number of successes.
-        n (int): The number of trials.
-        p (float): The probability of success.
-
-    Returns:
-        The negative base-10 log of the binomial CDF.
-
-    """
-    logn = [math.log10(i + 1) for i in range(n)]
-    nk = n - k
-    s = sum(logn)
-
-    pbt, pbf = math.log10(p), math.log10(1. - p)
-    # the initial binomial
-    pbk = []
-    s1, s2 = sum(logn[:k]), sum(logn[:nk])
-    pbk.append(s - s1 - s2 + k * pbt + nk * pbf)
-    # calculate the cumulative using recursive iteration
-    for i in range(k, n):
-        s1 += logn[i]
-        s2 -= logn[nk - 1]
-        nk -= 1
-        pbk.append(s - s1 - s2 + (i + 1) * pbt + nk * pbf)
-    m = min(pbk)
-
-    # to avoid OverflowError
-    try:
-        return - m - math.log10(sum(10 ** (x - m) for x in pbk))
-    except OverflowError:
-        pbk2 = [x - m for x in pbk]
-        m2 = max(pbk2)
-        return - m - m2 - math.log10(sum(10 ** (x - m2) for x in pbk2))
-
-
 def deduplicate(items):
     """
     Deduplicates a list, retaining the order of the elements.
