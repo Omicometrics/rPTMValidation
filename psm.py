@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
+import binomial
 from constants import FIXED_MASSES
 import mass_spectrum
 import modifications
@@ -73,6 +74,13 @@ class PSM():
         self.lda_prob = None
         self.decoy_lda_score = None
         self.decoy_lda_prob = None
+        
+        # The localization site probability
+        self.site_prob = None
+        
+        # Whether the PSM has been corrected by some post-processing, e.g.
+        # removal of deamidation
+        self.corrected = False
 
     @property
     def seq(self) -> str:
@@ -132,6 +140,15 @@ class PSM():
 
         """
         return f"{self.data_id}_{self.spec_id}_{self.seq}"
+        
+    @property
+    def max_similarity(self):
+        """
+        Returns the maximum similarity score for the PSM.
+
+        """
+        return (0. if not self.similarity_scores
+                else max(s[2] for s in self.similarity_scores))
 
     def __str__(self) -> str:
         """
@@ -346,11 +363,11 @@ class PSM():
         prob, mod_prob = 0., 0.
         if n_bins > 0:
             success_prob = float(len(denoised_spectrum)) / n_bins
-            prob = utilities.log_binom_prob(
+            prob = binomial.log_binom_prob(
                 n_anns["all"], 2 * (len(self.seq) - 1), success_prob)
 
             if target_mod is not None:
-                mod_prob = utilities.log_binom_prob(
+                mod_prob = binomial.log_binom_prob(
                     n_anns["mod"], len(self.seq) - 1, success_prob)
 
         self.features["MatchScore"] = prob / (float(len(self.seq)) ** 0.5)
@@ -497,9 +514,10 @@ def psms2df(psms: List[PSM]) -> pd.DataFrame:
     for psm in psms:
         trow = {**{"data_id": psm.data_id, "spec_id": psm.spec_id,
                    "seq": psm.seq, "target": True}, **psm.features}
-        drow = {**{"data_id": "", "spec_id": "", "seq": psm.decoy_id.seq,
-                   "target": False}, **psm.decoy_id.features}
         rows.append(trow)
-        rows.append(drow)
+        if psm.decoy_id is not None:
+            drow = {**{"data_id": "", "spec_id": "", "seq": psm.decoy_id.seq,
+                       "target": False}, **psm.decoy_id.features}
+            rows.append(drow)
 
     return pd.DataFrame(rows)
