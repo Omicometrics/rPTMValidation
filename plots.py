@@ -11,7 +11,7 @@ from typing import List, Tuple
 from matplotlib import font_manager
 import matplotlib.pyplot as plt
 
-from psm import PSM
+from peptide_spectrum_match import PSM
 
 
 TARGET_COLOR = "#4472C4"
@@ -173,6 +173,66 @@ def plot_score_similarity(psms: List[PSM], prob_threshold=0.99,
 
     plt.annotate(f"$s_{{similarity}}$={sim_score:.2f}",
                  (sim_score - 0.1, 1.1 * max_lda), fontproperties=FONT,
+                 annotation_clip=False)
+
+    if save_path is not None:
+        plt.savefig(save_path)
+
+    plt.show()
+    
+    
+def plot_recovered_score_similarity(psms: List[Tuple[PSM, str]],
+                                    sim_threshold,
+                                    lda_threshold,
+                                    save_path=None):
+    """
+    Plots the rPTMDetermine scores against the unmodified/modified spectrum
+    similarity scores for the recovered identifications.
+
+    Args:
+        psms (list): The list of validated PSMs as tuples with their
+                     normal/decoy indicator.
+        sim_threshold (float):
+        lda_threshold (float):
+        save_path (str, optional):
+
+    """
+    target_sims, target_ldas, decoy_sims, decoy_ldas = [], [], [], []
+    for psm, pep_type in psms:
+        if pep_type == "normal":
+            target_sims.append(psm.max_similarity)
+            target_ldas.append(psm.lda_score)
+        else:
+            decoy_sims.append(psm.max_similarity)
+            decoy_ldas.append(psm.lda_score)
+
+    plt.scatter(target_sims, target_ldas, marker="o", facecolors="none",
+                edgecolors=TARGET_COLOR,
+                label="Target Identifications")
+
+    plt.scatter(decoy_sims, decoy_ldas, marker="x",
+                facecolors=DECOY_COLOR,
+                label="Decoy Identifications")
+
+    plt.xlabel("Similarity Score", fontproperties=FONT)
+    plt.ylabel("rPTMDetermine Score", fontproperties=FONT)
+
+    ax = plt.gca()
+    ax.axhline(lda_threshold, color=THRESHOLD_COLOR, linestyle="--", linewidth=2)
+
+    ax.axvline(sim_threshold, color=THRESHOLD_COLOR, linestyle="--",
+               linewidth=2)
+
+    ax.legend(prop=FONT, frameon=False, loc=0,
+              bbox_to_anchor=(0.07, 0.5, 0.5, 0.5), handletextpad=0.01)
+
+    max_lda = max(target_ldas + decoy_ldas)
+    plt.annotate(f"$s_{{PD}}$={lda_threshold:.2f}",
+                 (0.05, lda_threshold + 0.05 * max_lda),
+                 fontproperties=FONT)
+
+    plt.annotate(f"$s_{{similarity}}$={sim_threshold:.2f}",
+                 (sim_threshold - 0.1, 1.14 * max_lda), fontproperties=FONT,
                  annotation_clip=False)
 
     if save_path is not None:

@@ -21,7 +21,6 @@ from typing import List
 
 import numpy as np
 
-import config
 from constants import AA_MASSES, FIXED_MASSES, RESIDUES
 import generate_decoys
 import lda
@@ -29,11 +28,12 @@ import modifications
 import peptides
 import plots
 import proteolysis
-from psm import DecoyID, PSM, psms2df, UnmodPSM
+from peptide_spectrum_match import DecoyID, PSM, psms2df
 import readers
 import similarity
 import spectra_readers
 import utilities
+import validator_base
 
 sys.path.append("../pepfrag")
 from pepfrag import Peptide
@@ -42,10 +42,6 @@ from pepfrag import Peptide
 DecoyPeptides = collections.namedtuple("DecoyPeptides",
                                        ["seqs", "var_idxs", "idxs", "mods",
                                         "masses"])
-
-
-SpecMatch = collections.namedtuple("SpecMatch",
-                                   ["seq", "mods", "theor_z", "conf"])
 
 
 VarPTMs = collections.namedtuple("VarPTMs", ["masses", "max_mass",
@@ -171,7 +167,7 @@ def write_results(output_file, psms, include_features=False):
 
     Args:
         output_file (str): The path to which to write the results.
-        psms (list of psm.PSMs): The resulting PSMs.
+        psms (list of peptide_spectrum_match.PSMs): The resulting PSMs.
 
     """
     feature_names = list(psms[0].features.keys())
@@ -221,54 +217,7 @@ def decoy_features(decoy_peptide, spec, target_mod, proteolyzer):
         .extract_features(target_mod, proteolyzer)
 
 
-def test_matches_equal(matches, psm, peptide_str) -> bool:
-    """
-    Evaluates whether any one of a SpecMatch is to the same peptide,
-    in terms of sequence and modifications, as the given PSM.
-
-    Args:
-        matches (list of SpecMatch): The matches to test.
-        psm (psm.PSM): The peptide against which to compare.
-        peptide_str (str): The peptide string including modifications.
-
-    Returns:
-        boolean: True if there is a match, False otherwise.
-
-    """
-    for match in matches:
-        if match.seq != psm.seq or match.theor_z != psm.charge:
-            continue
-
-        mods = match.mods
-
-        if "Deamidated" in mods:
-            # Remove deamidation from the mods string
-            mods = ";".join(mod for mod in mods.split(";")
-                            if not mod.startswith("Deamidated"))
-
-        if peptides.merge_seq_mods(match.seq, mods) == peptide_str:
-            return True
-
-    return False
-
-
-def site_probability(score, all_scores):
-    """
-    Computes the probability that the site combination with score is the
-    correct combination.
-
-    Args:
-        score (float): The current combination LDA score.
-        all_scores (list): All of the combination LDA scores.
-
-    Returns:
-        The site probability as a float.
-
-        """
-    return 1 / sum(math.exp(s) / math.exp(score) for s in all_scores)
-
-
-class Validate():
+class Validate(validator_base.ValidateBase):
     """
     The main rPTMDetermine class. The validate method of this class
     encompasses the main functionality of the procedure.
@@ -283,29 +232,22 @@ class Validate():
             json_config (json.JSON): The JSON configuration read from a file.
 
         """
-        self.config = config.Config(json_config)
-
-        self.proteolyzer = proteolysis.Proteolyzer(self.config.enzyme)
+        super().__init__(json_config)
 
         # The UniProt PTM DB
         self.uniprot = readers.read_uniprot_ptms(self.config.uniprot_ptm_file)
-        # The UniMod PTM DB
-        self.unimod = readers.PTMDB(self.config.unimod_ptm_file)
 
         # Generate the full decoy protein sequence database file
         self.decoy_db_path = generate_decoys.generate_decoy_file(
             self.config.target_db_path, self.proteolyzer)
 
         # Cache these config options since they are used regularly
-        self.target_mod = self.config.target_mod
         self.target_residues = self.config.target_residues
         self.fixed_residues = self.config.fixed_residues
 
         # To be set later
-        self.mod_mass = None
-        self.psms = None
+        self.psms = []
         self.unmod_psms = None
-        self.pp_res = None
 
         # The LDA validation model for scoring
         self.model = None
@@ -320,16 +262,12 @@ class Validate():
 
         """
         # Process the input files to extract the modification identifications
-        self.psms, self.pp_res = self._get_identifications()
+        self.psms = self._get_identifications()
 
         # Check whether any modified PSMs are identified
         if not self.psms:
             print("No PSMs found matching the input. Exiting.")
             sys.exit()
-
-        # Get the mass change associated with the target modification
-        self.mod_mass = modifications.get_mod_mass(self.psms[0].mods,
-                                                   self.target_mod)
 
         # Read the tandem mass spectra from the raw input files
         # After this call, all PSMs will have their associated mass spectrum
@@ -367,14 +305,14 @@ class Validate():
 
         # Identify the PSMs whose peptides are benchmarks
         if self.config.benchmark_file is not None:
-            self._identify_benchmarks()
+            self._identify_benchmarks(self.psms)
 
         # Retain the psms whose probabilities exceed 0.99
         #self.psms = [p for p in self.psms if p.lda_prob > 0.99]
 
         # --- Unmodified analogues --- #
         # Get the unmodified peptide analogues
-        self.unmod_psms = self._find_unmod_analogues()
+        self.unmod_psms = self._find_unmod_analogues(self.psms)
 
         # Calculate features for the unmodified peptide analogues
         for psm in self.unmod_psms:
@@ -419,69 +357,19 @@ class Validate():
             plots.split_target_decoy_scores(self.psms)[0], 0.99)
         sim_threshold = min(psm.max_similarity for psm in self.psms
                             if psm.benchmark)
-
-        for ii, psm in enumerate(self.psms):
-            # Only localize those PSMs which pass the rPTMDetermine score and
-            # similarity score thresholds
-            if (psm.lda_score < spd_threshold or
-                    psm.max_similarity < sim_threshold):
-                continue
-            
-            # Count instances of the free (non-modified) target residues in
-            # the peptide sequence
-            target_idxs = [ii for ii, res in enumerate(psm.seq)
-                           if res in self.target_residues]
-
-            # Count the number of instances of the modification
-            mod_count = sum(ms.mod == self.target_mod for ms in psm.mods)
-
-            if len(target_idxs) == mod_count:
-                # No alternative modification sites exist
-                continue
-
-            isoform_scores = {}
-
-            for mod_comb in itertools.combinations(target_idxs, mod_count):
-                # Construct a new PSM with the given combination of modified
-                # sites
-                new_psm = copy.deepcopy(psm)
-
-                # Update the modification list to use the new target sites
-                new_psm.mods = [ms for ms in psm.mods
-                                if ms.mod != self.target_mod]
-                for idx in mod_comb:
-                    new_psm.mods.append(
-                        modifications.ModSite(
-                            self.mod_mass, idx + 1, self.target_mod))
-
-                # Compute the PSM features using the new modification site(s)
-                new_psm.extract_features(self.target_mod, self.proteolyzer)
-
-                # Get the target score for the new PSM
-                isoform_scores[new_psm] = self.model.decide_predict(
-                    psms2df([new_psm])[self.mod_features])[0, 0]
-
-            all_scores = list(isoform_scores.values())
-
-            for isoform, score in isoform_scores.items():
-                isoform.site_prob = site_probability(score, all_scores)
-
-            self.psms[ii] = max(isoform_scores.keys(),
-                                key=lambda p: p.site_prob)
+        super().localize(self.psms, self.model, self.mod_features,
+                         spd_threshold, sim_threshold)
 
     def _get_identifications(self):
         """
         Retrieves the identification results from the set of input files.
 
         Returns:
-            (list, dict): The PSMs for the target modification and all
-                          ProteinPilot results, keyed by input file path.
+            list: The PSMs for the target modification.
 
         """
         # Target modification identifications
         psms = []
-        # All ProteinPilot results
-        pp_res = collections.defaultdict(lambda: collections.defaultdict(list))
 
         for set_id, set_info in self.config.data_sets.items():
             data_dir = set_info['data_dir']
@@ -514,11 +402,13 @@ class Validate():
                             Peptide(summary.seq, summary.theor_z,
                                     parsed_mods)))
 
-                pp_res[set_id][summary.spec].append(
-                    SpecMatch(summary.seq, parsed_mods, summary.theor_z,
-                              summary.conf))
+                self.pp_res[set_id][summary.spec].append(
+                    validator_base.SpecMatch(summary.seq, parsed_mods,
+                                             summary.theor_z, summary.conf,
+                                             "decoy" if "REVERSED"
+                                                in summary.names else "normal"))
 
-        return utilities.deduplicate(psms), pp_res
+        return utilities.deduplicate(psms)
 
     def _process_mass_spectra(self):
         """
@@ -544,60 +434,6 @@ class Validate():
 
         return self.psms
 
-    def _identify_benchmarks(self):
-        """
-        Labels the PSMs which are in the benchmark set of peptides.
-
-        """
-        # Parse the benchmark sequences
-        with open(self.config.benchmark_file) as fh:
-            benchmarks = [l.rstrip() for l in fh]
-
-        for psm in self.psms:
-            psm.benchmark = (peptides.merge_seq_mods(psm.seq, psm.mods)
-                             in benchmarks)
-
-    def _find_unmod_analogues(self):
-        """
-        Finds the unmodified analogues in the ProteinPilot search results.
-
-        Returns:
-
-        """
-        unmod_psms = []
-
-        for data_id, data in self.pp_res.items():
-            unmods = collections.defaultdict(list)
-            for spec_id, matches in data.items():
-                for psm in self.psms:
-                    mods = [ms for ms in psm.mods if ms.mod != self.target_mod]
-                    peptide_str = peptides.merge_seq_mods(psm.seq, mods)
-                    if test_matches_equal(matches, psm, peptide_str):
-                        unmods[spec_id].append((psm, mods))
-
-            if not unmods:
-                continue
-
-            spec_file = os.path.join(
-                self.config.data_sets[data_id]["data_dir"],
-                self.config.data_sets[data_id]["spectra_file"])
-
-            print(f"Reading {spec_file}")
-            spectra = spectra_readers.read_spectra_file(spec_file)
-
-            print(f"Processing {len(unmods)} spectra")
-
-            for spec_id, _psms in unmods.items():
-                spec = spectra[spec_id].centroid().remove_itraq()
-
-                for psm, mods in _psms:
-                    unmod_psms.append(
-                        UnmodPSM(psm.uid, data_id, spec_id,
-                                 Peptide(psm.seq, psm.charge, mods),
-                                 spectrum=spec))
-
-        return utilities.deduplicate(unmod_psms)
-
     def _generate_decoy_matches(self, target_res, psms):
         """
 
@@ -613,11 +449,9 @@ class Validate():
         if target_res is not None:
             fixed_aas.append(target_res)
         # Remove termini
-        try:
-            fixed_aas.remove("nterm")
-            fixed_aas.remove("cterm")
-        except ValueError:
-            pass
+        for pos in ["nterm", "cterm"]:
+            if pos in fixed_aas:
+                fixed_aas.remove(pos)
 
         # Generate the decoy sequences, including the target_mod if
         # target_residue is provided

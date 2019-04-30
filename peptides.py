@@ -56,24 +56,17 @@ def merge_seq_mods(seq, mods):
         return seq
 
     # Convert nterm and cterm sites to their corresponding indices
-    mod_sites = []
-    for _, site, name in mods:
-        name = f"[{name}]"
-        site_str = str(site).replace("-", "").lower()
-        if site_str.lower() == "nterm":
-            mod_sites.append((name, 0))
-        elif site_str.lower() == "cterm":
-            mod_sites.append((name, len(seq)))
-        else:
-            mod_sites.append((name, int(site)))
+    seqlen = len(seq)
+    positions = {"nterm": 0, "n-term": 0, "N-term": 0, "cterm": seqlen, "c-term": seqlen, "C-term": seqlen}
+    mod_sites = [(name, int(positions.get(site, site))) for _, site, name in mods]
 
     # Sort the modifications by site index
-    mod_sites = sorted(mod_sites, key=lambda x: x[1], reverse=True)
-
+    mod_sites.sort(key=lambda x: x[1], reverse=True)
+    
     # Insert the modifications into the peptide sequence
     seq_list = list(seq)
     for name, site in mod_sites:
-        seq_list.insert(site, name)
+        seq_list.insert(int(site), f"[{name}]")
 
     return ''.join(seq_list)
 

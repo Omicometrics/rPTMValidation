@@ -9,8 +9,6 @@ import collections
 from constants import MassType
 
 
-# TODO: Use a class for ModSites which provides a method to calculate the
-# combined mass of the modifications
 ModSite = collections.namedtuple("ModSite", ["mass", "site", "mod"])
 
 

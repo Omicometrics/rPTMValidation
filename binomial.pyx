@@ -18,7 +18,7 @@ for ii in range(size):
     CUMLOGN[ii] = cursum
 
 
-cpdef double log_binom_prob(int k, int n, double p):
+cdef double _log_binom_prob(int k, int n, double p):
     """
     Calculates the negative base-10 log of the cumulative binomial
     probability.
@@ -33,8 +33,8 @@ cpdef double log_binom_prob(int k, int n, double p):
 
     """
     cdef int nk, i
-    cdef double s, s1, s2, pbt, pbf, m, m2, news, res, x
-    cdef cpp_vector[double] pbk, pbk2
+    cdef double s, s1, s2, pbt, pbf, m, x, news
+    cdef cpp_vector[double] pbk
     
     nk = n - k
     s = CUMLOGN[n - 1]
@@ -43,27 +43,25 @@ cpdef double log_binom_prob(int k, int n, double p):
     # the initial binomial
     s1, s2 = CUMLOGN[k - 1], CUMLOGN[nk - 1]
     pbk = cpp_vector[double]()
-    pbk.push_back( s - s1 - s2 + k * pbt + nk * pbf)
+    m = s - s1 - s2 + k * pbt + nk * pbf
+    pbk.push_back(m)
     # calculate the cumulative using recursive iteration
-    m = 100000
     for i in range(k, n):
         s1 += LOGN[i]
         s2 -= LOGN[nk - 1]
         nk -= 1
         news = s - s1 - s2 + (i + 1) * pbt + nk * pbf
         pbk.push_back(news)
-        if news < m:
+        if news > m:
             m = news
-
-    # to avoid OverflowError
-    try:
-        res = 0.
-        for x in pbk:
-            res += 10 ** (x - m)
-        res = - m - log10(res)
-    except OverflowError:
-        pbk2 = [x - m for x in pbk]
-        m2 = max(pbk2)
-        res = - m - m2 - log10(sum([10 ** (x - m2) for x in pbk2]))
+    
+    res = 0.
+    for x in pbk:
+        res += 10 ** (x - m)
         
-    return res
+    return - m - log10(res)
+
+
+cpdef log_binom_prob(int k, int n, double p):
+    return _log_binom_prob(k, n, p)
+    

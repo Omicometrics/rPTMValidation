@@ -12,6 +12,7 @@ import pandas as pd
 
 import binomial
 from constants import FIXED_MASSES
+import ionscore
 import mass_spectrum
 import modifications
 import proteolysis
@@ -224,8 +225,8 @@ class PSM():
         denoised_peaks, denoised_spec = self.spectrum.denoise(
             [idx in ann_peak_nums for idx in range(len(self.spectrum))])
 
-        denoised_peaks = sorted(denoised_peaks)
-
+        denoised_peaks.sort()
+        
         ion_anns = {l: (bisect.bisect_left(denoised_peaks, a.peak_num),
                         a.ion_pos)
                     for l, a in anns.items() if a.peak_num in denoised_peaks}
@@ -358,23 +359,32 @@ class PSM():
         Calculates the ion score features.
 
         """
+        #cdef double _ionscore(int seqlen, int npeaks, int seqcov, double mzrange, double tol):
         mzs = denoised_spectrum.mz
-        n_bins = float(round((max(mzs) - min(mzs)) / tol))
-        prob, mod_prob = 0., 0.
-        if n_bins > 0:
-            success_prob = float(len(denoised_spectrum)) / n_bins
-            prob = binomial.log_binom_prob(
-                n_anns["all"], 2 * (len(self.seq) - 1), success_prob)
-
-            if target_mod is not None:
-                mod_prob = binomial.log_binom_prob(
-                    n_anns["mod"], len(self.seq) - 1, success_prob)
-
-        self.features["MatchScore"] = prob / (float(len(self.seq)) ** 0.5)
-
+        mzrange = mzs[-1] - mzs[0]
+        self.features["MatchScore"] = ionscore.ionscore(
+            len(self.seq), len(mzs), n_anns["all"], mzrange, tol)
         if target_mod is not None:
-            self.features["MatchScoreMod"] = \
-                mod_prob / (float(len(self.seq)) ** 0.5)
+            self.features["MatchScoreMod"] = ionscore.ionscore(
+                len(self.seq), len(mzs), n_anns["mod"], mzrange, tol)
+        
+        
+        #n_bins = float(round((max(mzs) - min(mzs)) / tol))
+        #prob, mod_prob = 0., 0.
+        #if n_bins > 0:
+        #    success_prob = float(len(denoised_spectrum)) / n_bins
+        #    prob = binomial.log_binom_prob(
+        #        n_anns["all"], 2 * (len(self.seq) - 1), success_prob)
+
+        #    if target_mod is not None:
+        #        mod_prob = binomial.log_binom_prob(
+        #            n_anns["mod"], len(self.seq) - 1, success_prob)
+
+        #self.features["MatchScore"] = prob / (float(len(self.seq)) ** 0.5)
+
+        #if target_mod is not None:
+        #    self.features["MatchScoreMod"] = \
+        #        mod_prob / (float(len(self.seq)) ** 0.5)
 
     def _calculate_sequence_coverage(self, target_mod, seq_ions,
                                      mod_ion_start):
@@ -400,7 +410,7 @@ class PSM():
             # The number of annotated ions
             n_ions = {"all": 0, "mod": 0}
 
-            for ion_type in 'yb':
+            for ion_type in ['y', 'b']:
                 # A list of b-/y-ion numbers (e.g. 2 for b2[+])
                 ion_nums = sorted(
                     [int(l.split('[')[0][1:])
@@ -504,7 +514,7 @@ def psms2df(psms: List[PSM]) -> pd.DataFrame:
     target or decoy peptide and the peptide sequence.
 
     Args:
-        psms (list of psm.PSMs): The PSM entries to be merged to a DataFrame.
+        psms (list of PSMs): The PSM entries to be merged to a DataFrame.
 
     Returns:
         pandas.DataFrame

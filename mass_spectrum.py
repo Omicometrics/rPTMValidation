@@ -11,6 +11,7 @@ from typing import List, Tuple
 import numpy as np
 
 from constants import FIXED_MASSES, ITRAQ_MASSES
+import denoise
 
 
 Annotation = collections.namedtuple("Annotation",
@@ -24,7 +25,7 @@ class Spectrum():
     exploring the mass spectrum.
 
     """
-    def __init__(self, peak_list, prec_mz):
+    def __init__(self, peak_list, prec_mz, charge):
         """
         Initializes the class.
 
@@ -36,6 +37,7 @@ class Spectrum():
         """
         self._peaks = np.array(peak_list)
         self.prec_mz = prec_mz
+        self.charge = charge
 
         # Sort the spectrum by the m/z ratios
         self._mz_sort()
@@ -65,7 +67,7 @@ class Spectrum():
             The length of the Spectrum object as an int.
 
         """
-        return len(self._peaks)
+        return self._peaks.shape[0]
 
     def __repr__(self):
         """
@@ -226,7 +228,7 @@ class Spectrum():
 
         """
         mz = list(self._peaks[:, 0])
-        npeaks = len(self._peaks)
+        npeaks = self._peaks.shape[0]
         insert_idxs = [bisect.bisect_left(mz, ion.mass) for ion in theor_ions]
 
         anns = {}
@@ -252,10 +254,16 @@ class Spectrum():
             Tuple: The denoised peak indexes as a list, The denoised spectrum
 
         """
+        #peaks = denoise.denoise(self._peaks, assigned_peaks,
+        #                        max_peaks_per_window)
+        #print(peaks)
+
+        #return peaks, Spectrum(self._peaks[peaks, :], self.prec_mz)
+        
         npeaks = len(self._peaks)
         # Divide the mass spectrum into windows of 100 Da
         n_windows = int((self._peaks[-1][0] - self._peaks[0][0]) / 100.) + 1
-        start_idx, peaks = 0, []
+        start_idx, new_peaks = 0, []
 
         for window in range(n_windows):
             # Set up the mass limit for the current window
@@ -269,7 +277,7 @@ class Spectrum():
             if end_idx == start_idx:
                 if (self._peaks[end_idx][0] <= max_mass and
                         assigned_peaks[end_idx]):
-                    peaks.append(end_idx)
+                    new_peaks.append(end_idx)
                 continue
 
             # Sort the peaks within the window in descending order of
@@ -287,8 +295,8 @@ class Spectrum():
 
             # Take the top number of peaks with the highest number of
             # annotations
-            peaks += window_peaks[:sum_scores.index(max(sum_scores)) + 1]
+            new_peaks += window_peaks[:sum_scores.index(max(sum_scores)) + 1]
 
             start_idx = end_idx
 
-        return peaks, Spectrum(self._peaks[peaks, :], self.prec_mz)
+        return new_peaks, Spectrum(self._peaks[new_peaks, :], self.prec_mz)

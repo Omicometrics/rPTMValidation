@@ -115,15 +115,15 @@ class Config():
         if not os.path.exists(path):
             raise FileNotFoundError(f"UniProt PTM file not found at {path}")
         return path
-    
-    @property 
+
+    @property
     def correct_deamidation(self) -> bool:
         """
         Whether or not to apply the deamidation correction.
 
         """
         return self.json_config.get("correct_deamidation", False)
-        
+
     @property
     def benchmark_file(self) -> Optional[str]:
         """
@@ -132,6 +132,43 @@ class Config():
 
         """
         return self.json_config.get("benchmark_file", None)
+
+    @property
+    def retrieval_model_file(self) -> Optional[str]:
+        """
+        The file containing features with which to build an LDA model for
+        retrieval. This can be created by outputting the pandas DataFrame
+        used to build the model during validated.
+
+        """
+        return self.json_config.get("retrieval_model_file", None)
+        
+    @property
+    def retrieval_unmod_model_file(self) -> Optional[str]:
+        """
+        The file containing features with which to build an LDA model for
+        retrieval. This can be created by outputting the pandas DataFrame
+        used to build the model during validated.
+
+        """
+        return self.json_config.get("retrieval_unmod_model_file", None)
+        
+    @property
+    def retrieval_tolerance(self) -> float:
+        """
+        The m/z tolerance used in searching candidate peptides for a spectrum.
+        
+        """
+        return self.json_config.get("retrieval_tolerance", 0.05)
+        
+    @property
+    def validated_ids_file(self):
+        """
+        The path to a CSV file containing the validated identifications
+        obtained from using validate.Validate.
+        
+        """
+        return self.json_config.get("validated_ids_file", None)
 
     def _check_required(self):
         """

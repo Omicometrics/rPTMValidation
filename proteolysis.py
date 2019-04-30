@@ -15,16 +15,21 @@ from constants import RESIDUES
 
 class Proteolyzer():
     """
-    A class for cleaving peptides according to the given enzyme cleavage room.
+    A class for cleaving peptides according to the given enzyme cleavage rule.
 
     """
     def __init__(self, enzyme, enzyme_rules="EnzymeRules.json"):
         """
-        Enzyme project using the proteolytic cleavage rules set up
-        in proteolysis dictionary in ENZYME, according to the input
-        "enzyme".
-        Argument
-        - enzyme: proteolysis, if not in the dictionary, raise an exception
+        Initialize the class instance with the specified enzyme cleavage rule.
+        
+        Args:
+            enzyme (str): An enzyme rule defined in the enzyme_rules file.
+            enzyme_rules (str, optional): The JSON file which defines the
+                                          available cleavage rules.
+
+        Raises:
+            KeyError: Raised in the event that the enzyme is not defined.
+
         """
         self.enzyme = enzyme
 
@@ -46,7 +51,8 @@ class Proteolyzer():
 
     def _removenaa(self):
         """
-        Removes unrecognized residues not any one of 20 common residues.
+        Removes residues from the cleavage sites which are not one of the
+        standard 20 amino acid residues.
 
         Raises:
             KeyError
@@ -98,6 +104,26 @@ class Proteolyzer():
 
         """
         return [s for s in self.proteolytic_regex.split(sequence) if s]
+        
+    def is_cleaved(self, sequence):
+        """
+        Evaluates whether a peptide sequence has been proteolytically cleaved
+        using the rule associated with the current instance of the
+        Proteolyzer.
+
+        Args:
+            sequence (str): The peptide amino acid sequence.
+
+        Returns:
+            A boolean indicating whether the peptide follows the cleavage
+            rule.
+
+        """
+        # TODO: deal with terminal of cleavage
+        for ii, cleavage_sites in enumerate(self._cleavage_site):
+            if sequence[-1] in cleavage_sites:
+                return True
+        return False
 
     def count_missed_cleavages(self, sequence):
         """

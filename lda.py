@@ -17,7 +17,7 @@ from sklearn.model_selection import cross_val_predict
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from psm import PSM, psms2df
+from peptide_spectrum_match import PSM, psms2df
 
 # Silence this since it arises when converting ints to float in StandardScaler
 warnings.filterwarnings(action='ignore', category=DataConversionWarning)
@@ -173,7 +173,7 @@ def lda_validate(df: pd.DataFrame, features: List[str],
         features.remove(feature)
 
     X = df[features]
-    y = df["target"]
+    y = df["target"].astype("bool")
 
     pipeline = _lda_pipeline(fisher_threshold)
 

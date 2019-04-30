@@ -21,6 +21,13 @@ class ParserException(Exception):
     A custom exception to be raised during file parse errors.
 
     """
+    
+    
+END_IONS_LEN = 8
+TITLE_LEN = 5
+PEPMASS_LEN = 7
+BEGIN_IONS_LEN = 10
+CHARGE_LEN = 6
 
 
 def read_mgf_file(spec_file):
@@ -36,21 +43,23 @@ def read_mgf_file(spec_file):
 
     """
     spectra = {}
-    spec_id = None
+    spec_id = None    
     with open(spec_file) as fh:
-        peaks, mz = [], None
+        peaks, mz, charge = [], None, None
         for line in fh:
-            if line.startswith("END IONS"):
+            if line[:END_IONS_LEN] == "END IONS":
                 if spec_id is None:
                     raise ParserException(
                         f"No spectrum ID found in MGF block in {spec_file}")
-                spectra[spec_id] = mass_spectrum.Spectrum(peaks, float(mz))
-                peaks, spec_id, mz = [], None, None
-            elif line.startswith('TITLE'):
+                spectra[spec_id] = mass_spectrum.Spectrum(peaks, float(mz), charge)
+                peaks, spec_id, mz, charge = [], None, None, None
+            elif line[:TITLE_LEN] == "TITLE":
                 spec_id = MGF_TITLE_REGEX.match(line).group(1)
-            elif line.startswith("PEPMASS"):
+            elif line[:PEPMASS_LEN] == "PEPMASS":
                 mz = line.rstrip().split("=")[1]
-            elif '=' not in line and not line.startswith('BEGIN IONS'):
+            elif line[:CHARGE_LEN] == "CHARGE":
+                charge = line.rstrip().split("=")[1]
+            elif "=" not in line and line[:BEGIN_IONS_LEN] != "BEGIN IONS":
                 peaks.append([float(n) for n in line.split()[:2]])
 
     return spectra

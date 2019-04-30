@@ -4,11 +4,12 @@ A module for evaluating the similarity of two MS/MS spectra, based on their
 ion annotations and intensities.
 
 """
+import tqdm
 from typing import List, Tuple
 
 import numpy as np
 
-from psm import PSM, UnmodPSM
+from peptide_spectrum_match import PSM, UnmodPSM
 from mass_spectrum import Spectrum
 
 
@@ -26,12 +27,14 @@ def calculate_similarity_scores(mod_psms: List[PSM],
         The modified PSMs, with their similarity scores now set.
 
     """
-    for unmod_psm in unmod_psms:
-        for psm in mod_psms:
-            if unmod_psm.mod_psm_uid == psm.uid:
+    for psm in tqdm.tqdm(mod_psms):
+        uid = psm.uid
+        for upsm in unmod_psms:
+            if upsm.mod_psm_uid == uid:
                 psm.similarity_scores.append(
-                    (unmod_psm.data_id, unmod_psm.spec_id,
-                     calculate_spectral_similarity(psm, unmod_psm)))
+                    (upsm.data_id, upsm.spec_id,
+                     calculate_spectral_similarity(psm, upsm)))
+        psm.peptide.fragment_ions = None
     return mod_psms
 
 
@@ -42,8 +45,8 @@ def calculate_spectral_similarity(psm1: PSM, psm2: PSM) -> float:
     spectra.
 
     Args:
-        psm1 (psm.PSM): The first PSM, with an associated Spectrum.
-        psm2 (psm.PSM): The second PSM, with an associated Spectrum.
+        psm1 (peptide_spectrum_match.PSM): The first PSM, with an associated Spectrum.
+        psm2 (peptide_spectrum_match.PSM): The second PSM, with an associated Spectrum.
 
     Returns:
         float: The dot product similarity of the spectra.
