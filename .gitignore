@@ -1,0 +1,14 @@
+__pycache__
+.ipynb_checkpoints
+
+# Cython related
+*.c
+*.cpp
+*.html
+*.pxd
+*.pyd
+
+*.csv
+*.png
+*.svg
+*.txt
