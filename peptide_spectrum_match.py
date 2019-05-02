@@ -185,6 +185,13 @@ class PSM():
         """
         return (self.data_id, self.spec_id, self.peptide) == \
                (other.data_id, other.spec_id, other.peptide)
+               
+    def clean_fragment_ions(self):
+        """
+        Removes the cached peptide fragment ions.
+        
+        """
+        self.peptide.fragment_ions = None
 
     def _check_spectrum_initialized(self):
         """
