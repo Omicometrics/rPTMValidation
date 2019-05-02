@@ -4,8 +4,10 @@ A module to provide functions for the LDA (machine learning) validation
 of PSMS.
 
 """
+import bisect
 import copy
-from typing import List
+import operator
+from typing import List, Tuple
 import warnings
 
 import numpy as np
@@ -117,7 +119,8 @@ def lda_model(df: pd.DataFrame, features: List[str],
     """
     # TODO
     for feature in ["PepLen", "ErrPepMass", "Charge", "PepMass"]:
-        features.remove(feature)
+        if feature in features:
+            features.remove(feature)
 
     pipeline = _lda_pipeline(fisher_threshold)
 
@@ -266,3 +269,40 @@ def apply_deamidation_correction(pipeline, psms, target_mod, proteolyzer):
             psms[ii] = nondeam_psm
 
     return psms
+    
+    
+def get_validation_threshold(val_results: List[Tuple[float, float]],
+                             prob_threshold: float) -> float:
+    """
+    Finds the minimum score associated with the given probability threshold.
+
+    Args:
+        val_results (list): A list of tuples of (score, probability).
+        prob_threshold (float): The probability threshold.
+
+    Returns:
+        The score threshold for the probability as a float.
+
+    """
+    val_results = sorted(val_results, key=operator.itemgetter(0))
+    idx = bisect.bisect_left([r[1] for r in val_results], prob_threshold)
+    return val_results[idx][0]
+    
+    
+def get_validation_threshold_df(results_df, prob_threshold):
+    """
+    Finds the minimum score associated with the given probability threshold.
+    
+    Args:
+        results_df (pandas.DataFrame): The LDA validation results DataFrame,
+                                       including 'score' and 'prob' columns.
+        prob_threshold (float): The probability threshold.
+                                       
+    Returns:
+        The score threshold for the probability as a float.
+
+    """
+    return get_validation_threshold(
+        list(results_df[["score", "prob"]].itertuples(
+            index=False, name=None)),
+        prob_threshold)

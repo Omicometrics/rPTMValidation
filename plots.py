@@ -4,13 +4,12 @@ This module provides some functions useful for visualizing the peptide
 identification validation results.
 
 """
-import bisect
-import operator
 from typing import List, Tuple
 
 from matplotlib import font_manager
 import matplotlib.pyplot as plt
 
+import lda
 from peptide_spectrum_match import PSM
 
 
@@ -46,24 +45,6 @@ def split_target_decoy_scores(psms: List[PSM]) \
     return target, decoy
 
 
-def get_validation_threshold(val_results: List[Tuple[float, float]],
-                             prob_threshold: float) -> float:
-    """
-    Finds the minimum score associated with the given probability threshold.
-
-    Args:
-        val_results (list): A list of tuples of (score, probability).
-        prob_threshold (float): The probability threshold.
-
-    Returns:
-        The score threshold for the probability as a float.
-
-    """
-    val_results = sorted(val_results, key=operator.itemgetter(0))
-    idx = bisect.bisect_left([r[1] for r in val_results], prob_threshold)
-    return val_results[idx][0]
-
-
 def plot_scores(psms: List[PSM], prob_threshold=0.99, label_prefix="",
                 save_path=None):
     """
@@ -82,7 +63,7 @@ def plot_scores(psms: List[PSM], prob_threshold=0.99, label_prefix="",
     target, decoy = split_target_decoy_scores(psms)
 
     # Find the position of the last validated PSM
-    val_score = get_validation_threshold(target, prob_threshold)
+    val_score = lda.get_validation_threshold(target, prob_threshold)
 
     target_scores = sorted([t[0] for t in target], reverse=True)
     decoy_scores = sorted([d[0] for d in decoy], reverse=True)
@@ -143,7 +124,7 @@ def plot_score_similarity(psms: List[PSM], prob_threshold=0.99,
             sims.append(psm.max_similarity)
             ldas.append(psm.lda_score)
 
-    val_score = get_validation_threshold(split_target_decoy_scores(psms)[0],
+    val_score = lda.get_validation_threshold(split_target_decoy_scores(psms)[0],
                                          prob_threshold)
     sim_score = min(bench_sims)
 
