@@ -299,4 +299,4 @@ class Spectrum():
 
             start_idx = end_idx
 
-        return new_peaks, Spectrum(self._peaks[new_peaks, :], self.prec_mz)
+        return new_peaks, Spectrum(self._peaks[new_peaks, :], self.prec_mz, self.charge)
