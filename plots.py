@@ -106,7 +106,8 @@ def plot_scores(psms: List[PSM], prob_threshold=0.99, label_prefix="",
 
 
 def plot_score_similarity(psms: List[PSM], prob_threshold=0.99,
-                          save_path=None):
+                          save_path=None, use_benchmarks=True,
+                          sim_threshold=None):
     """
     Plots the rPTMDetermine scores against the unmodified/modified spectrum
     similarity scores.
@@ -115,9 +116,14 @@ def plot_score_similarity(psms: List[PSM], prob_threshold=0.99,
         psms (list): The list of validated and compared PSMs.
 
     """
+    if not use_benchmarks and sim_threshold is None:
+        print("sim_threshold must be passed to plot_score_similarity when "
+              "use_benchmarks is set to False")
+        sys.exit(1)        
+    
     bench_sims, bench_ldas, sims, ldas = [], [], [], []
     for psm in psms:
-        if psm.benchmark:
+        if use_benchmarks and psm.benchmark:
             bench_sims.append(psm.max_similarity)
             bench_ldas.append(psm.lda_score)
         else:
@@ -126,14 +132,19 @@ def plot_score_similarity(psms: List[PSM], prob_threshold=0.99,
 
     val_score = lda.get_validation_threshold(split_target_decoy_scores(psms)[0],
                                          prob_threshold)
-    sim_score = min(bench_sims)
+    sim_score = min(bench_sims) if use_benchmarks else sim_threshold
 
-    plt.scatter(bench_sims, bench_ldas, marker="o", facecolors=TARGET_COLOR,
-                label="Benchmark Identifications")
+    if use_benchmarks:
+        plt.scatter(bench_sims, bench_ldas, marker="o", facecolors=TARGET_COLOR,
+                    label="Benchmark Identifications")
 
-    plt.scatter(sims, ldas, marker="^",
-                facecolors="grey", linewidths=1,
-                label="Other Identifications")
+    if use_benchmarks:
+        plt.scatter(sims, ldas, marker="^",
+                    facecolors="grey", linewidths=1,
+                    label="Other Identifications")
+    else:
+        plt.scatter(sims, ldas, marker="o", facecolors="none",
+                    edgecolors=TARGET_COLOR, linewidths=1)
 
     plt.xlabel("Similarity Score", fontproperties=FONT)
     plt.ylabel("rPTMDetermine Score", fontproperties=FONT)
@@ -144,8 +155,9 @@ def plot_score_similarity(psms: List[PSM], prob_threshold=0.99,
     ax.axvline(sim_score, color=THRESHOLD_COLOR, linestyle="--",
                linewidth=2)
 
-    ax.legend(prop=FONT, frameon=False, loc=0,
-              bbox_to_anchor=(0.14, 0.5, 0.5, 0.5), handletextpad=0.01)
+    if use_benchmarks:
+        ax.legend(prop=FONT, frameon=False, loc=0,
+                  bbox_to_anchor=(0.14, 0.5, 0.5, 0.5), handletextpad=0.01)
 
     max_lda = max(bench_ldas + ldas)
     plt.annotate(f"$s_{{PD}}$={val_score:.2f}",
@@ -244,7 +256,7 @@ def plot_site_probabilities(psms: List[PSM], threshold=0.99, save_path=None):
     ax.axhline(threshold, color=THRESHOLD_COLOR, linestyle="--", linewidth=2)
 
     plt.annotate(f"$p_{{site}}$={threshold}",
-                 (0.75 * len(probs), threshold - 0.03), fontproperties=FONT)
+                 (0.75 * len(probs), threshold - 0.05), fontproperties=FONT)
 
     if save_path is not None:
         plt.savefig(save_path)
