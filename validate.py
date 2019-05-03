@@ -16,7 +16,9 @@ import math
 import multiprocessing as mp
 import operator
 import os
+import pickle
 import sys
+import tqdm
 from typing import List
 
 import numpy as np
@@ -262,6 +264,7 @@ class Validate(validator_base.ValidateBase):
 
         """
         # Process the input files to extract the modification identifications
+        print("Reading database search identifications...")
         self.psms = self._get_identifications()
 
         # Check whether any modified PSMs are identified
@@ -271,14 +274,17 @@ class Validate(validator_base.ValidateBase):
 
         # Read the tandem mass spectra from the raw input files
         # After this call, all PSMs will have their associated mass spectrum
+        print("Reading mass spectra from files...")
         self.psms = self._process_mass_spectra()
 
         # Calculate the PSM quality features for each PSM
-        for psm in self.psms:
+        print("Calculating PSM features...")
+        for psm in tqdm.tqdm(self.psms):
             psm.extract_features(self.target_mod, self.proteolyzer)
 
         print(f"Total {len(self.psms)} identifications")
 
+        print("Generating decoy PSMs...")
         self.psms = list(itertools.chain(
             *[self._generate_decoy_matches(res, self.psms)
               for res in self.target_residues]))
@@ -288,6 +294,7 @@ class Validate(validator_base.ValidateBase):
         mod_df = psms2df(self.psms)
 
         # Validate the PSMs using LDA
+        print("Validating PSMs...")
         self.mod_features = list(self.psms[0].features.keys())
         _, results, _ = lda.lda_validate(mod_df, self.mod_features,
                                          self.config.fisher_threshold, cv=10)
@@ -300,30 +307,35 @@ class Validate(validator_base.ValidateBase):
         self.model = lda.lda_model(mod_df, self.mod_features,
                                    self.config.fisher_threshold)
         if self.config.correct_deamidation:
+            print("Applying deamidation correction...")
             self.psms = lda.apply_deamidation_correction(
                 self.model, self.psms, self.target_mod, self.proteolyzer)
+                
+        # Write the model input to a file for re-use in retrieval
+        mod_df.to_csv(self.file_prefix + "model.csv")
 
         # Identify the PSMs whose peptides are benchmarks
         if self.config.benchmark_file is not None:
             self._identify_benchmarks(self.psms)
 
-        # Retain the psms whose probabilities exceed 0.99
-        #self.psms = [p for p in self.psms if p.lda_prob > 0.99]
-
         # --- Unmodified analogues --- #
         # Get the unmodified peptide analogues
+        print("Finding unmodified analogues...")
         self.unmod_psms = self._find_unmod_analogues(self.psms)
 
         # Calculate features for the unmodified peptide analogues
-        for psm in self.unmod_psms:
+        print("Calculating unmodified PSM features...")
+        for psm in tqdm.tqdm(self.unmod_psms):
             psm.extract_features(None, self.proteolyzer)
 
         # Add decoy identifications to the unmodified PSMs
+        print("Generating decoy matches for unmodified analogues...")
         self.unmod_psms = self._generate_decoy_matches(None, self.unmod_psms)
 
         # Validate the unmodified PSMs using LDA
         unmod_df = psms2df(self.unmod_psms)
 
+        print("Validating unmodified analogues...")
         unmod_features = list(self.unmod_psms[0].features.keys())
         _, unmod_results, _ = lda.lda_validate(unmod_df, unmod_features,
                                                self.config.fisher_threshold,
@@ -333,16 +345,24 @@ class Validate(validator_base.ValidateBase):
                                                 unmod_results)
 
         if self.config.correct_deamidation:
+            print("Applying deamidation correction for unmodified analogues")
             unmod_model = lda.lda_model(unmod_df, unmod_features,
                                         self.config.fisher_threshold)
             self.unmod_psms = lda.apply_deamidation_correction(
                 unmod_model, self.unmod_psms, None, self.proteolyzer)
 
+        unmod_df.to_csv(self.file_prefix + "unmod_model.csv")
+                
+        with open(self.file_prefix + "psms", "wb") as fh:
+            pickle.dump(self.unmod_psms, fh)
+
         # Filter the unmodified analogues according to their probabilities
-        #self.unmod_psms = [p for p in self.unmod_psms if p.lda_prob > 0.99]
+        unmod_threshold = lda.get_validation_threshold_df(unmod_results, 0.99)
+        self.unmod_psms = [p for p in self.unmod_psms
+                           if p.lda_score >= unmod_threshold]
 
         # --- Similarity Scores --- #
-        print("Calculating similarity scores")
+        print("Calculating similarity scores...")
         # Calculate the highest similarity score for each target peptide
         self.psms = similarity.calculate_similarity_scores(self.psms,
                                                            self.unmod_psms)
@@ -353,10 +373,14 @@ class Validate(validator_base.ValidateBase):
         localizes the modification site by computing site probabilities.
 
         """
-        spd_threshold = plots.get_validation_threshold(
+        spd_threshold = lda.get_validation_threshold(
             plots.split_target_decoy_scores(self.psms)[0], 0.99)
-        sim_threshold = min(psm.max_similarity for psm in self.psms
+        if self.config.sim_threshold_from_benchmarks:
+            sim_threshold = min(psm.max_similarity for psm in self.psms
                             if psm.benchmark)
+        else:
+            sim_threshold = self.config.sim_threshold
+        print("Localizing modification sites...")
         super().localize(self.psms, self.model, self.mod_features,
                          spd_threshold, sim_threshold)
 
@@ -371,7 +395,7 @@ class Validate(validator_base.ValidateBase):
         # Target modification identifications
         psms = []
 
-        for set_id, set_info in self.config.data_sets.items():
+        for set_id, set_info in tqdm.tqdm(self.config.data_sets.items()):
             data_dir = set_info['data_dir']
             conf = set_info['confidence']
 
@@ -418,7 +442,7 @@ class Validate(validator_base.ValidateBase):
             The PSM objects, now with their associated mass spectra.
 
         """
-        for set_id, data_conf in self.config.data_sets.items():
+        for set_id, data_conf in tqdm.tqdm(self.config.data_sets.items()):
             spec_file = os.path.join(data_conf['data_dir'],
                                      data_conf['spectra_file'])
 
@@ -720,6 +744,11 @@ def main():
     validator = Validate(conf)
     validator.validate()
     validator.localize()
+    
+    write_results(validator.file_prefix + "results.csv", validator.psms)
+    
+    with open(validator.file_prefix + "final_psms", "wb") as fh:
+        pickle.dump(validator.psms, fh)
 
 
 if __name__ == '__main__':
