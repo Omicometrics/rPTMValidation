@@ -112,6 +112,9 @@ class ValidateBase():
         # Get the mass change associated with the target modification
         self.mod_mass = self.unimod.get_mass(self.config.target_mod)
         
+        self.file_prefix = (f"{self.target_mod.replace('->', '2')}_"
+                            f"{''.join(self.config.target_residues)}_")
+        
     def _identify_benchmarks(self, psms):
         """
         Labels the PSMs which are in the benchmark set of peptides.
@@ -196,10 +199,15 @@ class ValidateBase():
             # Count instances of the free (non-modified) target residues in
             # the peptide sequence
             target_idxs = [jj for jj, res in enumerate(psm.seq)
-                           if res in self.config.target_residues]
+                           if res in self.config.target_residues +
+                           self.config.alternative_localization_residues]
 
             # Count the number of instances of the modification
-            mod_count = sum(ms.mod == self.target_mod for ms in psm.mods)
+            mod_count =\
+                sum(ms.mod == self.target_mod and
+                    isinstance(ms.site, int) and
+                    (ms.site - 1) in target_idxs
+                    for ms in psm.mods)
 
             if len(target_idxs) == mod_count:
                 # No alternative modification sites exist
