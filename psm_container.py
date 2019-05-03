@@ -4,6 +4,7 @@ A module providing a container class for PSM objects.
 
 """
 import collections
+import tqdm
 
 import pandas as pd
 
@@ -16,6 +17,12 @@ class PSMContainer(collections.UserList):
         """
         """
         self.data = psms if psms is not None else []
+        
+    def __getitem__(self, slice):
+        """
+        """
+        res = self.data[slice]
+        return res if isinstance(res, PSM) else PSMContainer(res)
         
     def clean_fragment_ions(self):
         """
@@ -128,7 +135,7 @@ class PSMContainer(collections.UserList):
 
         """
         seen, best_psms = set(), PSMContainer()
-        for psm in self.data:
+        for psm in tqdm.tqdm(self.data):
             data_id, spec_id = psm.data_id, psm.spec_id
             comb_id = (data_id, spec_id)
             if comb_id in seen:
