@@ -23,7 +23,6 @@ import ionscore
 import lda
 import modifications
 from peptide_spectrum_match import PSM
-import plots
 from psm_container import PSMContainer
 import readers
 import similarity
@@ -47,6 +46,9 @@ FEATURES = ["Charge", "ErrPepMass", "FracIon", "FracIon20%", "FracIonInt",
 UNMOD_FEATURES = FEATURES[:-2]
 
 SIMILARITY_THRESHOLD = 0.56
+
+MODEL_REMOVE_COLS = ["data_id", "seq", "spec_id", "target", "score", "prob",
+                     "uid"]
 
 
 def get_ion_score(seq, charge, ions, spectrum, tol):
@@ -122,11 +124,15 @@ def calculate_lda_scores(psms, lda_model, features):
 
     """
     # Convert PSMContainer to a pandas DataFrame
-    psms_df = psms.to_df()
+    batch_size = 10000
+    for ii in range(0, len(psms), batch_size):
+        batch_psms = psms[ii:ii + batch_size]
+    
+        psms_df = batch_psms.to_df()
 
-    lda_scores = lda_model.decide_predict(psms_df[features])[:, 0]
-    for ii, psm in enumerate(psms):
-        psm.lda_score = lda_scores[ii]
+        lda_scores = lda_model.decide_predict(psms_df[features])[:, 0]
+        for jj, psm in enumerate(batch_psms):
+            psm.lda_score = lda_scores[jj]
 
 
 class Retriever(validator_base.ValidateBase):
@@ -154,9 +160,16 @@ class Retriever(validator_base.ValidateBase):
     def retrieve(self):
         """
         """
+        print("Extracting peptide candidates...")
         peptides = self._get_peptides()
-        all_spectra = self._get_spectra()
+        #all_spectra = self._get_spectra()
+        
+        #with open("wide_search_spectra", "wb") as fh:
+        #    pickle.dump(all_spectra, fh)
+        with open("Nitration/wide_search_spectra", "rb") as fh:
+            all_spectra = pickle.load(fh)
 
+        print("Building LDA validation models...")
         model, spd_threshold = self.build_model()
         unmod_model, unmod_spd_threshold = self.build_unmod_model()
 
@@ -176,56 +189,94 @@ class Retriever(validator_base.ValidateBase):
                                       spec_ids, prec_mzs,
                                       tol=self.config.retrieval_tolerance))
         psms = PSMContainer(psms)
+        
+        with open(self.file_prefix + "psms1", "wb") as fh:
+            pickle.dump(psms, fh)
 
         print("Calculating rPTMDetermine scores...")
         calculate_lda_scores(psms, model, FEATURES)
+        
+        with open(self.file_prefix + "psms2", "wb") as fh:
+            pickle.dump(psms, fh)
 
         # Keep only the best match (in terms of LDA score) for each spectrum
+        print("Retaining best PSM for each spectrum...")
         psms = psms.get_best_psms()
+        
+        with open(self.file_prefix + "psms3", "wb") as fh:
+            pickle.dump(psms, fh)
 
         psms = lda.apply_deamidation_correction(model, psms, self.target_mod,
                                                 self.proteolyzer)
         psms.clean_fragment_ions()
         print("Deamidation removed from {} PSMs".format(
                 sum(p.corrected for p in psms)))
+                
+        with open(self.file_prefix + "psms4", "wb") as fh:
+            pickle.dump(psms, fh)
 
         print("Finding unmodified analogue PSMs...")
         unmod_psms = PSMContainer(self._find_unmod_analogues(psms))
+        
+        with open(self.file_prefix + "unmod_psms1", "wb") as fh:
+            pickle.dump(unmod_psms, fh)
 
         print("Calculating unmodified PSM features...")
-        for psm in unmod_psms:
+        for psm in tqdm.tqdm(unmod_psms):
             psm.extract_features(None, self.proteolyzer)
             psm.clean_fragment_ions()
+            
+        with open(self.file_prefix + "unmod_psms2", "wb") as fh:
+            pickle.dump(unmod_psms, fh)
 
         print("Calculating rPTMDetermine scores for unmodified analogues...")
         calculate_lda_scores(unmod_psms, unmod_model, UNMOD_FEATURES)
 
         unmod_psms = unmod_psms.filter_lda_score(unmod_spd_threshold)
+        
+        with open(self.file_prefix + "unmod_psms4", "wb") as fh:
+            pickle.dump(unmod_psms, fh)
 
         print("Calculating similarity scores...")
         psms = similarity.calculate_similarity_scores(psms, unmod_psms)
+        
+        with open(self.file_prefix + "psms4", "wb") as fh:
+            pickle.dump(psms, fh)
 
         self._identify_benchmarks(psms)
 
         # Remove the identifications found by ProteinPilot and validated by
         # Validate
         psms = self._remove_search_ids(psms)
+        
+        with open(self.file_prefix + "psms5", "wb") as fh:
+            pickle.dump(psms, fh)
 
         rec_psms = PSMContainer([p for idx, p in psms
                                  if types[idx] == "normal"])
         # TODO: similarity score threshold
         rec_psms = rec_psms.filter_lda_similarity(spd_threshold,
                                                   SIMILARITY_THRESHOLD)
+                                                  
+        with open(self.file_prefix + "rec_psms1", "wb") as fh:
+            pickle.dump(rec_psms, fh)
 
         print("Localizing modification site(s)...")
         self.localize(psms, model, FEATURES, spd_threshold,
                       SIMILARITY_THRESHOLD)
+                      
+        with open(self.file_prefix + "rec_psms2", "wb") as fh:
+            pickle.dump(rec_psms, fh)
 
         rec_psms = rec_psms.filter_site_prob(0.99)
+        
+        with open(self.file_prefix + "rec_psms3", "wb") as fh:
+            pickle.dump(rec_psms, fh)
 
         self.write_results(rec_psms,
-                           "validated_recovered_identifications.csv")
-        self.write_results(psms, "all_recovered_identifications.csv")
+                           self.file_prefix + "recovered_results.csv")
+        self.write_results(psms,
+                           self.file_prefix + "all_recovered_results.csv")
 
     def _get_peptides(self):
         """
@@ -284,13 +335,13 @@ class Retriever(validator_base.ValidateBase):
                         bk = [float(jk) for jk in xj.split(':')[1].split(',')]
                         ionscores[xk[0]][xk[1]].append(('res', 'pp', max(bk)))
 
-        ionscores = collections.defaultdict(dict)
+        ionscores2 = collections.defaultdict(dict)
         for ky1, ky2 in spec_ids:
             try:
                 bx = max([xk for xk in ionscores[ky1][ky2]
                           if isinstance(xk, tuple)],
                          key=operator.itemgetter(2))
-            except KeyError:
+            except ValueError:
                 continue
             bx2 = [max(xk, key=operator.itemgetter(2))
                    for xk in ionscores[ky1][ky2] if isinstance(xk, list)]
@@ -302,9 +353,9 @@ class Retriever(validator_base.ValidateBase):
                 if bx[2] > m:
                     m = bx[2]
 
-            ionscores[ky1][ky2] = m
+            ionscores2[ky1][ky2] = m
 
-        return ionscores
+        return ionscores2
 
     def _build_model(self, model_file):
         """
@@ -312,8 +363,9 @@ class Retriever(validator_base.ValidateBase):
         df = pd.read_csv(model_file, index_col=0)
 
         features = list(df.columns.values)
-        for feature in ["data_id", "seq", "spec_id", "target"]:
-            features.remove(feature)
+        for col in MODEL_REMOVE_COLS:
+            if col in features:
+                features.remove(col)
 
         _, df, model = lda.lda_validate(
             df, features, self.config.fisher_threshold, kfold=False)
@@ -321,7 +373,7 @@ class Retriever(validator_base.ValidateBase):
         results = [(r[1].score, r[1].prob)
                    for r in df.iterrows() if r[1].target]
 
-        threshold = plots.get_validation_threshold(results, 0.99)
+        threshold = lda.get_validation_threshold(results, 0.99)
 
         return model, threshold
 
@@ -416,7 +468,7 @@ class Retriever(validator_base.ValidateBase):
                             continue
 
                         score = get_ion_score(seq, c, list(by_anns[diff]),
-                                              spec[:jjm + 1, :], 0.2)
+                                              spec[:jjm + 1, :], 0.2)                       
 
                         # Filter to those PSMs whose ion scores, before
                         # denoising, are at least close to the score from
@@ -429,6 +481,9 @@ class Retriever(validator_base.ValidateBase):
 
                         psm.extract_features(self.config.target_mod,
                                              self.proteolyzer)
+                                             
+                        # TODO: optionally apply LDA criterion here to reduce number of matches
+                                             
                         score = psm.features["MatchScore"]
 
                         psm.clean_fragment_ions()

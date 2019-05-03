@@ -6,6 +6,7 @@ rPTMDetermine.
 """
 
 import os
+import sys
 from typing import Any, Dict, List, Optional
 
 
@@ -169,6 +170,34 @@ class Config():
         
         """
         return self.json_config.get("validated_ids_file", None)
+        
+    @property
+    def sim_threshold_from_benchmarks(self):
+        """
+        A boolean flag indicating whether benchmark identifications should be
+        used to dynamically define the similarity score threshold for
+        validation.
+
+        """
+        return self.json_config.get("sim_threshold_from_benchmarks", True)
+        
+    @property
+    def sim_threshold(self):
+        """
+        The threshold similarity score. This is required if
+        sim_threshold_from_benchmarks is False.
+
+        """
+        return self.json_config.get("sim_threshold", None)
+        
+    @property
+    def alternative_localization_residues(self):
+        """
+        The alternative residues targeted by the modification, but not under
+        validation (i.e. in target_residues).
+        
+        """
+        return self.json_config.get("alternative_localization_residues", [])
 
     def _check_required(self):
         """
@@ -182,3 +211,10 @@ class Config():
                 getattr(self, attr)
             except KeyError:
                 print(f"Missing required config option: {attr}")
+                sys.exit(1)
+                
+        if (not self.sim_threshold_from_benchmarks and
+                self.sim_threshold is None):
+            print("sim_threshold must be specified when not using the "
+                  "benchmark file")
+            sys.exit(1)
