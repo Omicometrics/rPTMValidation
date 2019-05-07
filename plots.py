@@ -8,6 +8,7 @@ from typing import List, Tuple
 
 from matplotlib import font_manager
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 import lda
 from peptide_spectrum_match import PSM
@@ -174,7 +175,7 @@ def plot_score_similarity(psms: List[PSM], prob_threshold=0.99,
     plt.show()
     
     
-def plot_recovered_score_similarity(psms: List[Tuple[PSM, str]],
+def plot_recovered_score_similarity(psms: List[PSM],
                                     sim_threshold,
                                     lda_threshold,
                                     save_path=None):
@@ -191,8 +192,8 @@ def plot_recovered_score_similarity(psms: List[Tuple[PSM, str]],
 
     """
     target_sims, target_ldas, decoy_sims, decoy_ldas = [], [], [], []
-    for psm, pep_type in psms:
-        if pep_type == "normal":
+    for psm in psms:
+        if psm.target:
             target_sims.append(psm.max_similarity)
             target_ldas.append(psm.lda_score)
         else:
@@ -232,6 +233,12 @@ def plot_recovered_score_similarity(psms: List[Tuple[PSM, str]],
         plt.savefig(save_path)
 
     plt.show()
+    
+    
+def _filter_psms_site_probs(psms):
+    """
+    """
+    return sorted([p.site_prob for p in psms if p.site_prob is not None])
 
 
 def plot_site_probabilities(psms: List[PSM], threshold=0.99, save_path=None):
@@ -243,8 +250,7 @@ def plot_site_probabilities(psms: List[PSM], threshold=0.99, save_path=None):
         threshold (float): The site probability threshold for localization.
 
     """
-    probs = [p.site_prob for p in psms if p.site_prob is not None]
-    probs = sorted(probs)
+    probs = _filter_psms_site_probs(psms)
 
     plt.scatter(range(len(probs)), probs, color=TARGET_COLOR, marker="x",
                 linewidth=2, s=100)
@@ -262,3 +268,82 @@ def plot_site_probabilities(psms: List[PSM], threshold=0.99, save_path=None):
         plt.savefig(save_path)
 
     plt.show()
+    
+    
+def plot_validated_recovered_site_probabilities(
+        val_psms: List[PSM], rec_psms: List[PSM], threshold=0.99,
+        save_path=None):
+    """
+    """
+    val_probs = _filter_psms_site_probs(val_psms)
+    rec_probs = _filter_psms_site_probs(rec_psms)
+    
+    plt.scatter(range(len(val_probs)), val_probs, color="#6c0e08", marker="x",
+                linewidth=2, s=100, label="Validated")
+    plt.scatter(range(len(rec_probs)), rec_probs, color="#16086c", marker="x",
+                linewidth=2, s=100, label="Missed")
+                
+    plt.xlabel("Identification No.", fontproperties=FONT)
+    plt.ylabel("Site Probability", fontproperties=FONT)
+    
+    ax = plt.gca()
+    ax.axhline(threshold, color=THRESHOLD_COLOR, linestyle="--", linewidth=2)
+    
+    plt.annotate(f"$p_{{site}}$={threshold}",
+                 (0.75 * len(rec_probs), threshold - 0.05),
+                 fontproperties=FONT)
+                 
+    ax.legend(prop=FONT, frameon=False, loc=4, handletextpad=0.01)
+
+    if save_path is not None:
+        plt.savefig(save_path)
+
+    plt.show()
+    
+    
+def plot_similarity_score_dist(scores: List[float], kde=False,
+                               save_path=None):
+    """
+    """
+    scores = sorted(scores)
+    
+    if kde:
+        sns.distplot(scores, hist=True, kde=True,
+                     bins=20, color='darkblue', 
+                     hist_kws={'edgecolor':'black'},
+                     kde_kws={'linewidth': 4})
+        plt.ylabel("Probability Density", fontproperties=FONT)
+    else:
+        sns.distplot(scores, hist=True, kde=False,
+                     bins=20, color='darkblue', 
+                     hist_kws={'edgecolor':'black'})
+        plt.ylabel("Frequency", fontproperties=FONT)
+        
+    plt.xlabel("Similarity Score", fontproperties=FONT)
+    
+    if save_path is not None:
+        plt.savefig(save_path)
+
+    plt.show()
+    
+    
+def plot_spectra(spectra):
+    """
+    Plots any number of mass spectra, vertically aligned.
+    
+    Args:
+        spectra (list): A list of numpy arrays (n x 2).
+
+    """
+    fig, axes = plt.subplots(len(spectra), 1, sharex=True)
+    axes = [axes] if len(spectra) == 1 else axes
+    for ax, spectrum in zip(axes, spectra):
+        ax.stem(spectrum[:, 0], spectrum[:, 1], "black", basefmt=' ',
+                       markerfmt=' ', label=None)
+        ax.set_ylabel("Intensity", fontproperties=FONT)
+    
+    plt.xlabel("$\it{m/z}$", fontproperties=FONT)
+    
+    plt.show()
+    
+    
