@@ -4,11 +4,19 @@ A module providing a container class for PSM objects.
 
 """
 import collections
+import csv
+import os
+import sys
 import tqdm
 
 import pandas as pd
 
+import modifications
 from peptide_spectrum_match import PSM
+
+sys.path.append("../pepfrag")
+from pepfrag import Peptide
+
 
 class PSMContainer(collections.UserList):
     """
@@ -22,7 +30,7 @@ class PSMContainer(collections.UserList):
         """
         """
         res = self.data[slice]
-        return res if isinstance(res, PSM) else PSMContainer(res)
+        return PSMContainer(res) if isinstance(res, list) else res
         
     def clean_fragment_ions(self):
         """
@@ -172,3 +180,48 @@ class PSMContainer(collections.UserList):
                 rows.append(drow)
 
         return pd.DataFrame(rows)
+        
+        
+def read_csv(csv_file, ptmdb, spectra=None, sep="\t"):
+    """
+    Converts the contents of a CSV file to a PSMContainer. Each row of the
+    file should contain the details of a single PSM. This function is
+    designed to be used to read CSV files output by this program.
+    
+    Args:
+        csv_file (str): The path to the CSV file.
+        
+    Returns:
+        PSMContainer.
+
+    """
+    if not os.path.exists(csv_file):
+        print(f"CSV file {csv_file} does not exist - exiting")
+        sys.exit(1)
+        
+    psms = []
+    with open(csv_file, newline="") as fh:
+        reader = csv.DictReader(fh, delimiter=sep)
+        for row in reader:
+            psm = PSM(
+                row.get("DataID", row.get("Rawset", None)),
+                row["SpectrumID"],
+                Peptide(
+                    row["Sequence"],
+                    int(row["Charge"]),
+                    modifications.parse_mods(row["Modifications"], ptmdb)
+                )
+            )
+            psm.lda_score = float(row.get("rPTMDetermineScore", None))
+            site_prob = row["SiteProbability"]
+            psm.site_prob = (float(site_prob) if site_prob else None)
+
+            if "SimilarityScore" in row:
+                psm.similarity_scores = [(None, None, float(row["SimilarityScore"]))]
+            
+            if spectra is not None:
+                psm.spectrum = spectra[psm.data_id][psm.spec_id]
+                
+            psms.append(psm)
+        
+    return PSMContainer(psms)
