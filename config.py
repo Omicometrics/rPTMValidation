@@ -198,6 +198,14 @@ class Config():
         
         """
         return self.json_config.get("alternative_localization_residues", [])
+        
+    @property
+    def site_localization_threshold(self):
+        """
+        The probability threshold for site localization.
+
+        """
+        return self.json_config.get("site_localization_threshold", 0.99)
 
     def _check_required(self):
         """

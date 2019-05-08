@@ -171,7 +171,9 @@ class Retriever(validator_base.ValidateBase):
 
         print("Building LDA validation models...")
         model, spd_threshold = self.build_model()
+        print(f"Modified LDA threshold = {spd_threshold}")
         unmod_model, unmod_spd_threshold = self.build_unmod_model()
+        print(f"Unmodified LDA threshold = {unmod_spd_threshold}")
 
         spec_ids, prec_mzs = [], []
         for set_id, spectra in all_spectra.items():
@@ -184,10 +186,9 @@ class Retriever(validator_base.ValidateBase):
         self.db_ionscores = self._get_ionscores(spec_ids)
 
         print("Finding better modified PSMs...")
-        psms, types = zip(
-            *self._get_better_matches(peptides, all_spectra,
-                                      spec_ids, prec_mzs,
-                                      tol=self.config.retrieval_tolerance))
+        psms = self._get_better_matches(peptides, all_spectra, spec_ids,
+                                        prec_mzs,
+                                        tol=self.config.retrieval_tolerance)
         psms = PSMContainer(psms)
         
         with open(self.file_prefix + "psms1", "wb") as fh:
@@ -240,21 +241,20 @@ class Retriever(validator_base.ValidateBase):
         print("Calculating similarity scores...")
         psms = similarity.calculate_similarity_scores(psms, unmod_psms)
         
-        with open(self.file_prefix + "psms4", "wb") as fh:
+        with open(self.file_prefix + "psms5", "wb") as fh:
             pickle.dump(psms, fh)
 
-        self._identify_benchmarks(psms)
+        if self.config.benchmark_file is not None:
+            self._identify_benchmarks(psms)
 
         # Remove the identifications found by ProteinPilot and validated by
         # Validate
         psms = self._remove_search_ids(psms)
+        rec_psms = PSMContainer([p for p in psms if p.target])
         
-        with open(self.file_prefix + "psms5", "wb") as fh:
+        with open(self.file_prefix + "psms6", "wb") as fh:
             pickle.dump(psms, fh)
 
-        rec_psms = PSMContainer([p for idx, p in psms
-                                 if types[idx] == "normal"])
-        # TODO: similarity score threshold
         rec_psms = rec_psms.filter_lda_similarity(spd_threshold,
                                                   SIMILARITY_THRESHOLD)
                                                   
@@ -262,21 +262,24 @@ class Retriever(validator_base.ValidateBase):
             pickle.dump(rec_psms, fh)
 
         print("Localizing modification site(s)...")
-        self.localize(psms, model, FEATURES, spd_threshold,
+        self.localize(rec_psms, model, FEATURES, spd_threshold,
                       SIMILARITY_THRESHOLD)
-                      
+
         with open(self.file_prefix + "rec_psms2", "wb") as fh:
             pickle.dump(rec_psms, fh)
+            
+        rec_psms = self.filter_localizations(rec_psms)
 
-        rec_psms = rec_psms.filter_site_prob(0.99)
+        rec_psms = rec_psms.filter_site_prob(
+            self.config.site_localization_threshold)
         
         with open(self.file_prefix + "rec_psms3", "wb") as fh:
             pickle.dump(rec_psms, fh)
 
         self.write_results(rec_psms,
                            self.file_prefix + "recovered_results.csv")
-        self.write_results(psms,
-                           self.file_prefix + "all_recovered_results.csv")
+        #self.write_results(psms,
+        #                   self.file_prefix + "all_recovered_results.csv")
 
     def _get_peptides(self):
         """
@@ -290,10 +293,24 @@ class Retriever(validator_base.ValidateBase):
                 and set(RESIDUES).issuperset(x[2]) and
                 any(res in x[2] for res in self.config.target_residues)}
 
-        peps2 = set()
+        '''peps2 = set()
         for x in peps:
-            mods = tuple([ms for ms in x[1] if ms.mod != self.target_mod])
-            peps2.add((x[0], mods, x[2], x[3]))
+            seq = x[0]
+            mods = []
+            for ms in x[1]:
+                try:
+                    site = int(ms.site)
+                except ValueError:
+                    mods.append(ms)
+                    continue
+                    
+                if ms.mod != self.target_mod and seq[site - 1] not in self.config.target_residues:
+                    mods.append(ms)
+
+            peps2.add((x[0], tuple(self._filter_mods(x[1], x[0])), x[2], x[3]))'''
+            
+        peps2 = {(x[0], tuple(self._filter_mods(x[1], x[0])), x[2], x[3])
+                 for x in peps}
 
         return list(peps2)
 
@@ -477,7 +494,8 @@ class Retriever(validator_base.ValidateBase):
                             continue
 
                         psm = PSM(spec_ids[kk][0], spec_ids[kk][1],
-                                  mod_peptide, spectrum=spec)
+                                  mod_peptide, spectrum=spec,
+                                  target=(pep_type == "normal"))
 
                         psm.extract_features(self.config.target_mod,
                                              self.proteolyzer)
@@ -489,10 +507,10 @@ class Retriever(validator_base.ValidateBase):
                         psm.clean_fragment_ions()
 
                         if round(score, 4) >= dbscore:
-                            better.append((psm, pep_type))
+                            better.append(psm)
         return better
 
-    def _remove_search_ids(self, psms):
+    def _remove_search_ids(self, psms, types=None):
         """
         Removes the database search-identified results from the list of
         recovered PSMs.

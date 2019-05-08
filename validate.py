@@ -353,7 +353,7 @@ class Validate(validator_base.ValidateBase):
 
         unmod_df.to_csv(self.file_prefix + "unmod_model.csv")
                 
-        with open(self.file_prefix + "psms", "wb") as fh:
+        with open(self.file_prefix + "unmod_psms", "wb") as fh:
             pickle.dump(self.unmod_psms, fh)
 
         # Filter the unmodified analogues according to their probabilities
@@ -383,6 +383,7 @@ class Validate(validator_base.ValidateBase):
         print("Localizing modification sites...")
         super().localize(self.psms, self.model, self.mod_features,
                          spd_threshold, sim_threshold)
+        self.psms = self.filter_localizations(self.psms)
 
     def _get_identifications(self):
         """
@@ -743,6 +744,10 @@ def main():
 
     validator = Validate(conf)
     validator.validate()
+    
+    with open(validator.file_prefix + "validated_psms", "wb") as fh:
+        pickle.dump(validator.psms, fh)
+    
     validator.localize()
     
     write_results(validator.file_prefix + "results.csv", validator.psms)

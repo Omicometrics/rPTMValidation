@@ -19,6 +19,7 @@ import peptides
 import plots
 import proteolysis
 from peptide_spectrum_match import psms2df, UnmodPSM
+from psm_container import PSMContainer
 import readers
 import spectra_readers
 import utilities
@@ -102,6 +103,7 @@ class ValidateBase():
         self.proteolyzer = proteolysis.Proteolyzer(self.config.enzyme)
 
         # The UniMod PTM DB
+        print("Reading UniMod PTM DB")
         self.unimod = readers.PTMDB(self.config.unimod_ptm_file)
         
         # All ProteinPilot results
@@ -112,8 +114,14 @@ class ValidateBase():
         # Get the mass change associated with the target modification
         self.mod_mass = self.unimod.get_mass(self.config.target_mod)
         
-        self.file_prefix = (f"{self.target_mod.replace('->', '2')}_"
-                            f"{''.join(self.config.target_residues)}_")
+        path_str = (f"{self.target_mod.replace('->', '2')}_"
+                    f"{''.join(self.config.target_residues)}")
+        
+        output_dir = path_str
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+        
+        self.file_prefix = f"{output_dir}/{path_str}_"
         
     def _identify_benchmarks(self, psms):
         """
@@ -142,7 +150,18 @@ class ValidateBase():
         print("Caching PSM sequences...")
         psm_info = []
         for psm in mod_psms:
-            mods = [ms for ms in psm.mods if ms.mod != self.target_mod]
+            seq = psm.seq
+            mods = []
+            for ms in psm.mods:
+                try:
+                    site = int(ms.site)
+                except ValueError:
+                    mods.append(ms)
+                    continue
+                    
+                if ms.mod != self.target_mod and seq[site - 1] not in self.config.target_residues:
+                    mods.append(ms)
+
             psm_info.append(
                 (mods, merged_seqs.get(psm.seq, mods), psm.charge))
 
@@ -181,6 +200,32 @@ class ValidateBase():
                                  spectrum=spec))
 
         return utilities.deduplicate(unmod_psms)
+        
+    def _filter_mods(self, mods, seq):
+        """
+        Filters the modification list to remove those instances of the
+        target_mod at one of the target_residues.
+        
+        Args:
+            mods (list of ModSites)
+            seq (str): The peptide sequence.
+            
+        Returns:
+            Filtered list of ModSites.
+
+        """
+        new_mods = []
+        for ms in mods:
+            try:
+                site = int(ms.site)
+            except ValueError:
+                new_mods.append(ms)
+                continue
+                
+            if ms.mod != self.target_mod and seq[site - 1] not in self.config.target_residues:
+                new_mods.append(ms)
+                
+        return new_mods
         
     def localize(self, psms, lda_model, features, spd_threshold,
                  sim_threshold):
@@ -221,8 +266,7 @@ class ValidateBase():
                 new_psm = copy.deepcopy(psm)
 
                 # Update the modification list to use the new target sites
-                new_psm.mods = [ms for ms in psm.mods
-                                if ms.mod != self.target_mod]
+                new_psm.mods = self._filter_mods(new_psm.mods, new_psm.seq)
                 for idx in mod_comb:
                     new_psm.mods.append(
                         modifications.ModSite(
@@ -241,3 +285,27 @@ class ValidateBase():
                 isoform.site_prob = site_probability(score, all_scores)
 
             psms[ii] = max(isoform_scores.keys(), key=lambda p: p.site_prob)
+            
+    def filter_localizations(self, psms):
+        """
+        Filters the PSMs to retain only those which have the target_mod
+        localizaed to one of the target residues.
+        
+        Args:
+            psms (list of PSMs): The PSMs to be filtered.
+            
+        Returns:
+            Filtered list of PSMs.
+
+        """
+        new_psms = []
+        for psm in psms:
+            seq = psm.seq
+            for ms in psm.mods:
+                if ms.site == "nterm" or ms.site == "cterm":
+                    continue
+                if (ms.mod == self.target_mod and
+                        seq[int(ms.site) - 1] in self.config.target_residues):
+                    new_psms.append(psm)
+                    break
+        return PSMContainer(new_psms)
