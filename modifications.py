@@ -108,6 +108,28 @@ def _parse_mod_string(mod_str, ptmdb, mass_type):
                 f"Failed to detect site for modification {mod_str}")
 
     return ModSite(mass, site, name)
+    
+    
+def _parse_bar_mod_string(mod_str):
+    """
+    Parses the vertical bar-separated modification string.
+
+    Args:
+        mod_str (str): The modification string, vertical bar-separated.
+
+    Returns:
+        The extracted information as a ModSite namedtuple.
+
+    """
+    mod_list = mod_str.strip().split('|')
+    
+    site = mod_list[1]
+    try:
+        site = int(site)
+    except ValueError:
+        pass
+
+    return ModSite(float(mod_list[0]), site, mod_list[2])
 
 
 def parse_mods(mods_str, ptmdb, mass_type=MassType.mono):
@@ -130,12 +152,17 @@ def parse_mods(mods_str, ptmdb, mass_type=MassType.mono):
 
     """
     if not mods_str:
-        raise UnknownModificationException("No modification string provided")
+        return []
 
     mods = []
     if '@' in mods_str:
+        # Ignore modifications that begin with "No ", since these reflect the
+        # absence of a modification, e.g. quantitative label
         mods = [_parse_mod_string(mod, ptmdb, mass_type)
-                for mod in mods_str.split(';')]
+                for mod in mods_str.split(';') if not mod.startswith("No ")]
+    elif "|" in mods_str:
+        mods = [_parse_bar_mod_string(mod)
+                for mod in mods_str.split(",")]
     else:
         raise NotImplementedError(f"parse_mods called with {mods_str}")
 
