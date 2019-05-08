@@ -38,7 +38,7 @@ class PSM():
 
     """
     def __init__(self, data_id: Optional[str], spec_id: Optional[str],
-                 peptide: Peptide, spectrum=None):
+                 peptide: Peptide, spectrum=None, target=True):
         """
         Initializes the PSM class using basic identifying information.
 
@@ -82,6 +82,8 @@ class PSM():
         # Whether the PSM has been corrected by some post-processing, e.g.
         # removal of deamidation
         self.corrected = False
+        
+        self.target = target
 
     @property
     def seq(self) -> str:
@@ -105,6 +107,7 @@ class PSM():
         Sets the peptide modifications list.
 
         """
+        self.clean_fragment_ions()
         self.peptide.mods = val
 
     @property
@@ -129,6 +132,7 @@ class PSM():
         Sets the composed mass_spectrum.Spectrum.
 
         """
+        self.clean_fragment_ions()
         if val is not None and not isinstance(val, mass_spectrum.Spectrum):
             raise TypeError(
                 "Setting PSM.spectrum requires a mass_spectrum.Spectrum")
@@ -159,7 +163,24 @@ class PSM():
             String representation.
 
         """
-        return f"<{self.__class__.__name__} {self.__dict__}>"
+        out = {
+            "data_id": self.data_id,
+            "spec_id": self.spec_id,
+            "peptide": self.peptide,
+            "spectrum": self.spectrum,
+            "decoy_id": self.decoy_id,
+            "benchmark": self.benchmark,
+            "similarity_scores": self.similarity_scores,
+            "features": self.features,
+            "lda_prob": self.lda_prob,
+            "lda_score": self.lda_score,
+            "decoy_lda_score": self.decoy_lda_score,
+            "decoy_lda_prob": self.decoy_lda_prob,
+            "site_prob": self.site_prob,
+            "corrected": self.corrected,
+            "target": self.target
+        }
+        return f"<{self.__class__.__name__} {out}>"
 
     def __repr__(self) -> str:
         """
@@ -169,7 +190,7 @@ class PSM():
             Official string representation.
 
         """
-        return str(self)
+        return f"<{self.__class__.__name__} {self.__dict__}>"
 
     def __hash__(self):
         """
