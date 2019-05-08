@@ -135,7 +135,9 @@ def mzml_extract_ms1(mzml_file, namespace="http://psi.hupo.org/ms/mzml"):
         if event == 'end' and element.tag == f"{{{namespace}}}spectrum":
             # This contains the cycle and experiment information
             spectrum_info = dict(element.items())
-            default_array_length = int(spectrum_info['default_array_length'])
+            default_array_length = int(
+                spectrum_info.get('default_array_length',
+                                  spectrum_info["defaultArrayLength"]))
 
             # MS level
             if element.find(f"{{{namespace}}}precursorList"):
