@@ -108,7 +108,7 @@ def plot_scores(psms: List[PSM], prob_threshold=0.99, label_prefix="",
 
 def plot_score_similarity(psms: List[PSM], prob_threshold=0.99,
                           save_path=None, use_benchmarks=True,
-                          sim_threshold=None):
+                          sim_threshold=None, lda_threshold=None):
     """
     Plots the rPTMDetermine scores against the unmodified/modified spectrum
     similarity scores.
@@ -131,8 +131,13 @@ def plot_score_similarity(psms: List[PSM], prob_threshold=0.99,
             sims.append(psm.max_similarity)
             ldas.append(psm.lda_score)
 
-    val_score = lda.get_validation_threshold(split_target_decoy_scores(psms)[0],
-                                         prob_threshold)
+    if lda_threshold is None:
+        print("Calculating rPTMDetermine threshold using probabilities...")
+        val_score = lda.get_validation_threshold(
+            split_target_decoy_scores(psms)[0], prob_threshold)
+    else:
+        print("Using rPTMDetermine threshold provided...")
+        val_score = lda_threshold
     sim_score = min(bench_sims) if use_benchmarks else sim_threshold
 
     if use_benchmarks:
