@@ -78,7 +78,22 @@ class Spectrum():
             The official string representation of the Spectrum object.
 
         """
-        return repr(self._peaks)
+        return f"<{self.__class__.__name__} {self.__dict__}>"
+        
+    def __str__(self):
+        """
+        Implements the __str__ method for the Spectrum class.
+        
+        Returns:
+            string representation of the Spectrum object.
+
+        """
+        out = {
+            "peaks": len(self._peaks),
+            "prec_mz": self.prec_mz,
+            "charge": self.charge
+        }
+        return f"<{self.__class__.__name__} {out}>"
 
     def __nonzero__(self):
         """
