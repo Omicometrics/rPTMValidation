@@ -17,6 +17,8 @@ PPRes = collections.namedtuple("PPRes", ["seq", "mods", "theor_z", "spec",
 
 MGF_TITLE_REGEX = re.compile(r"TITLE=Locus:([\d\.]+) ")
 
+UNIMOD_FORMULA_REGEX = re.compile(r"(\w+)\(?([0-9-]+)?\)?")
+
 
 class ParserException(Exception):
     """
@@ -109,6 +111,7 @@ class PTMDB():
     _mass_keys = ['Monoisotopic mass', 'Average mass']
     _name_keys = ['PSI-MS Name', 'Interim name']
     _desc_key = 'Description'
+    _comp_key = 'Composition'
 
     def __init__(self, ptm_file):
         """
@@ -121,11 +124,12 @@ class PTMDB():
         self._data = {
             'Monoisotopic mass': [],
             'Average mass': [],
+            PTMDB._comp_key: [],
             # Each of the below keys store a dictionary mapping their
-            # position in the above mass lists
+            # position in the above lists
             'PSI-MS Name': {},
             'Interim name': {},
-            'Description': {}
+            PTMDB._desc_key: {}
         }
 
         with open(ptm_file, newline='') as fh:
@@ -147,6 +151,29 @@ class PTMDB():
         for key in PTMDB._name_keys:
             self._data[key][entry[key]] = pos
         self._data[PTMDB._desc_key][entry[key].replace(' ', '').lower()] = pos
+        self._data[PTMDB._comp_key].append(entry[PTMDB._comp_key])
+
+    def _get_idx(self, name):
+        """
+        Retrieves the index of the specified modification, i.e. its position
+        in the mass and composition lists.
+
+        Args:
+            name (str): The name of the modification.
+
+        Returns:
+            The integer index of the modification, or None.
+
+        """
+        # Try matching either of the two name fields, using PSI-MS Name first
+        for key in PTMDB._name_keys:
+            idx = self._data[key].get(name, None)
+            if idx is not None:
+                return idx
+
+        # Try matching the description
+        name = name.replace(' ', '')
+        return self._data[PTMDB._desc_key].get(name.lower(), None)
 
     def get_mass(self, name, mass_type=MassType.mono):
         """
@@ -162,18 +189,38 @@ class PTMDB():
         """
         mass_key = (PTMDB._mass_keys[0] if mass_type is MassType.mono
                     else PTMDB._mass_keys[1])
-        # Try matching either of the two name fields, using PSI-MS Name first
-        for key in PTMDB._name_keys:
-            idx = self._data[key].get(name, None)
-            if idx is not None:
-                return self._data[mass_key][idx]
 
-        # Try matching the description
+        idx = self._get_idx(name)
+        if idx is not None:
+            return self._data[mass_key][idx]
+
+        # Try matching the modification name
         name = name.replace(' ', '')
         if name.lower().startswith("delta"):
             return parse_mod_formula(name, mass_type)
-        idx = self._data[PTMDB._desc_key].get(name.lower(), None)
-        return None if idx is None else self._data[mass_key][idx]
+
+        return None
+
+    def get_formula(self, name):
+        """
+        Retrieves the modification formula, in terms of its elemental
+        composition.
+
+        Args:
+            name (str): The name of the modification.
+
+        Returns:
+            A dictionary of element (isotope) to the number of occurrences.
+
+        """
+        idx = self._get_idx(name)
+        if idx is None:
+            return None
+
+        # Parse the composition string
+        return {k: int(v) if v else 0
+                for k, v in re.findall(UNIMOD_FORMULA_REGEX,
+                                       self._data[PTMDB._comp_key][idx])}
 
 
 def _build_ppres(row):
