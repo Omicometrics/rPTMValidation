@@ -206,6 +206,14 @@ class Config():
 
         """
         return self.json_config.get("site_localization_threshold", 0.99)
+        
+    @property
+    def output_dir(self):
+        """
+        The directory to which to write output files.
+        
+        """
+        return self.json_config.get("output_dir", None)
 
     def _check_required(self):
         """

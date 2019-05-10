@@ -116,8 +116,11 @@ class ValidateBase():
         
         path_str = (f"{self.target_mod.replace('->', '2')}_"
                     f"{''.join(self.config.target_residues)}")
-        
-        output_dir = path_str
+                    
+        output_dir = self.config.output_dir
+        if output_dir is None:
+            output_dir = path_str
+
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
         
