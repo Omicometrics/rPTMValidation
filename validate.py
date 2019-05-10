@@ -12,7 +12,6 @@ import csv
 import functools
 import itertools
 import json
-import math
 import multiprocessing as mp
 import operator
 import os
@@ -28,8 +27,6 @@ import generate_decoys
 import lda
 import modifications
 import peptides
-import plots
-import proteolysis
 from peptide_spectrum_match import DecoyID, PSM, psms2df
 import readers
 import similarity
@@ -253,6 +250,7 @@ class Validate(validator_base.ValidateBase):
 
         # The LDA validation model for scoring
         self.model = None
+        self.spd_threshold = None
         self.mod_features = None
 
         # Used for multiprocessing throughout the class methods
@@ -292,20 +290,23 @@ class Validate(validator_base.ValidateBase):
         # Convert the PSMs to a pandas DataFrame, including a "target" column
         # to distinguish target and decoy peptides
         mod_df = psms2df(self.psms)
+        
+        # Train full LDA model
+        self.mod_features = list(self.psms[0].features.keys())
+        self.model, self.spd_threshold = lda.lda_model(
+            mod_df, self.mod_features, self.config.fisher_threshold)
 
         # Validate the PSMs using LDA
         print("Validating PSMs...")
-        self.mod_features = list(self.psms[0].features.keys())
-        _, results, _ = lda.lda_validate(mod_df, self.mod_features,
-                                         self.config.fisher_threshold, cv=10)
+        results = lda.lda_validate(mod_df, self.mod_features,
+                                   self.config.fisher_threshold,
+                                   self.spd_threshold)
 
         # Merge the LDA results to the PSM objects
         self.psms = lda.merge_lda_results(self.psms, results)
 
         # Apply a deamidation removal: test whether the non-deamidated
         # peptide has a higher score for the identification
-        self.model = lda.lda_model(mod_df, self.mod_features,
-                                   self.config.fisher_threshold)
         if self.config.correct_deamidation:
             print("Applying deamidation correction...")
             self.psms = lda.apply_deamidation_correction(
@@ -337,17 +338,18 @@ class Validate(validator_base.ValidateBase):
 
         print("Validating unmodified analogues...")
         unmod_features = list(self.unmod_psms[0].features.keys())
-        _, unmod_results, _ = lda.lda_validate(unmod_df, unmod_features,
-                                               self.config.fisher_threshold,
-                                               cv=10)
+        unmod_model, unmod_spd_threshold = lda.lda_model(
+            unmod_df, unmod_features, self.config.fisher_threshold)
+        
+        unmod_results = lda.lda_validate(unmod_df, unmod_features,
+                                         self.config.fisher_threshold,
+                                         unmod_spd_threshold)
 
         self.unmod_psms = lda.merge_lda_results(self.unmod_psms,
                                                 unmod_results)
 
         if self.config.correct_deamidation:
             print("Applying deamidation correction for unmodified analogues")
-            unmod_model = lda.lda_model(unmod_df, unmod_features,
-                                        self.config.fisher_threshold)
             self.unmod_psms = lda.apply_deamidation_correction(
                 unmod_model, self.unmod_psms, None, self.proteolyzer)
 
@@ -357,9 +359,8 @@ class Validate(validator_base.ValidateBase):
             pickle.dump(self.unmod_psms, fh)
 
         # Filter the unmodified analogues according to their probabilities
-        unmod_threshold = lda.get_validation_threshold_df(unmod_results, 0.99)
         self.unmod_psms = [p for p in self.unmod_psms
-                           if p.lda_score >= unmod_threshold]
+                           if p.lda_score >= unmod_spd_threshold]
 
         # --- Similarity Scores --- #
         print("Calculating similarity scores...")
@@ -373,8 +374,6 @@ class Validate(validator_base.ValidateBase):
         localizes the modification site by computing site probabilities.
 
         """
-        spd_threshold = lda.get_validation_threshold(
-            plots.split_target_decoy_scores(self.psms)[0], 0.99)
         if self.config.sim_threshold_from_benchmarks:
             sim_threshold = min(psm.max_similarity for psm in self.psms
                             if psm.benchmark)
@@ -382,7 +381,7 @@ class Validate(validator_base.ValidateBase):
             sim_threshold = self.config.sim_threshold
         print("Localizing modification sites...")
         super().localize(self.psms, self.model, self.mod_features,
-                         spd_threshold, sim_threshold)
+                         self.spd_threshold, sim_threshold)
         self.psms = self.filter_localizations(self.psms)
 
     def _get_identifications(self):

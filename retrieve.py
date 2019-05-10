@@ -283,6 +283,8 @@ class Retriever(validator_base.ValidateBase):
 
     def _get_peptides(self):
         """
+        Retrieves the candidate peptides from the database search results.
+
         """
         allpeps = [(set_id, spec_id, m.seq, tuple(m.mods), m.theor_z,
                     m.pep_type)
@@ -292,22 +294,6 @@ class Retriever(validator_base.ValidateBase):
         peps = {(x[2], x[3], x[4], x[5]) for x in allpeps if len(x[2]) >= 7
                 and set(RESIDUES).issuperset(x[2]) and
                 any(res in x[2] for res in self.config.target_residues)}
-
-        '''peps2 = set()
-        for x in peps:
-            seq = x[0]
-            mods = []
-            for ms in x[1]:
-                try:
-                    site = int(ms.site)
-                except ValueError:
-                    mods.append(ms)
-                    continue
-                    
-                if ms.mod != self.target_mod and seq[site - 1] not in self.config.target_residues:
-                    mods.append(ms)
-
-            peps2.add((x[0], tuple(self._filter_mods(x[1], x[0])), x[2], x[3]))'''
             
         peps2 = {(x[0], tuple(self._filter_mods(x[1], x[0])), x[2], x[3])
                  for x in peps}
@@ -384,13 +370,8 @@ class Retriever(validator_base.ValidateBase):
             if col in features:
                 features.remove(col)
 
-        _, df, model = lda.lda_validate(
-            df, features, self.config.fisher_threshold, kfold=False)
-
-        results = [(r[1].score, r[1].prob)
-                   for r in df.iterrows() if r[1].target]
-
-        threshold = lda.get_validation_threshold(results, 0.99)
+        model, threshold = lda.lda_model(
+            df, features, self.config.fisher_threshold)
 
         return model, threshold
 
