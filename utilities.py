@@ -5,14 +5,13 @@ A script providing utility functions for peptide modification validation.
 """
 from bisect import bisect_left
 import collections
-import math
-from typing import List, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 
 Slices = collections.namedtuple("Slices", ["idxs", "bounds"])
 
 
-def slice_list(values, nslices=800) -> Slices:
+def slice_list(values: List[float], nslices: int = 800) -> Slices:
     """
     Slices the list of values into nslices segments.
 
@@ -43,7 +42,7 @@ def slice_list(values, nslices=800) -> Slices:
     return Slices(idxs, bounds)
 
 
-def longest_sequence(seq: List[int]) -> Tuple[int, List[int]]:
+def longest_sequence(seq: Sequence[int]) -> Tuple[int, Optional[List[int]]]:
     """
     Finds the length (and subsequence) of the longest consecutive sequence
     of integers in a sorted list. This algorithm is O(n) in compexity.
@@ -58,7 +57,9 @@ def longest_sequence(seq: List[int]) -> Tuple[int, List[int]]:
     if not seq:
         return 0, None
 
-    max_len, num_lens, max_num = -1, {}, None
+    max_len = -1
+    num_lens: Dict[int, int] = {}
+    max_num = -1
     for num in seq:
         num_len = num_lens[num] = num_lens.get(num - 1, 0) + 1
         if num_len > max_len:
@@ -81,7 +82,7 @@ def sort_lists(key: int, *args):
     return zip(*sorted(zip(*args), key=lambda t: t[key]))
 
 
-def deduplicate(items):
+def deduplicate(items: Sequence[Any]) -> List[Any]:
     """
     Deduplicates a list, retaining the order of the elements.
 
@@ -92,6 +93,6 @@ def deduplicate(items):
         The deduplicated list of items, retaining the order.
 
     """
-    seen = set()
+    seen: Set[Any] = set()
     seen_add = seen.add
     return [x for x in items if not (x in seen or seen_add(x))]
