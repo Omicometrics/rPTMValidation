@@ -6,6 +6,7 @@ A series of functions used to read different file types.
 import collections
 import csv
 import re
+from typing import Any, Dict, List, TextIO, Tuple
 
 from constants import AA_SYMBOLS, ELEMENT_MASSES, MassType
 
@@ -19,6 +20,8 @@ MGF_TITLE_REGEX = re.compile(r"TITLE=Locus:([\d\.]+) ")
 
 UNIMOD_FORMULA_REGEX = re.compile(r"(\w+)\(?([0-9-]+)?\)?")
 
+MOD_FORMULA_REGEX = re.compile(r"(\w+)\(([0-9]+)\)")
+
 
 class ParserException(Exception):
     """
@@ -27,7 +30,7 @@ class ParserException(Exception):
     """
 
 
-def _strip_line(string, nchars=2):
+def _strip_line(string: str, nchars: int = 2) -> str:
     """
     Strips trailing whitespace, preceeding nchars and preceeding whitespace
     from the given string.
@@ -43,7 +46,7 @@ def _strip_line(string, nchars=2):
     return string.rstrip()[nchars:].lstrip()
 
 
-def read_uniprot_ptms(ptm_file):
+def read_uniprot_ptms(ptm_file: str) -> Dict[str, List[Modification]]:
     """
     Parses the PTM list provided by the UniProt Knowledgebase
     https://www.uniprot.org/docs/ptmlist.
@@ -55,13 +58,13 @@ def read_uniprot_ptms(ptm_file):
         A dictionary mapping residues to Modifications.
 
     """
-    ptms = collections.defaultdict(list)
+    ptms: Dict[str, List[Modification]] = collections.defaultdict(list)
     with open(ptm_file) as fh:
         # Read the file until the entries begin at a line of underscores
         line = next(fh)
         while not line.startswith("______"):
             line = next(fh)
-        mod = {}
+        mod: Dict[str, Any] = {}
         for line in fh:
             if line.startswith("ID"):
                 mod["name"] = _strip_line(line)
@@ -83,10 +86,7 @@ def read_uniprot_ptms(ptm_file):
     return ptms
 
 
-MOD_FORMULA_REGEX = re.compile(r"(\w+)\(([0-9]+)\)")
-
-
-def parse_mod_formula(formula, mass_type):
+def parse_mod_formula(formula: str, mass_type: MassType) -> float:
     """
     Parses the given modification chemical formula to determine the
     associated mass change.
@@ -153,7 +153,7 @@ class PTMDB():
         self._data[PTMDB._desc_key][entry[key].replace(' ', '').lower()] = pos
         self._data[PTMDB._comp_key].append(entry[PTMDB._comp_key])
 
-    def _get_idx(self, name):
+    def _get_idx(self, name: str) -> int:
         """
         Retrieves the index of the specified modification, i.e. its position
         in the mass and composition lists.
@@ -218,12 +218,12 @@ class PTMDB():
             return None
 
         # Parse the composition string
-        return {k: int(v) if v else 0
+        return {k: int(v) if v else 1
                 for k, v in re.findall(UNIMOD_FORMULA_REGEX,
                                        self._data[PTMDB._comp_key][idx])}
 
 
-def _build_ppres(row):
+def _build_ppres(row: Dict[str, Any]) -> PPRes:
     """
     Processes the given row of a Peptide Summary file to produce a PPRes
     entry.
@@ -241,7 +241,7 @@ def _build_ppres(row):
                  row["Accessions"], row["Names"])
 
 
-def read_peptide_summary(summary_file, condition=None):
+def read_peptide_summary(summary_file: str, condition=None) -> List[PPRes]:
     """
     Reads the given ProteinPilot Peptide Summary file to extract useful
     information on sequence, modifications, m/z etc.
@@ -262,7 +262,8 @@ def read_peptide_summary(summary_file, condition=None):
                 else [_build_ppres(r) for r in reader if condition(r)])
 
 
-def read_proteinpilot_xml(filename):
+def read_proteinpilot_xml(filename: str) -> List[
+        Tuple[str, List[Tuple[str, str, int, float, float, float, str]]]]:
     """
     Reads the full ProteinPilot search results in XML format.
     Note that reading this file using an XML parser does not appear to be
@@ -274,9 +275,11 @@ def read_proteinpilot_xml(filename):
     Returns:
 
     """
-    res = []
+    res: List[
+        Tuple[str, List[Tuple[str, str, int, float, float, float, str]]]] = []
     with open(filename, 'r') as f:
-        hits, t = [], False
+        hits: List[Tuple[str, str, int, float, float, float, str]] = []
+        t = False
         for line in f:
             sx = re.findall('"([^"]*)"', line.rstrip())
             if line.startswith('<SPECTRUM'):
@@ -312,7 +315,7 @@ def read_proteinpilot_xml(filename):
     return res
 
 
-def read_fasta_sequences(fasta_file):
+def read_fasta_sequences(fasta_file: TextIO):
     """
     Retrieves sequences from the input fasta_file.
 
@@ -323,7 +326,7 @@ def read_fasta_sequences(fasta_file):
         Sequences from the input file.
 
     """
-    subseqs = []
+    subseqs: List[str] = []
     for line in fasta_file:
         if line.startswith('>'):
             title = line.rstrip()
