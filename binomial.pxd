@@ -1,0 +1,1 @@
+cdef double _log_binom_prob(int k, int n, double p)
