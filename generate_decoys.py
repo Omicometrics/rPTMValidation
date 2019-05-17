@@ -6,13 +6,16 @@ Generate decoy peptides from the target protein sequence database.
 import argparse
 import csv
 import os
+from typing import List, Tuple
 
 from constants import AA_MASSES, FIXED_MASSES
 import proteolysis
 import readers
 
 
-def generate_decoy_file(target_db_path, proteolyzer, decoy_prefix='_DECOY'):
+def generate_decoy_file(target_db_path: str,
+                        proteolyzer: proteolysis.Proteolyzer,
+                        decoy_prefix: str = '_DECOY') -> str:
     """
     Generates the decoy peptide sequence database file.
     
@@ -40,7 +43,8 @@ def generate_decoy_file(target_db_path, proteolyzer, decoy_prefix='_DECOY'):
         writer = csv.writer(dfh, delimiter='\t')
         writer.writerow(("Protein_Name", "Sequence", "Monoisotopic_Mass"))
         with open(target_db_path) as tfh:
-            rows, count = [], 0
+            rows: List[Tuple[str, str, str]] = []
+            count = 0
             for title, protein in readers.read_fasta_sequences(tfh):
                 peptides = proteolyzer.cleave(protein[::-1], numbermissed=2)
                 if not peptides:

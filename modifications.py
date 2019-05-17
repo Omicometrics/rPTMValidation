@@ -5,8 +5,10 @@ applied to peptides.
 
 """
 import collections
+from typing import List, Sequence, Union
 
 from constants import MassType
+from readers import PTMDB
 
 
 ModSite = collections.namedtuple("ModSite", ["mass", "site", "mod"])
@@ -19,7 +21,7 @@ class UnknownModificationException(Exception):
     """
 
 
-def get_mod_mass(mod_sites, mod):
+def get_mod_mass(mod_sites: Sequence[ModSite], mod: str) -> float:
     """
     Retrieves the mass of the target modification.
 
@@ -42,7 +44,7 @@ def get_mod_mass(mod_sites, mod):
         f"Mass not found for modification {mod} within {mod_sites}")
 
 
-def preparse_mod_string(mods):
+def preparse_mod_string(mods: str) -> str:
     """
     Pre-parses the modification string to a list of ModSites.
 
@@ -60,7 +62,8 @@ def preparse_mod_string(mods):
     return mods
 
 
-def _parse_mod_string(mod_str, ptmdb, mass_type):
+def _parse_mod_string(mod_str: str, ptmdb: PTMDB, mass_type: MassType)\
+        -> ModSite:
     """
     Parses the modification string and maps to the UniMod PTM database
     in order to extract the modification name, mass and site.
@@ -96,7 +99,7 @@ def _parse_mod_string(mod_str, ptmdb, mass_type):
 
     # Get the site of the modification
     try:
-        site = int(mod_list[1])
+        site: Union[str, int] = int(mod_list[1])
     except ValueError:
         site_str = mod_list[1].lower()
         if site_str.startswith('c') and "term" in site_str:
@@ -110,7 +113,7 @@ def _parse_mod_string(mod_str, ptmdb, mass_type):
     return ModSite(mass, site, name)
     
     
-def _parse_bar_mod_string(mod_str):
+def _parse_bar_mod_string(mod_str: str) -> ModSite:
     """
     Parses the vertical bar-separated modification string.
 
@@ -123,7 +126,7 @@ def _parse_bar_mod_string(mod_str):
     """
     mod_list = mod_str.strip().split('|')
     
-    site = mod_list[1]
+    site: Union[str, int] = mod_list[1]
     try:
         site = int(site)
     except ValueError:
@@ -132,7 +135,8 @@ def _parse_bar_mod_string(mod_str):
     return ModSite(float(mod_list[0]), site, mod_list[2])
 
 
-def parse_mods(mods_str, ptmdb, mass_type=MassType.mono):
+def parse_mods(mods_str: str, ptmdb: PTMDB,
+               mass_type: MassType = MassType.mono) -> List[ModSite]:
     """
     Parses the modification string and maps to the UniMod DB to extract
     the modification mass, site in the sequence and name.
@@ -154,7 +158,7 @@ def parse_mods(mods_str, ptmdb, mass_type=MassType.mono):
     if not mods_str:
         return []
 
-    mods = []
+    mods: List[ModSite] = []
     if '@' in mods_str:
         # Ignore modifications that begin with "No ", since these reflect the
         # absence of a modification, e.g. quantitative label

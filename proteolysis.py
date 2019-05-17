@@ -9,6 +9,7 @@ Note that the 'none' type cleavage is not supported currently.
 """
 import json
 import re
+from typing import List, Optional, Pattern, Tuple
 
 from constants import RESIDUES
 
@@ -18,7 +19,7 @@ class Proteolyzer():
     A class for cleaving peptides according to the given enzyme cleavage rule.
 
     """
-    def __init__(self, enzyme, enzyme_rules="EnzymeRules.json"):
+    def __init__(self, enzyme: str, enzyme_rules: str = "EnzymeRules.json"):
         """
         Initialize the class instance with the specified enzyme cleavage rule.
         
@@ -40,7 +41,7 @@ class Proteolyzer():
         if self.enzyme not in enzymes:
             raise KeyError(f'Undefined or unsupported enzyme type: {enzyme}!')
 
-        self.proteolytic_regex = None
+        self.proteolytic_regex: Optional[Pattern] = None
         self._site_terminal = None
 
         self._cleavage_site = enzymes[self.enzyme]['Sites']
@@ -92,7 +93,7 @@ class Proteolyzer():
         self.proteolytic_regex = re.compile("|".join(enzrules))
         self._site_terminal = siteterminal
 
-    def _split_sequence(self, sequence):
+    def _split_sequence(self, sequence: str) -> List[str]:
         """
         Splits the provided sequence using the rules defined.
 
@@ -103,9 +104,11 @@ class Proteolyzer():
             The split sequence as a list.
 
         """
+        if self.proteolytic_regex is None:
+            raise RuntimeError("Proteolytic regex not defined")
         return [s for s in self.proteolytic_regex.split(sequence) if s]
         
-    def is_cleaved(self, sequence):
+    def is_cleaved(self, sequence: str) -> bool:
         """
         Evaluates whether a peptide sequence has been proteolytically cleaved
         using the rule associated with the current instance of the
@@ -125,7 +128,7 @@ class Proteolyzer():
                 return True
         return False
 
-    def count_missed_cleavages(self, sequence):
+    def count_missed_cleavages(self, sequence: str) -> int:
         """
         Counts the number of missed cleavages in the given sequence.
 
@@ -136,6 +139,8 @@ class Proteolyzer():
             An integer number of missed cleavages.
 
         """
+        if self.proteolytic_regex is None:
+            raise RuntimeError("Proteolytic regex not defined")
         # Subtract one for the main sequence itself and another one for the
         # cleavage residue at the terminus
         missed = len(re.findall(self.proteolytic_regex, sequence))
@@ -143,7 +148,8 @@ class Proteolyzer():
             missed -= 1
         return missed
 
-    def cleave(self, sequence, numbermissed=1, lenrange=(7, 60)):
+    def cleave(self, sequence: str, numbermissed: int = 1,
+               lenrange: Tuple[int, int] = (7, 60)) -> Tuple[str, ...]:
         """
         Cleavage of the input sequence using the constructed enzyme
         object, with number of missed cleavage allowed.
@@ -151,14 +157,17 @@ class Proteolyzer():
         - sequence: protein sequence in ..fasta file
         - numbermissed: number of missed cleavage allowed
         """
+        if self._site_terminal is None:
+            raise RuntimeError("Site terminal is not defined")
+
         min_len, max_len = lenrange
         # Split the sequence according to the cleavage rules of the enzyme
         split_seq = self._split_sequence(sequence)
         seq_len = len(split_seq)
 
         if seq_len == 1:
-            return ((split_seq[0]) if max_len >= len(split_seq[0]) >= min_len
-                    and RESIDUES.issuperset(split_seq[0]) else ())
+            return (tuple(split_seq[0],) if max_len >= len(split_seq[0]) >= min_len
+                    and RESIDUES.issuperset(split_seq[0]) else tuple())
 
         # Get all peptides with zero missed cleavage
         comb_peps = []

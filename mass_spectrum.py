@@ -3,15 +3,20 @@
 This module provides functions for processing mass spectra.
 
 """
+from __future__ import annotations
+
 import bisect
 import collections
 import operator
-from typing import List, Tuple
+import sys
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
-from constants import FIXED_MASSES, ITRAQ_MASSES
-import denoise
+from constants import ITRAQ_MASSES
+
+sys.path.append("../pepfrag")
+from ion_generators import Ion
 
 
 Annotation = collections.namedtuple("Annotation",
@@ -25,7 +30,8 @@ class Spectrum():
     exploring the mass spectrum.
 
     """
-    def __init__(self, peak_list, prec_mz, charge):
+    def __init__(self, peak_list: List[List[float]], prec_mz: float,
+                 charge: int):
         """
         Initializes the class.
 
@@ -50,7 +56,7 @@ class Spectrum():
         """
         return self._peaks.__iter__()
 
-    def __getitem__(self, indices):
+    def __getitem__(self, indices: Union[int, Sequence[int]]) -> np.array:
         """
         Implements the __getitem__ method for the Spectrum class, using the
         composed numpy array.
@@ -58,7 +64,7 @@ class Spectrum():
         """
         return self._peaks[indices]
 
-    def __len__(self):
+    def __len__(self) -> int:
         """
         Implements the __len__ method for the Spectrum class, using the
         composed numpy array.
@@ -69,7 +75,7 @@ class Spectrum():
         """
         return self._peaks.shape[0]
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """
         Implements the __repr__ method for the Spectrum class, using the
         composed numpy array.
@@ -79,11 +85,11 @@ class Spectrum():
 
         """
         return f"<{self.__class__.__name__} {self.__dict__}>"
-        
-    def __str__(self):
+
+    def __str__(self) -> str:
         """
         Implements the __str__ method for the Spectrum class.
-        
+
         Returns:
             string representation of the Spectrum object.
 
@@ -95,7 +101,7 @@ class Spectrum():
         }
         return f"<{self.__class__.__name__} {out}>"
 
-    def __nonzero__(self):
+    def __nonzero__(self) -> bool:
         """
         Implements the __nonzero__ method for the Spectrum class, testing
         whether the underlying numpy array has been populated.
@@ -126,7 +132,8 @@ class Spectrum():
         """
         return self._peaks[:, 1]
 
-    def select(self, peaks, col=None) -> np.array:
+    def select(self, peaks: List[int],
+               col: Optional[Union[int, List[int]]] = None) -> np.array:
         """
         Extracts only those peak indices in the given list.
 
@@ -212,7 +219,7 @@ class Spectrum():
 
         return self
 
-    def remove_itraq(self, tol=0.1):
+    def remove_itraq(self, tol: float = 0.1):
         """
         Removes the iTRAQ fragment peaks from the spectrum.
         https://stackoverflow.com/questions/51744613/numpy-setdiff1d-with-
@@ -230,7 +237,8 @@ class Spectrum():
              > tol).all(1)]
         return self
 
-    def annotate(self, theor_ions, tol=0.2):
+    def annotate(self, theor_ions: List[Ion],
+                 tol: float = 0.2) -> Dict[str, Annotation]:
         """
         Annotates the spectrum using the provided theoretical ions.
 
@@ -246,7 +254,7 @@ class Spectrum():
         npeaks = self._peaks.shape[0]
         insert_idxs = [bisect.bisect_left(mz, ion.mass) for ion in theor_ions]
 
-        anns = {}
+        anns: Dict[str, Annotation] = {}
         for idx, (mass, label, pos) in zip(insert_idxs, theor_ions):
             if idx > 0 and mass - mz[idx - 1] <= tol:
                 anns[label] = Annotation(idx - 1, mass - mz[idx - 1], pos)
@@ -255,7 +263,8 @@ class Spectrum():
 
         return anns
 
-    def denoise(self, assigned_peaks, max_peaks_per_window=8):
+    def denoise(self, assigned_peaks: List[bool],
+                max_peaks_per_window: int = 8) -> Tuple[List[int], Spectrum]:
         """
         Denoises the mass spectrum using the annotated ions.
 
@@ -269,16 +278,11 @@ class Spectrum():
             Tuple: The denoised peak indexes as a list, The denoised spectrum
 
         """
-        #peaks = denoise.denoise(self._peaks, assigned_peaks,
-        #                        max_peaks_per_window)
-        #print(peaks)
-
-        #return peaks, Spectrum(self._peaks[peaks, :], self.prec_mz)
-        
         npeaks = len(self._peaks)
         # Divide the mass spectrum into windows of 100 Da
         n_windows = int((self._peaks[-1][0] - self._peaks[0][0]) / 100.) + 1
-        start_idx, new_peaks = 0, []
+        start_idx = 0
+        new_peaks: List[int] = []
 
         for window in range(n_windows):
             # Set up the mass limit for the current window
@@ -314,4 +318,5 @@ class Spectrum():
 
             start_idx = end_idx
 
-        return new_peaks, Spectrum(self._peaks[new_peaks, :], self.prec_mz, self.charge)
+        return new_peaks, Spectrum(self._peaks[new_peaks, :], self.prec_mz,
+                                   self.charge)

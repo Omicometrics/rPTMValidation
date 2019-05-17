@@ -5,18 +5,21 @@ A set of functions to be used for processing peptide sequences.
 """
 import collections
 import sys
+from typing import Sequence, Union
 
 from constants import AA_MASSES, FIXED_MASSES
 import modifications
 
 sys.path.append("../pepfrag")
 from ion_generators import IonType
+import pepfrag
 
 
 Ion = collections.namedtuple("Ion", ["mass", "label", "pos"])
 
 
-def calculate_mz(seq, mods, charge):
+def calculate_mz(seq: str, mods: Sequence[modifications.ModSite],
+                 charge: int) -> float:
     """
     Calculates the mass/charge ratio of a peptide given its sequence,
     modifications and charge state.
@@ -34,7 +37,8 @@ def calculate_mz(seq, mods, charge):
             sum(m for m, _, _ in mods) + FIXED_MASSES["H2O"]) / charge
 
 
-def merge_seq_mods(seq, mods):
+def merge_seq_mods(seq: str,
+                   mods: Union[str, Sequence[modifications.ModSite]]) -> str:
     """
     Inserts modifications into the corresponding locations of the peptide
     sequence.
@@ -57,8 +61,10 @@ def merge_seq_mods(seq, mods):
 
     # Convert nterm and cterm sites to their corresponding indices
     seqlen = len(seq)
-    positions = {"nterm": 0, "n-term": 0, "N-term": 0, "cterm": seqlen, "c-term": seqlen, "C-term": seqlen}
-    mod_sites = [(name, int(positions.get(site, site))) for _, site, name in mods]
+    positions = {"nterm": 0, "n-term": 0, "N-term": 0,
+                 "cterm": seqlen, "c-term": seqlen, "C-term": seqlen}
+    mod_sites = [(name, int(positions.get(site, site)))
+                 for _, site, name in mods]
 
     # Sort the modifications by site index
     mod_sites.sort(key=lambda x: x[1], reverse=True)
@@ -71,7 +77,7 @@ def merge_seq_mods(seq, mods):
     return ''.join(seq_list)
 
 
-def get_by_ion_mzs(peptide):
+def get_by_ion_mzs(peptide: pepfrag.Peptide):
     """
     Get the b/y-type fragment ions for the peptide.
 

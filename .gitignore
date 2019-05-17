@@ -5,7 +5,6 @@ __pycache__
 *.c
 *.cpp
 *.html
-*.pxd
 *.pyd
 
 *.csv

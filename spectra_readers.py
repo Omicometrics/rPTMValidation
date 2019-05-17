@@ -6,6 +6,7 @@ A series of functions used to read different spectra file types.
 import base64
 import re
 import struct
+from typing import Any, Dict, List, Tuple
 import zlib
 
 import lxml.etree as etree
@@ -21,8 +22,8 @@ class ParserException(Exception):
     A custom exception to be raised during file parse errors.
 
     """
-    
-    
+
+
 END_IONS_LEN = 8
 TITLE_LEN = 5
 PEPMASS_LEN = 7
@@ -30,7 +31,7 @@ BEGIN_IONS_LEN = 10
 CHARGE_LEN = 6
 
 
-def read_mgf_file(spec_file):
+def read_mgf_file(spec_file: str) -> Dict[str, mass_spectrum.Spectrum]:
     """
     Reads the given tandem mass spectrometry data file to extract individual
     spectra.
@@ -42,8 +43,8 @@ def read_mgf_file(spec_file):
         A dictionary of spectrum ID to numpy array of peaks.
 
     """
-    spectra = {}
-    spec_id = None    
+    spectra: Dict[str, mass_spectrum.Spectrum] = {}
+    spec_id = None
     with open(spec_file) as fh:
         peaks, mz, charge = [], None, None
         for line in fh:
@@ -51,10 +52,13 @@ def read_mgf_file(spec_file):
                 if spec_id is None:
                     raise ParserException(
                         f"No spectrum ID found in MGF block in {spec_file}")
-                spectra[spec_id] = mass_spectrum.Spectrum(peaks, float(mz), charge)
+                spectra[spec_id] = mass_spectrum.Spectrum(peaks, float(mz),
+                                                          charge)
                 peaks, spec_id, mz, charge = [], None, None, None
             elif line[:TITLE_LEN] == "TITLE":
-                spec_id = MGF_TITLE_REGEX.match(line).group(1)
+                match = MGF_TITLE_REGEX.match(line)
+                if match is not None:
+                    spec_id = match.group(1)
             elif line[:PEPMASS_LEN] == "PEPMASS":
                 mz = line.rstrip().split("=")[1]
             elif line[:CHARGE_LEN] == "CHARGE":
@@ -65,7 +69,7 @@ def read_mgf_file(spec_file):
     return spectra
 
 
-def read_mzml_file(spec_file):
+def read_mzml_file(spec_file: str):
     """
     Reads the given mzML file to extract spectra.
 
@@ -74,7 +78,7 @@ def read_mzml_file(spec_file):
     raise NotImplementedError()
 
 
-def read_mzxml_file(spec_file):
+def read_mzxml_file(spec_file: str):
     """
     Reads the given mzXML file to extract spectra.
 
@@ -83,7 +87,7 @@ def read_mzxml_file(spec_file):
     raise NotImplementedError()
 
 
-def read_spectra_file(spec_file):
+def read_spectra_file(spec_file: str) -> Dict[str, mass_spectrum.Spectrum]:
     """
     Determines the format of the given tandem mass spectrum file and delegates
     to the appropriate reader.
@@ -104,7 +108,8 @@ def read_spectra_file(spec_file):
         f"Unsupported spectrum file type for {spec_file}")
 
 
-def decodebinary(string, default_array_length, precision=64, bzlib='z'):
+def decodebinary(string: str, default_array_length: int, precision: int = 64,
+                 bzlib: str = 'z') -> Tuple[Any, ...]:
     """
     Decode binary string to float points.
     If provided, should take endian order into consideration.
@@ -116,7 +121,9 @@ def decodebinary(string, default_array_length, precision=64, bzlib='z'):
     return struct.unpack(unpack_format, decoded)
 
 
-def mzml_extract_ms1(mzml_file, namespace="http://psi.hupo.org/ms/mzml"):
+def mzml_extract_ms1(mzml_file: str,
+                     namespace: str = "http://psi.hupo.org/ms/mzml")\
+                     -> List[Dict[str, Any]]:
     """
     Extracts the MS1 spectra from the input mzML file.
 

@@ -5,7 +5,7 @@ ion annotations and intensities.
 
 """
 import tqdm
-from typing import List, Tuple
+from typing import Any, Dict, Iterable, List, Sequence, Set, Tuple
 
 import numpy as np
 
@@ -156,7 +156,9 @@ def match_spectra(spectrum1: Tuple[Spectrum, dict],
     return matched_idxs
 
 
-def _matched_peak_indices(ions1, ions2, common_ions):
+def _matched_peak_indices(ions1: Dict[str, Tuple[int, int]],
+                          ions2: Dict[str, Tuple[int, int]],
+                          common_ions: Iterable[str]):
     """
     Finds the index of the peak in the mass spectra for each of the ions
     commonly annotated between the spectra.
@@ -179,7 +181,8 @@ def _matched_peak_indices(ions1, ions2, common_ions):
     return zip(*[(ions1[ion][0], ions2[ion][0]) for ion in common_ions])
 
 
-def _annotation_names(ions):
+def _annotation_names(ions: Dict[str, Tuple[int, int]])\
+        -> Tuple[Set[str], Set[str]]:
     """
     Separates the annotations by name into two groups: y/b/M ions and
     others.
@@ -191,12 +194,13 @@ def _annotation_names(ions):
         tuple of two sets: y/b/M ions and other ions.
 
     """
-    ions = set(ions.keys())
-    frags = {l for l in ions if l[0] in "ybM" and "-" not in l}
-    return frags, ions - frags
+    _ions = set(ions.keys())
+    frags = {l for l in _ions if l[0] in "ybM" and "-" not in l}
+    return frags, _ions - frags
 
 
-def _merged_matches(indices1, indices2, spec2):
+def _merged_matches(indices1: Sequence[int], indices2: Sequence[int],
+                    spec2: Spectrum) -> List[Tuple[Any, Any]]:
     """
     Merges the matched peak indices into a single list of tuples, removing
     replicates in the process.
@@ -208,7 +212,7 @@ def _merged_matches(indices1, indices2, spec2):
 
     Returns:
     """
-    merged = []
+    merged: List[Tuple[int, int]] = []
     if len(set(indices1)) < len(indices1):
         for idx1 in set(indices1):
             if indices1.count(idx1) == 1:

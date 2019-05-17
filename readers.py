@@ -6,7 +6,7 @@ A series of functions used to read different file types.
 import collections
 import csv
 import re
-from typing import Any, Dict, List, TextIO, Tuple
+from typing import Any, Dict, Iterable, List, TextIO, Tuple
 
 from constants import AA_SYMBOLS, ELEMENT_MASSES, MassType
 
@@ -315,7 +315,7 @@ def read_proteinpilot_xml(filename: str) -> List[
     return res
 
 
-def read_fasta_sequences(fasta_file: TextIO):
+def read_fasta_sequences(fasta_file: TextIO) -> Iterable[Tuple[str, str]]:
     """
     Retrieves sequences from the input fasta_file.
 
