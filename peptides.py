@@ -84,7 +84,7 @@ def get_by_ion_mzs(peptide: pepfrag.Peptide):
     """
     return [ion.mass for ion in peptide.fragment(
         ion_types={
-            IonType.precursor: {"neutral_losses": [], "itraq": True},
+            IonType.precursor: {"neutral_losses": []},
             IonType.imm: {},
             IonType.b: {"neutral_losses": []},
             IonType.y: {"neutral_losses": []},
