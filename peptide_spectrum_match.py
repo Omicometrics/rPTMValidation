@@ -227,8 +227,7 @@ class PSM():
         # Get the theoretical ions for the peptide
         ions = self.peptide.fragment(
             ion_types={
-                IonType.precursor: {"neutral_losses": ["H2O", "NH3"],
-                                    "itraq": True},
+                IonType.precursor: {"neutral_losses": ["H2O", "NH3"]},
                 IonType.imm: {},
                 IonType.b: {"neutral_losses": ["H2O", "NH3"]},
                 IonType.y: {"neutral_losses": ["H2O", "NH3"]},
