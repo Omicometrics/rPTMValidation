@@ -32,6 +32,9 @@ class PSMContainer(collections.UserList):
         Initialize the instance of the class.
 
         """
+        # TODO
+        # The generic type of self.data needs to be overridden, but this is
+        # problematic due to https://github.com/python/mypy/issues/5846
         self.data = psms if psms is not None else []
 
     def __getitem__(self, slice):
@@ -78,21 +81,6 @@ class PSMContainer(collections.UserList):
         """
         return PSMContainer([p for p in self.data if p.data_id == data_id and
                              p.spec_id == spec_id])
-
-    '''def filter_lda_score(self, threshold):
-        """
-        Filters the PSMs to those with an LDA score exceeding the threshold
-        value.
-
-        Args:
-            threshold (float): The threshold LDA score to exceed.
-
-        Returns:
-            PSMContainer
-
-        """
-        return PSMContainer(
-            [p for p in self.data if p.lda_score >= threshold])'''
 
     def filter_lda_prob(self, threshold: float = 0.99) -> PSMContainer:
         """
@@ -189,6 +177,22 @@ class PSMContainer(collections.UserList):
             best_psms.append(max_score_psm)
 
         return best_psms
+
+    def get_unique_peptides(self)\
+            -> Set[Tuple[str, Tuple[modifications.ModSite]]]:
+        """
+        Finds the unique peptides, by sequence and modifications.
+
+        Returns:
+            Set of unique peptides as tuples of sequence and mods.
+
+        """
+        peptides: Set[Tuple[str, Tuple[modifications.ModSite]]] = set()
+        for psm in self.data:
+            # TODO: typing ignore due to
+            # https://github.com/python/mypy/issues/5846
+            peptides.add((psm.seq, tuple(psm.mods), psm.max_similarity))  # type: ignore
+        return peptides
 
     def to_df(self, target_only: bool = False) -> pd.DataFrame:
         """
