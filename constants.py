@@ -7,6 +7,7 @@ analyses.
 
 import collections
 import enum
+from typing import Dict, List, Set
 
 
 class MassType(enum.Enum):
@@ -20,7 +21,7 @@ class MassType(enum.Enum):
 
 Mass = collections.namedtuple('Mass', ['mono', 'avg'])
 
-AA_MASSES = {
+AA_MASSES: Dict[str, Mass] = {
     'G': Mass(57.02146, 57.052),
     'A': Mass(71.03711, 71.078),
     'S': Mass(87.03203, 87.078),
@@ -43,7 +44,7 @@ AA_MASSES = {
     'W': Mass(186.07931, 186.213)
 }
 
-AA_SYMBOLS = {
+AA_SYMBOLS: Dict[str, str] = {
     'Asparagine': 'N',
     'Alanine': 'A',
     'Arginine': 'R',
@@ -68,20 +69,20 @@ AA_SYMBOLS = {
     'Valine': 'V'
 }
 
-RESIDUES = set(AA_SYMBOLS.values())
+RESIDUES: Set[str] = set(AA_SYMBOLS.values())
 
-FIXED_MASSES = {
+FIXED_MASSES: Dict[str, float] = {
     # iTRAQ tag
     "tag": 304.20536,
     "H2O": 18.006067,
-    "H": 1.0073,
+    "H": 1.007276466879,
     "CO": 28.0101,
     "NH3": 16.998767,
     # Carbamidomethylation
     "cys_c": 57.021464
 }
 
-ELEMENT_MASSES = {
+ELEMENT_MASSES: Dict[str, Mass] = {
     'H': Mass(1.007825032230, 1.007940754056),
     '2H': Mass(2.014101778120, 2.014101778120),
     'He': Mass(3.016029320100, 4.002601932121),
@@ -372,4 +373,5 @@ ELEMENT_MASSES = {
     '238U': Mass(238.050788400000, 238.050788400000)
 }
 
-ITRAQ_MASSES = [113.1, 114.1, 115.1, 116.1, 117.1, 118.1, 119.1, 121.1]
+ITRAQ_MASSES: List[float] = [113.1, 114.1, 115.1, 116.1, 117.1,
+                             118.1, 119.1, 121.1]
