@@ -9,7 +9,7 @@ import collections
 import csv
 import os
 import sys
-from typing import List, Optional, Sequence, Set, Tuple
+from typing import Callable, List, Optional, Sequence, Set, Tuple
 
 import pandas as pd
 import tqdm
@@ -178,10 +178,17 @@ class PSMContainer(collections.UserList):
 
         return best_psms
 
-    def get_unique_peptides(self)\
+    def get_unique_peptides(
+        self, predicate: Optional[Callable[[PSM], bool]] = None)\
             -> Set[Tuple[str, Tuple[modifications.ModSite]]]:
         """
         Finds the unique peptides, by sequence and modifications.
+
+        Args:
+            predicate (func, optional): If not None, this function will be
+                                        evaluated for each PSM and the peptide
+                                        will only be returned if the return
+                                        value of this function is True.
 
         Returns:
             Set of unique peptides as tuples of sequence and mods.
@@ -189,10 +196,23 @@ class PSMContainer(collections.UserList):
         """
         peptides: Set[Tuple[str, Tuple[modifications.ModSite]]] = set()
         for psm in self.data:
-            # TODO: typing ignore due to
-            # https://github.com/python/mypy/issues/5846
-            peptides.add((psm.seq, tuple(psm.mods)))  # type: ignore
+            if predicate is None or predicate(psm):
+                # TODO: typing ignore due to
+                # https://github.com/python/mypy/issues/5846
+                peptides.add((psm.seq, tuple(psm.mods)))  # type: ignore
         return peptides
+
+    def get_benchmark_peptides(self)\
+            -> Set[Tuple[str, Tuple[modifications.ModSite]]]:
+        """
+        Finds the unique peptides, by sequence and modifications, which
+        correspond to benchmark peptides.
+
+        Returns:
+            Set of unique benchmark peptides as tuples of sequence and mods.
+
+        """
+        return self.get_unique_peptides(predicate=lambda psm: psm.benchmark)
 
     def to_df(self, target_only: bool = False) -> pd.DataFrame:
         """
