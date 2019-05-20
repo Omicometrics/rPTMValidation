@@ -6,7 +6,7 @@ A series of functions used to read different spectra file types.
 import base64
 import re
 import struct
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import zlib
 
 import lxml.etree as etree
@@ -46,7 +46,8 @@ def read_mgf_file(spec_file: str) -> Dict[str, mass_spectrum.Spectrum]:
     spectra: Dict[str, mass_spectrum.Spectrum] = {}
     spec_id = None
     with open(spec_file) as fh:
-        peaks, mz, charge = [], None, None
+        peaks, mz = [], None
+        charge: Optional[int] = None
         for line in fh:
             if line[:END_IONS_LEN] == "END IONS":
                 if spec_id is None:
@@ -62,7 +63,7 @@ def read_mgf_file(spec_file: str) -> Dict[str, mass_spectrum.Spectrum]:
             elif line[:PEPMASS_LEN] == "PEPMASS":
                 mz = line.rstrip().split("=")[1]
             elif line[:CHARGE_LEN] == "CHARGE":
-                charge = line.rstrip().split("=")[1]
+                charge = int(line.rstrip().split("=")[1].split("+")[0])
             elif "=" not in line and line[:BEGIN_IONS_LEN] != "BEGIN IONS":
                 peaks.append([float(n) for n in line.split()[:2]])
 
