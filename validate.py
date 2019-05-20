@@ -36,6 +36,7 @@ import similarity
 import spectra_readers
 import utilities
 import validator_base
+from validator_config import ValidatorConfig
 
 sys.path.append("../pepfrag")
 from pepfrag import Peptide
@@ -240,7 +241,7 @@ class Validate(validator_base.ValidateBase):
             json_config (json.JSON): The JSON configuration read from a file.
 
         """
-        super().__init__(json_config)
+        super().__init__(ValidatorConfig(json_config))
 
         # The UniProt PTM DB
         self.uniprot = readers.read_uniprot_ptms(self.config.uniprot_ptm_file)

@@ -14,9 +14,6 @@ import os
 import sys
 from typing import Dict, Iterable, List, Sequence, Tuple
 
-import pandas as pd
-
-import config
 import lda
 from modifications import ModSite
 import peptides
@@ -34,9 +31,6 @@ from pepfrag import Peptide
 SpecMatch = collections.namedtuple("SpecMatch",
                                    ["seq", "mods", "theor_z", "conf",
                                     "pep_type"])
-
-MODEL_REMOVE_COLS = ["data_id", "seq", "spec_id", "target", "score", "prob",
-                     "uid"]
 
 
 @functools.lru_cache(maxsize=1024)
@@ -77,15 +71,17 @@ class ValidateBase():
     retrieval pathways for the program.
 
     """
-    def __init__(self, json_config):
+    def __init__(self, config):
         """
         Initialize the object.
 
         Args:
-            json_config (json.JSON): The JSON configuration read from a file.
+            config (subclass of BaseConfig)
 
         """
-        self.config = config.Config(json_config)
+        # Config does not have a type hint to allow duck typing of
+        # ValidatorConfig and RetrieverConfig
+        self.config = config
 
         self.proteolyzer = proteolysis.Proteolyzer(self.config.enzyme)
 
@@ -94,8 +90,8 @@ class ValidateBase():
         self.unimod = readers.PTMDB(self.config.unimod_ptm_file)
 
         # All ProteinPilot results
-        self.pp_res = collections.defaultdict(
-            lambda: collections.defaultdict(list))
+        self.pp_res: Dict[str, Dict[str, List[SpecMatch]]] =\
+            collections.defaultdict(lambda: collections.defaultdict(list))
 
         self.target_mod = self.config.target_mod
 
@@ -119,13 +115,14 @@ class ValidateBase():
         Labels the PSMs which are in the benchmark set of peptides.
 
         """
-        # Parse the benchmark sequences
-        with open(self.config.benchmark_file) as fh:
-            benchmarks = [l.rstrip() for l in fh]
+        if self.config.benchmark_file is not None:
+            # Parse the benchmark sequences
+            with open(self.config.benchmark_file) as fh:
+                benchmarks = [l.rstrip() for l in fh]
 
-        for psm in psms:
-            psm.benchmark = (peptides.merge_seq_mods(psm.seq, psm.mods)
-                             in benchmarks)
+            for psm in psms:
+                psm.benchmark = (peptides.merge_seq_mods(psm.seq, psm.mods)
+                                 in benchmarks)
 
     def _find_unmod_analogues(self, mod_psms: Sequence[PSM]):
         """
@@ -303,42 +300,3 @@ class ValidateBase():
                     new_psms.append(psm)
                     break
         return PSMContainer(new_psms)
-
-    def _build_model(self, model_file: str)\
-            -> Tuple[lda.CustomPipeline, Dict[int, Tuple[float, float]],
-                     float, List[str]]:
-        """
-        Constructs an LDA model from the feature data in model_file.
-
-        Args:
-            model_file (str): The path to a CSV file containing feature
-                              data, as written during validate.py execution.
-
-        Returns:
-
-        """
-        df = pd.read_csv(model_file, index_col=0)
-
-        features: List[str] = list(df.columns.values)
-        features = [f for f in features if f not in MODEL_REMOVE_COLS and
-                    f not in self.config.exclude_features]
-
-        return (*lda.lda_model(df, features), features)
-
-    def build_model(self)\
-            -> Tuple[lda.CustomPipeline, Dict[int, Tuple[float, float]],
-                     float, List[str]]:
-        """
-        Constructs the LDA model for the modified identifications.
-
-        """
-        return self._build_model(self.config.model_file)
-
-    def build_unmod_model(self)\
-            -> Tuple[lda.CustomPipeline, Dict[int, Tuple[float, float]],
-                     float, List[str]]:
-        """
-        Constructs the LDA model for the unmodified identifications.
-
-        """
-        return self._build_model(self.config.unmod_model_file)

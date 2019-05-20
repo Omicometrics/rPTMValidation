@@ -13,8 +13,10 @@ import operator
 import os
 import pickle
 import sys
+from typing import Dict, List, Tuple
 
 import numpy as np
+import pandas as pd
 import tqdm
 
 from constants import RESIDUES
@@ -24,6 +26,7 @@ import modifications
 from peptide_spectrum_match import PSM
 from psm_container import PSMContainer
 import readers
+from retriever_config import RetrieverConfig
 import similarity
 import spectra_readers
 import validator_base
@@ -37,8 +40,8 @@ CHARGE_LABELS = [['[+]' if cj == 0 else f'[{cj + 1}+]'
                   for cj in range(charge)]
                  for charge in range(10)]
 
-# TODO: non-global
-SIMILARITY_THRESHOLD = 0.56
+MODEL_REMOVE_COLS = ["data_id", "seq", "spec_id", "target", "score", "prob",
+                     "uid"]
 
 
 def get_ion_score(seq, charge, ions, spectrum, tol):
@@ -142,7 +145,7 @@ class Retriever(validator_base.ValidateBase):
             json_config (json.JSON): The JSON configuration read from a file.
 
         """
-        super().__init__(json_config)
+        super().__init__(RetrieverConfig(json_config))
 
         self.db_ionscores = None
 
@@ -247,14 +250,14 @@ class Retriever(validator_base.ValidateBase):
             pickle.dump(psms, fh)
 
         rec_psms = rec_psms.filter_lda_similarity(0.99,
-                                                  SIMILARITY_THRESHOLD)
+                                                  self.config.sim_threshold)
 
         with open(self.file_prefix + "rec_psms1", "wb") as fh:
             pickle.dump(rec_psms, fh)
 
         print("Localizing modification site(s)...")
         self._localize(rec_psms, model, features, 0.99,
-                       SIMILARITY_THRESHOLD)
+                       self.config.sim_threshold)
 
         with open(self.file_prefix + "rec_psms2", "wb") as fh:
             pickle.dump(rec_psms, fh)
@@ -499,6 +502,45 @@ class Retriever(validator_base.ValidateBase):
                     psm.lda_score,
                     psm.max_similarity
                 ])
+
+    def _build_model(self, model_file: str)\
+            -> Tuple[lda.CustomPipeline, Dict[int, Tuple[float, float]],
+                     float, List[str]]:
+        """
+        Constructs an LDA model from the feature data in model_file.
+
+        Args:
+            model_file (str): The path to a CSV file containing feature
+                              data, as written during validate.py execution.
+
+        Returns:
+
+        """
+        df = pd.read_csv(model_file, index_col=0)
+
+        features: List[str] = list(df.columns.values)
+        features = [f for f in features if f not in MODEL_REMOVE_COLS and
+                    f not in self.config.exclude_features]
+
+        return (*lda.lda_model(df, features), features)
+
+    def build_model(self)\
+            -> Tuple[lda.CustomPipeline, Dict[int, Tuple[float, float]],
+                     float, List[str]]:
+        """
+        Constructs the LDA model for the modified identifications.
+
+        """
+        return self._build_model(self.config.model_file)
+
+    def build_unmod_model(self)\
+            -> Tuple[lda.CustomPipeline, Dict[int, Tuple[float, float]],
+                     float, List[str]]:
+        """
+        Constructs the LDA model for the unmodified identifications.
+
+        """
+        return self._build_model(self.config.unmod_model_file)
 
 
 def parse_args():

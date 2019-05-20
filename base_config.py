@@ -10,27 +10,31 @@ import sys
 from typing import Any, Dict, List, Optional
 
 
-class Config():
+class BaseConfig():
     """
     This class represents the configuration options for rPTMDetermine. Its
     purpose is to centralize the possible options and their corresponding
     default values, if any.
 
     """
-    def __init__(self, json_config: Dict[str, Any]):
+    def __init__(self, json_config: Dict[str, Any],
+                 extra_required: Optional[List[str]] = None):
         """
         Initialize the Config class using the JSON configuration.
 
         """
         self.json_config = json_config
-        
+
         self._required = ["data_sets", "fixed_residues", "target_db_path",
                           "target_mod", "target_residues"]
+
+        if extra_required is not None:
+            self._required.extend(extra_required)
 
         self._check_required()
 
     @property
-    def data_sets(self) -> Dict[str, Dict[str, float]]:
+    def data_sets(self) -> Dict[str, Dict[str, Any]]:
         """
         The map of data set IDs to their data files and confidences.
 
@@ -44,14 +48,6 @@ class Config():
 
         """
         return self.json_config.get("enzyme", "Trypsin")
-
-    @property
-    def fisher_threshold(self) -> float:
-        """
-        The minimum Fisher score required for feature selection.
-
-        """
-        return self.json_config.get("fisher_score_threshold", 0.05)
 
     @property
     def fixed_residues(self) -> List[str]:
@@ -107,20 +103,6 @@ class Config():
         return path
 
     @property
-    def uniprot_ptm_file(self) -> str:
-        """
-        The path to the UniProt PTM list file.
-
-        Raises:
-            FileNotFoundError
-
-        """
-        path = self.json_config.get("uniprot_ptm_file", "ptmlist.txt")
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"UniProt PTM file not found at {path}")
-        return path
-
-    @property
     def correct_deamidation(self) -> bool:
         """
         Whether or not to apply the deamidation correction.
@@ -136,53 +118,6 @@ class Config():
 
         """
         return self.json_config.get("benchmark_file", None)
-
-    @property
-    def model_file(self) -> Optional[str]:
-        """
-        The file containing features with which to build an LDA model for
-        retrieval. This can be created by outputting the pandas DataFrame
-        used to build the model during validated.
-
-        """
-        return self.json_config.get("model_file", None)
-
-    @property
-    def unmod_model_file(self) -> Optional[str]:
-        """
-        The file containing features with which to build an LDA model for
-        retrieval. This can be created by outputting the pandas DataFrame
-        used to build the model during validated.
-
-        """
-        return self.json_config.get("unmod_model_file", None)
-
-    @property
-    def retrieval_tolerance(self) -> float:
-        """
-        The m/z tolerance used in searching candidate peptides for a spectrum.
-
-        """
-        return self.json_config.get("retrieval_tolerance", 0.05)
-
-    @property
-    def validated_ids_file(self) -> Optional[str]:
-        """
-        The path to a CSV file containing the validated identifications
-        obtained from using validate.Validate.
-
-        """
-        return self.json_config.get("validated_ids_file", None)
-
-    @property
-    def sim_threshold_from_benchmarks(self) -> bool:
-        """
-        A boolean flag indicating whether benchmark identifications should be
-        used to dynamically define the similarity score threshold for
-        validation.
-
-        """
-        return self.json_config.get("sim_threshold_from_benchmarks", True)
 
     @property
     def sim_threshold(self) -> Optional[float]:
@@ -218,14 +153,6 @@ class Config():
         """
         return self.json_config.get("output_dir", None)
 
-    @property
-    def db_ionscores_file(self) -> Optional[str]:
-        """
-        The file containing the alternative database ion scores.
-
-        """
-        return self.json_config.get("db_ionscores_file", None)
-        
     @property
     def exclude_features(self) -> List[str]:
         """
