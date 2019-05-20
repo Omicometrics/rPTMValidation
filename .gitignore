@@ -1,5 +1,7 @@
 __pycache__
 .ipynb_checkpoints
+.mypy_cache
+*.ipynb
 
 # Cython related
 *.c
