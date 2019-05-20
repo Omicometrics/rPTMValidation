@@ -54,7 +54,7 @@ class PSMContainer(collections.UserList):
         for psm in self.data:
             psm.clean_fragment_ions()
 
-    def get_psms_by_seq(self, seq: str) -> PSMContainer:
+    def get_by_seq(self, seq: str) -> PSMContainer:
         """
         Retrieves the PSMs with the given peptide sequence.
 
@@ -67,7 +67,7 @@ class PSMContainer(collections.UserList):
         """
         return PSMContainer([p for p in self.data if p.seq == seq])
 
-    def get_psms_by_id(self, data_id: str, spec_id: str) -> PSMContainer:
+    def get_by_id(self, data_id: str, spec_id: str) -> PSMContainer:
         """
         Retrieves the PSMs with the given identifiers.
 
@@ -169,7 +169,7 @@ class PSMContainer(collections.UserList):
 
             max_score, max_score_psm = psm.lda_score, psm
             count = 0
-            for other_psm in self.get_psms_by_id(data_id, spec_id):
+            for other_psm in self.get_by_id(data_id, spec_id):
                 count += 1
                 if other_psm.lda_score > max_score:
                     max_score, max_score_psm = other_psm.lda_score, other_psm
@@ -191,7 +191,7 @@ class PSMContainer(collections.UserList):
         for psm in self.data:
             # TODO: typing ignore due to
             # https://github.com/python/mypy/issues/5846
-            peptides.add((psm.seq, tuple(psm.mods), psm.max_similarity))  # type: ignore
+            peptides.add((psm.seq, tuple(psm.mods)))  # type: ignore
         return peptides
 
     def to_df(self, target_only: bool = False) -> pd.DataFrame:
