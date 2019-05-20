@@ -7,18 +7,21 @@ retrieval pathways.
 
 import collections
 import copy
+import functools
 import itertools
-import json
 import math
 import os
 import sys
+from typing import Dict, Iterable, List, Sequence, Tuple
+
+import pandas as pd
 
 import config
-import modifications
+import lda
+from modifications import ModSite
 import peptides
-import plots
 import proteolysis
-from peptide_spectrum_match import psms2df, UnmodPSM
+from peptide_spectrum_match import PSM, UnmodPSM
 from psm_container import PSMContainer
 import readers
 import spectra_readers
@@ -31,44 +34,28 @@ from pepfrag import Peptide
 SpecMatch = collections.namedtuple("SpecMatch",
                                    ["seq", "mods", "theor_z", "conf",
                                     "pep_type"])
-    
-    
-class MergedPeptideSequences():
+
+MODEL_REMOVE_COLS = ["data_id", "seq", "spec_id", "target", "score", "prob",
+                     "uid"]
+
+
+@functools.lru_cache(maxsize=1024)
+def merge_peptide_sequence(seq: str, mods: Tuple[ModSite, ...]) -> str:
     """
-    A class to cache merged peptide sequences to avoid recreating these
-    on many iterations.
+    Merges the modifications into the peptide sequence.
+
+    Args:
+        seq (str): The peptide sequence.
+        mods (tuple): The peptide ModSites.
+
+    Returns:
+        The merged sequence as a string.
 
     """
-    def __init__(self):
-        """
-        Initializes the cache object.
+    return peptides.merge_seq_mods(seq, mods)
 
-        """
-        self._cache = {}
-        
-    def get(self, seq, mods):
-        """
-        Retrieves the merged combination of seq and mods. If it does not exist
-        in the cache, the merge is performed and cached for future use.
-        
-        Args:
-            seq (str): The peptide sequence.
-            mods (list of ModSites): The peptide modification sites.
-            
-        Returns:
-            The peptide string with modifications merged into the sequence.
 
-        """
-        key = (seq, tuple(mods))
-        
-        if key not in self._cache:
-            self._cache[key] = peptides.merge_seq_mods(
-                seq, mods)
-        
-        return self._cache[key]
-        
-        
-def site_probability(score, all_scores):
+def site_probability(score: float, all_scores: Iterable[float]) -> float:
     """
     Computes the probability that the site combination with score is the
     correct combination.
@@ -80,8 +67,8 @@ def site_probability(score, all_scores):
     Returns:
         The site probability as a float.
 
-        """
-    return 1 / sum(math.exp(s) / math.exp(score) for s in all_scores)
+    """
+    return 1. / sum(math.exp(s) / math.exp(score) for s in all_scores)
 
 
 class ValidateBase():
@@ -93,7 +80,7 @@ class ValidateBase():
     def __init__(self, json_config):
         """
         Initialize the object.
-        
+
         Args:
             json_config (json.JSON): The JSON configuration read from a file.
 
@@ -105,28 +92,29 @@ class ValidateBase():
         # The UniMod PTM DB
         print("Reading UniMod PTM DB")
         self.unimod = readers.PTMDB(self.config.unimod_ptm_file)
-        
+
         # All ProteinPilot results
-        self.pp_res = collections.defaultdict(lambda: collections.defaultdict(list))
-        
+        self.pp_res = collections.defaultdict(
+            lambda: collections.defaultdict(list))
+
         self.target_mod = self.config.target_mod
-        
+
         # Get the mass change associated with the target modification
         self.mod_mass = self.unimod.get_mass(self.config.target_mod)
-        
+
         path_str = (f"{self.target_mod.replace('->', '2')}_"
                     f"{''.join(self.config.target_residues)}")
-                    
+
         output_dir = self.config.output_dir
         if output_dir is None:
             output_dir = path_str
 
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
-        
+
         self.file_prefix = f"{output_dir}/{path_str}_"
-        
-    def _identify_benchmarks(self, psms):
+
+    def identify_benchmarks(self, psms: Sequence[PSM]):
         """
         Labels the PSMs which are in the benchmark set of peptides.
 
@@ -139,7 +127,7 @@ class ValidateBase():
             psm.benchmark = (peptides.merge_seq_mods(psm.seq, psm.mods)
                              in benchmarks)
 
-    def _find_unmod_analogues(self, mod_psms):
+    def _find_unmod_analogues(self, mod_psms: Sequence[PSM]):
         """
         Finds the unmodified analogues in the ProteinPilot search results.
 
@@ -147,34 +135,34 @@ class ValidateBase():
 
         """
         unmod_psms = []
-        
-        merged_seqs = MergedPeptideSequences()
-        
+
         print("Caching PSM sequences...")
         psm_info = []
         for psm in mod_psms:
             seq = psm.seq
             mods = []
-            for ms in psm.mods:
+            for mod in psm.mods:
                 try:
-                    site = int(ms.site)
+                    site = int(mod.site)
                 except ValueError:
-                    mods.append(ms)
+                    mods.append(mod)
                     continue
-                    
-                if ms.mod != self.target_mod and seq[site - 1] not in self.config.target_residues:
-                    mods.append(ms)
+
+                if (mod.mod != self.target_mod and
+                        seq[site - 1] not in self.config.target_residues):
+                    mods.append(mod)
 
             psm_info.append(
-                (mods, merged_seqs.get(psm.seq, mods), psm.charge))
+                (mods, merge_peptide_sequence(psm.seq, tuple(mods)),
+                 psm.charge))
 
         for data_id, data in self.pp_res.items():
             print(f"Processing data set {data_id}...")
             unmods = {}
             for spec_id, matches in data.items():
-                pp_peptides = [(merged_seqs.get(match.seq, match.mods),
-                                match.theor_z)
-                               for match in matches]
+                pp_peptides = [(
+                    merge_peptide_sequence(match.seq, tuple(match.mods)),
+                    match.theor_z) for match in matches]
                 res = [(mod_psms[idx], mods)
                        for idx, (mods, pep_str, charge) in enumerate(psm_info)
                        if (pep_str, charge) in pp_peptides]
@@ -203,16 +191,17 @@ class ValidateBase():
                                  spectrum=spec))
 
         return utilities.deduplicate(unmod_psms)
-        
-    def _filter_mods(self, mods, seq):
+
+    def _filter_mods(self, mods: Iterable[ModSite], seq: str)\
+            -> List[ModSite]:
         """
         Filters the modification list to remove those instances of the
         target_mod at one of the target_residues.
-        
+
         Args:
             mods (list of ModSites)
             seq (str): The peptide sequence.
-            
+
         Returns:
             Filtered list of ModSites.
 
@@ -224,14 +213,16 @@ class ValidateBase():
             except ValueError:
                 new_mods.append(ms)
                 continue
-                
-            if ms.mod != self.target_mod and seq[site - 1] not in self.config.target_residues:
+
+            if (ms.mod != self.target_mod and
+                    seq[site - 1] not in self.config.target_residues):
                 new_mods.append(ms)
-                
+
         return new_mods
-        
-    def localize(self, psms, lda_model, features, spd_threshold,
-                 sim_threshold):
+
+    def _localize(self, psms: List[PSM], lda_model: lda.CustomPipeline,
+                  features: Iterable[str], spd_prob_threshold: float,
+                  sim_threshold: float):
         """
         For peptide identifications with multiple possible modification sites,
         localizes the modification site by computing site probabilities.
@@ -240,10 +231,10 @@ class ValidateBase():
         for ii, psm in enumerate(psms):
             # Only localize those PSMs which pass the rPTMDetermine score and
             # similarity score thresholds
-            if (psm.lda_score < spd_threshold or
+            if (psm.lda_prob is None or psm.lda_prob < spd_prob_threshold or
                     psm.max_similarity < sim_threshold):
                 continue
-            
+
             # Count instances of the free (non-modified) target residues in
             # the peptide sequence
             target_idxs = [jj for jj, res in enumerate(psm.seq)
@@ -272,7 +263,7 @@ class ValidateBase():
                 new_psm.mods = self._filter_mods(new_psm.mods, new_psm.seq)
                 for idx in mod_comb:
                     new_psm.mods.append(
-                        modifications.ModSite(
+                        ModSite(
                             self.mod_mass, idx + 1, self.target_mod))
 
                 # Compute the PSM features using the new modification site(s)
@@ -280,7 +271,7 @@ class ValidateBase():
 
                 # Get the target score for the new PSM
                 isoform_scores[new_psm] = lda_model.decide_predict(
-                    psms2df([new_psm])[features])[0, 0]
+                    PSMContainer([new_psm]).to_df()[features])[0, 0]
 
             all_scores = list(isoform_scores.values())
 
@@ -288,15 +279,15 @@ class ValidateBase():
                 isoform.site_prob = site_probability(score, all_scores)
 
             psms[ii] = max(isoform_scores.keys(), key=lambda p: p.site_prob)
-            
-    def filter_localizations(self, psms):
+
+    def filter_localizations(self, psms: Sequence[PSM]) -> PSMContainer:
         """
         Filters the PSMs to retain only those which have the target_mod
-        localizaed to one of the target residues.
-        
+        localized to one of the target residues.
+
         Args:
             psms (list of PSMs): The PSMs to be filtered.
-            
+
         Returns:
             Filtered list of PSMs.
 
@@ -312,3 +303,42 @@ class ValidateBase():
                     new_psms.append(psm)
                     break
         return PSMContainer(new_psms)
+
+    def _build_model(self, model_file: str)\
+            -> Tuple[lda.CustomPipeline, Dict[int, Tuple[float, float]],
+                     float, List[str]]:
+        """
+        Constructs an LDA model from the feature data in model_file.
+
+        Args:
+            model_file (str): The path to a CSV file containing feature
+                              data, as written during validate.py execution.
+
+        Returns:
+
+        """
+        df = pd.read_csv(model_file, index_col=0)
+
+        features: List[str] = list(df.columns.values)
+        features = [f for f in features if f not in MODEL_REMOVE_COLS and
+                    f not in self.config.exclude_features]
+
+        return (*lda.lda_model(df, features), features)
+
+    def build_model(self)\
+            -> Tuple[lda.CustomPipeline, Dict[int, Tuple[float, float]],
+                     float, List[str]]:
+        """
+        Constructs the LDA model for the modified identifications.
+
+        """
+        return self._build_model(self.config.model_file)
+
+    def build_unmod_model(self)\
+            -> Tuple[lda.CustomPipeline, Dict[int, Tuple[float, float]],
+                     float, List[str]]:
+        """
+        Constructs the LDA model for the unmodified identifications.
+
+        """
+        return self._build_model(self.config.unmod_model_file)
