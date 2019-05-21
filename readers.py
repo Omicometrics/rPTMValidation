@@ -5,8 +5,13 @@ A series of functions used to read different file types.
 """
 import collections
 import csv
+import functools
+import operator
 import re
-from typing import Any, Dict, Iterable, List, TextIO, Tuple
+from typing import (Any, Dict, Iterable, Iterator, List, Optional,
+                    TextIO, Tuple, Union)
+
+import lxml.etree as etree
 
 from constants import AA_SYMBOLS, ELEMENT_MASSES, MassType
 
@@ -108,8 +113,12 @@ class PTMDB():
     A class representing the UniMod PTM DB data structure.
 
     """
-    _mass_keys = ['Monoisotopic mass', 'Average mass']
-    _name_keys = ['PSI-MS Name', 'Interim name']
+    _mono_mass_key = "Monoisotopic mass"
+    _avg_mass_key = "Average mass"
+    _mass_keys = [_mono_mass_key, _avg_mass_key]
+    _psi_name_key = "PSI-MS Name"
+    _interim_name_key = "Interim name"
+    _name_keys = [_psi_name_key, _interim_name_key]
     _desc_key = 'Description'
     _comp_key = 'Composition'
 
@@ -122,22 +131,36 @@ class PTMDB():
 
         """
         self._data = {
-            'Monoisotopic mass': [],
-            'Average mass': [],
+            PTMDB._mono_mass_key: [],
+            PTMDB._avg_mass_key: [],
             PTMDB._comp_key: [],
             # Each of the below keys store a dictionary mapping their
             # position in the above lists
-            'PSI-MS Name': {},
-            'Interim name': {},
+            PTMDB._psi_name_key: {},
+            PTMDB._interim_name_key: {},
             PTMDB._desc_key: {}
         }
 
         with open(ptm_file, newline='') as fh:
             reader = csv.DictReader(fh, delimiter='\t')
             for row in reader:
-                self.add_entry(row)
+                self._add_entry(row)
 
-    def add_entry(self, entry):
+        self._reversed = {key: {v: k for k, v in self._data[key].items()}
+                          for key in PTMDB._name_keys}
+
+    def __iter__(self) -> Iterator[Tuple[str, float, float]]:
+        """
+        Implements iteration as a generator for the PTMDB class.
+
+        """
+        for idx, mono in enumerate(self._data[PTMDB._mono_mass_key]):
+            name = (self._reversed[PTMDB._psi_name_key][idx]
+                    if idx in self._reversed[PTMDB._psi_name_key]
+                    else self._reversed[PTMDB._interim_name_key][idx])
+            yield (name, mono, self._data[PTMDB._avg_mass_key][idx])
+
+    def _add_entry(self, entry):
         """
         Adds a new entry to the database.
 
@@ -145,7 +168,7 @@ class PTMDB():
             entry (dict): A row from the UniMod PTB file.
 
         """
-        pos = len(self._data[PTMDB._mass_keys[0]])
+        pos = len(self._data[PTMDB._mono_mass_key])
         for key in PTMDB._mass_keys:
             self._data[key].append(float(entry[key]))
         for key in PTMDB._name_keys:
@@ -175,6 +198,7 @@ class PTMDB():
         name = name.replace(' ', '')
         return self._data[PTMDB._desc_key].get(name.lower(), None)
 
+    @functools.lru_cache()
     def get_mass(self, name, mass_type=MassType.mono):
         """
         Retrieves the mass of the specified modification.
@@ -201,6 +225,7 @@ class PTMDB():
 
         return None
 
+    @functools.lru_cache()
     def get_formula(self, name):
         """
         Retrieves the modification formula, in terms of its elemental
@@ -221,6 +246,29 @@ class PTMDB():
         return {k: int(v) if v else 1
                 for k, v in re.findall(UNIMOD_FORMULA_REGEX,
                                        self._data[PTMDB._comp_key][idx])}
+
+    @functools.lru_cache()
+    def get_name(self, mass: float, mass_type: MassType = MassType.mono)\
+            -> Optional[str]:
+        """
+        Retrieves the name of the modification, given its mass.
+
+        Args:
+            mass (float): The modification mass.
+            mass_type (MassType, optional): The mass type.
+
+        Returns:
+            The name of the modification as a string.
+
+        """
+        key = (PTMDB._mono_mass_key if mass_type is MassType.mono
+               else PTMDB._avg_mass_key)
+        for idx, db_mass in enumerate(self._data[key]):
+            if abs(mass - db_mass) < 0.001:
+                return (self._reversed[PTMDB._psi_name_key][idx]
+                        if idx in self._reversed[PTMDB._psi_name_key]
+                        else self._reversed[PTMDB._interim_name_key][idx])
+        return None
 
 
 def _build_ppres(row: Dict[str, Any]) -> PPRes:
@@ -262,6 +310,7 @@ def read_peptide_summary(summary_file: str, condition=None) -> List[PPRes]:
                 else [_build_ppres(r) for r in reader if condition(r)])
 
 
+# TODO: use XML parser
 def read_proteinpilot_xml(filename: str) -> List[
         Tuple[str, List[Tuple[str, str, int, float, float, float, str]]]]:
     """
@@ -313,6 +362,127 @@ def read_proteinpilot_xml(filename: str) -> List[
                     res.append((queryid, hits))
                     hits, t = [], False
     return res
+
+
+class CometReader():
+    """
+    Class to read a Comet pepXML file.
+
+    """
+    _mass_mod_names = {
+        305: "iTRAQ8plex",
+        58: "Cabamidomethyl",
+        44: "Carbamyl"
+    }
+
+    def __init__(self, ptmdb: PTMDB,
+                 namespace: Optional[str] = None):
+        """
+        Initialize the reader.
+
+        Args:
+            ptmdb (PTMDB): The UniMod PTM database.
+            namespace (str, optional): The pepXML namespace.
+
+        """
+        self.ptmdb = ptmdb
+        self.namespace = ("http://regis-web.systemsbiology.net/pepXML"
+                          if namespace is None else namespace)
+        self.ns_map = {'x': self.namespace}
+
+    def read(self, filename: str) -> \
+        List[Tuple[str, int, str,
+                   List[Tuple[int, str,
+                              Tuple[Tuple[float, Union[str, int], str], ...],
+                              int, Dict[str, float], str]]]]:
+        """
+        Reads the specified pepXML file.
+
+        Args:
+            filename (str): The path to the pepXML file.
+
+        Returns:
+
+        Raises:
+            ParserException
+
+        """
+        res = []
+        for event, element in etree.iterparse(filename, events=['end']):
+            if (event == "end" and
+                    element.tag == f"{{{self.namespace}}}spectrum_query"):
+                raw_id = element.get("spectrum").split(".")
+                raw_file, scan_no = raw_id[0], int(raw_id[1])
+                charge = int(element.get("assumed_charge"))
+                spec_id = element.get("spectrumNativeID")
+
+                hits = [(
+                    int(hit.get("hit_rank")),
+                    hit.get("peptide"),
+                    tuple(self._process_mods(
+                        hit.find(f"{{{self.namespace}}}modification_info"))),
+                    charge,
+                    {s.get("name"): float(s.get("value"))
+                     for s in hit.xpath("x:search_score",
+                                        namespaces=self.ns_map)},
+                    "decoy" if hit.get("protein").startswith("DECOY_")
+                    else "normal"
+                    )
+                        for hit in element.xpath(
+                            "x:search_result/x:search_hit",
+                            namespaces=self.ns_map)]
+
+                if hits:
+                    res.append((raw_file, scan_no, spec_id, hits))
+
+        return res
+
+    def _process_mods(self, mod_info)\
+            -> List[Tuple[float, Union[str, int], str]]:
+        """
+        Processes the modification elements of the pepXML search result.
+
+        Args:
+            mod_info
+
+        Raises:
+            ParserException
+
+        """
+        if mod_info is None:
+            return []
+
+        mod_nterm_mass = mod_info.get("mod_nterm_mass", None)
+        nterm_mod: Optional[Tuple[float, str, str]] = None
+        if mod_nterm_mass is not None:
+            mod_nterm_mass = float(mod_nterm_mass)
+            name = CometReader._mass_mod_names.get(int(mod_nterm_mass), None)
+
+            if name is None:
+                raise ParserException(
+                    "Unrecognized n-terminal modification with mass "
+                    f"{mod_nterm_mass}")
+
+            nterm_mod = (mod_nterm_mass, "N-term", name)
+
+        mods: List[Tuple[float, Union[str, int], str]] = []
+        for mod in mod_info.findall(f"{{{self.namespace}}}mod_aminoacid_mass"):
+            mass = (float(mod.get("static")) if "static" in mod.attrib
+                    else float(mod.get("variable")))
+
+            mod_name = self.ptmdb.get_name(mass)
+
+            if mod_name is None:
+                raise ParserException(
+                    f"Unrecognized modification with mass {mass}")
+
+            mods.append((mass, int(mod.get("position")), mod_name))
+
+        mods = sorted(mods, key=operator.itemgetter(1))
+        if nterm_mod is not None:
+            mods.insert(0, nterm_mod)
+
+        return mods
 
 
 def read_fasta_sequences(fasta_file: TextIO) -> Iterable[Tuple[str, str]]:
