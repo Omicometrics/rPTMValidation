@@ -11,7 +11,7 @@ import json
 import re
 from typing import List, Optional, Pattern, Tuple
 
-from constants import RESIDUES
+from .constants import RESIDUES
 
 
 class Proteolyzer():

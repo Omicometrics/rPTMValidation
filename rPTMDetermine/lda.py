@@ -17,9 +17,9 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from peptide_spectrum_match import PSM
-import proteolysis
-from psm_container import PSMContainer
+from .peptide_spectrum_match import PSM
+from . import proteolysis
+from .psm_container import PSMContainer
 
 # Silence this since it arises when converting ints to float in StandardScaler
 warnings.filterwarnings(action='ignore', category=DataConversionWarning)

@@ -9,8 +9,8 @@ from typing import Any, Dict, Iterable, List, Sequence, Set, Tuple
 
 import numpy as np
 
-from peptide_spectrum_match import PSM, UnmodPSM
-from mass_spectrum import Spectrum
+from .peptide_spectrum_match import PSM, UnmodPSM
+from .mass_spectrum import Spectrum
 
 
 def calculate_similarity_scores(mod_psms: List[PSM],

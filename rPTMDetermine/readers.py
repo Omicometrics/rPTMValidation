@@ -5,6 +5,7 @@ A series of functions used to read different file types.
 """
 import collections
 import csv
+import email
 import functools
 import operator
 import re
@@ -13,7 +14,7 @@ from typing import (Any, Dict, Iterable, Iterator, List, Optional,
 
 import lxml.etree as etree
 
-from constants import AA_SYMBOLS, ELEMENT_MASSES, MassType
+from .constants import AA_SYMBOLS, ELEMENT_MASSES, MassType
 
 
 Modification = collections.namedtuple("Modification", ["name", "mono"])
@@ -483,6 +484,37 @@ class CometReader():
             mods.insert(0, nterm_mod)
 
         return mods
+
+
+class MascotReader():
+    """
+    Class to read Mascot dat/MIME files.
+
+    """
+    def __init__(self):
+        """
+        """
+        pass
+
+    def read(self, filename: str):
+        """
+        """
+        with open(filename) as fh:
+            file_content = email.parser.Parser().parse(fh)
+
+        payloads: Dict[str, str] = {
+            dict(sub._headers)["Content-Type"].split("=")[1].strip("\""):
+            sub._payload for sub in file_content._payload}
+            
+        error_tol_search, decoy_search =\
+            self.parse_parameters(payloads["parameters"])
+            
+    def parse_parameters(self, param_payload: str) -> Tuple[bool, bool]:
+        """
+        """
+        params = dict(re.findall(r'(\w+)=([^\n]*)', param_payload))
+        return params["ERRORTOLERANT"] == "1", params["DECOY"] == "1"
+        
 
 
 def read_fasta_sequences(fasta_file: TextIO) -> Iterable[Tuple[str, str]]:

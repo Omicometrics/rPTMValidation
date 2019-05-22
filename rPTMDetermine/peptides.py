@@ -7,8 +7,8 @@ import collections
 import sys
 from typing import Sequence, Union
 
-from constants import AA_MASSES, FIXED_MASSES
-import modifications
+from .constants import AA_MASSES, FIXED_MASSES
+from . import modifications
 
 sys.path.append("../pepfrag")
 from ion_generators import IonType

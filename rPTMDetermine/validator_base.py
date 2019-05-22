@@ -14,15 +14,15 @@ import os
 import sys
 from typing import Dict, Iterable, List, Sequence, Tuple
 
-import lda
-from modifications import ModSite
-import peptides
-import proteolysis
-from peptide_spectrum_match import PSM, UnmodPSM
-from psm_container import PSMContainer
-import readers
-import spectra_readers
-import utilities
+from . import lda
+from .modifications import ModSite
+from . import peptides
+from . import proteolysis
+from .peptide_spectrum_match import PSM, UnmodPSM
+from .psm_container import PSMContainer
+from . import readers
+from . import spectra_readers
+from . import utilities
 
 sys.path.append("../pepfrag")
 from pepfrag import Peptide

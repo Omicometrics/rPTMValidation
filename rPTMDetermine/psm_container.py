@@ -14,8 +14,8 @@ from typing import Callable, List, Optional, Sequence, Set, Tuple
 import pandas as pd
 import tqdm
 
-import modifications
-from peptide_spectrum_match import PSM, SimilarityScore
+from . import modifications
+from .peptide_spectrum_match import PSM, SimilarityScore
 
 sys.path.append("../pepfrag")
 from pepfrag import Peptide

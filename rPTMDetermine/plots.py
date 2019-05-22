@@ -14,7 +14,7 @@ from matplotlib.ticker import MaxNLocator
 import numpy as np
 import seaborn as sns
 
-from peptide_spectrum_match import PSM
+from .peptide_spectrum_match import PSM
 
 
 TARGET_COLOR = "#4472C4"

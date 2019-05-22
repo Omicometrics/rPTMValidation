@@ -7,8 +7,8 @@ applied to peptides.
 import collections
 from typing import List, Sequence, Union
 
-from constants import MassType
-from readers import PTMDB
+from .constants import MassType
+from .readers import PTMDB
 
 
 ModSite = collections.namedtuple("ModSite", ["mass", "site", "mod"])

@@ -8,12 +8,12 @@ import collections
 import sys
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from constants import FIXED_MASSES
-import ionscore
-import mass_spectrum
-import modifications
-import proteolysis
-import utilities
+from .constants import FIXED_MASSES
+from . import ionscore
+from . import mass_spectrum
+from . import modifications
+from . import proteolysis
+from . import utilities
 
 sys.path.append("../pepfrag")
 from pepfrag import IonType, Peptide

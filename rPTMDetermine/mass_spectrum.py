@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
-from constants import ITRAQ_MASSES
+from .constants import ITRAQ_MASSES
 
 sys.path.append("../pepfrag")
 from ion_generators import Ion

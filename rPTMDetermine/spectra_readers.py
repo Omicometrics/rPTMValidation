@@ -11,7 +11,7 @@ import zlib
 
 import lxml.etree as etree
 
-import mass_spectrum
+from . import mass_spectrum
 
 
 MGF_TITLE_REGEX = re.compile(r"TITLE=Locus:([\d\.]+) ")

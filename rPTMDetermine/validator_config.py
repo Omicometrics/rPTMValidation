@@ -8,7 +8,7 @@ rPTMDetermine.
 import os
 from typing import Any, Dict
 
-from base_config import BaseConfig
+from .base_config import BaseConfig
 
 
 class ValidatorConfig(BaseConfig):
