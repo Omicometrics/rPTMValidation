@@ -41,7 +41,7 @@ class Spectrum():
             charge (int): The charge state of the spectrum precursor.
 
         """
-		peak_list = np.array(peak_list)
+        peak_list = np.array(peak_list)
         if peak_list.shape[0] == 2:
             peak_list = peak_list.T
         self._peaks = peak_list
