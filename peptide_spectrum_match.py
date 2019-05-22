@@ -214,7 +214,8 @@ class PSM():
         if self.spectrum is None:
             raise RuntimeError("PSM has not been assigned a Spectrum")
 
-    def denoise_spectrum(self) -> Tuple[Dict[str, Tuple[int, int]], mass_spectrum.Spectrum]:
+    def denoise_spectrum(self, tol: float = 0.2)\
+            -> Tuple[Dict[str, Tuple[int, int]], mass_spectrum.Spectrum]:
         """
         Adaptively denoises the mass spectrum.
 
@@ -235,7 +236,7 @@ class PSM():
             })
 
         # The spectrum annotations
-        anns = self.spectrum.annotate(ions)
+        anns = self.spectrum.annotate(ions, tol=tol)
         ann_peak_nums = {an.peak_num for an in anns.values()}
         denoised_peaks, denoised_spec = self.spectrum.denoise(
             [idx in ann_peak_nums for idx in range(len(self.spectrum))])
