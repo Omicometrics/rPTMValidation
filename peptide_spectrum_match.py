@@ -6,7 +6,7 @@ Module contains a class to define a Peptide Spectrum Match (PSM).
 import bisect
 import collections
 import sys
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from constants import FIXED_MASSES
 import ionscore
@@ -213,6 +213,37 @@ class PSM():
         """
         if self.spectrum is None:
             raise RuntimeError("PSM has not been assigned a Spectrum")
+            
+    def annotate_spectrum(
+        self, tol: float = 0.2,
+        ion_types: Optional[Dict[IonType, Dict[str, Any]]] = None)\
+            -> Dict[str, mass_spectrum.Annotation]:
+        """
+        Annotates the mass spectrum using the theoretical ions of the peptide.
+
+        Args:
+            tol (float, optional): The annotation m/z tolerance.
+            ion_types (dict, optional): The fragmentation configuration dict.
+
+        Returns:
+            Dictionary mapping ion labels to mass_spectrum.Annotation.
+
+        """
+        self._check_spectrum_initialized()
+
+        if ion_types is None:
+            ion_types = {
+                IonType.precursor: {"neutral_losses": ["H2O", "NH3"]},
+                IonType.imm: {},
+                IonType.b: {"neutral_losses": ["H2O", "NH3"]},
+                IonType.y: {"neutral_losses": ["H2O", "NH3"]},
+                IonType.a: {"neutral_losses": []}
+            }
+
+        # Get the theoretical ions for the peptide
+        ions = self.peptide.fragment(ion_types=ion_types)
+
+        return self.spectrum.annotate(ions, tol=tol)
 
     def denoise_spectrum(self, tol: float = 0.2)\
             -> Tuple[Dict[str, Tuple[int, int]], mass_spectrum.Spectrum]:
@@ -225,18 +256,8 @@ class PSM():
         """
         self._check_spectrum_initialized()
 
-        # Get the theoretical ions for the peptide
-        ions = self.peptide.fragment(
-            ion_types={
-                IonType.precursor: {"neutral_losses": ["H2O", "NH3"]},
-                IonType.imm: {},
-                IonType.b: {"neutral_losses": ["H2O", "NH3"]},
-                IonType.y: {"neutral_losses": ["H2O", "NH3"]},
-                IonType.a: {"neutral_losses": []}
-            })
-
         # The spectrum annotations
-        anns = self.spectrum.annotate(ions, tol=tol)
+        anns = self.annotate_spectrum(tol=tol)
         ann_peak_nums = {an.peak_num for an in anns.values()}
         denoised_peaks, denoised_spec = self.spectrum.denoise(
             [idx in ann_peak_nums for idx in range(len(self.spectrum))])
