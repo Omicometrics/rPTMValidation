@@ -14,8 +14,9 @@ import os
 import sys
 from typing import Dict, Iterable, List, Sequence, Tuple
 
+from pepfrag import ModSite, Peptide
+
 from . import lda
-from .modifications import ModSite
 from . import peptides
 from . import proteolysis
 from .peptide_spectrum_match import PSM, UnmodPSM
@@ -23,9 +24,6 @@ from .psm_container import PSMContainer
 from . import readers
 from . import spectra_readers
 from . import utilities
-
-sys.path.append("../pepfrag")
-from pepfrag import Peptide
 
 
 SpecMatch = collections.namedtuple("SpecMatch",

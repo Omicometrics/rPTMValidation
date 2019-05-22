@@ -17,6 +17,7 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
+from pepfrag import IonType, Peptide
 import tqdm
 
 from .constants import RESIDUES
@@ -30,10 +31,6 @@ from .retriever_config import RetrieverConfig
 from . import similarity
 from . import spectra_readers
 from . import validator_base
-
-sys.path.append("../pepfrag")
-from ion_generators import IonType
-from pepfrag import Peptide
 
 
 CHARGE_LABELS = [['[+]' if cj == 0 else f'[{cj + 1}+]'

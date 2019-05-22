@@ -7,18 +7,15 @@ import collections
 import sys
 from typing import Sequence, Union
 
-from .constants import AA_MASSES, FIXED_MASSES
-from . import modifications
+from pepfrag import AA_MASSES, FIXED_MASSES, IonType, ModSite, Peptide
 
-sys.path.append("../pepfrag")
-from ion_generators import IonType
-import pepfrag
+from . import modifications
 
 
 Ion = collections.namedtuple("Ion", ["mass", "label", "pos"])
 
 
-def calculate_mz(seq: str, mods: Sequence[modifications.ModSite],
+def calculate_mz(seq: str, mods: Sequence[ModSite],
                  charge: int) -> float:
     """
     Calculates the mass/charge ratio of a peptide given its sequence,
@@ -38,7 +35,7 @@ def calculate_mz(seq: str, mods: Sequence[modifications.ModSite],
 
 
 def merge_seq_mods(seq: str,
-                   mods: Union[str, Sequence[modifications.ModSite]]) -> str:
+                   mods: Union[str, Sequence[ModSite]]) -> str:
     """
     Inserts modifications into the corresponding locations of the peptide
     sequence.
@@ -53,7 +50,7 @@ def merge_seq_mods(seq: str,
     """
     if isinstance(mods, str):
         mod_str = modifications.preparse_mod_string(mods)
-        mods = [modifications.ModSite(None, *m.split("@")[::-1])
+        mods = [ModSite(None, *m.split("@")[::-1])
                 for m in mod_str.split(";") if m]
 
     if not mods:
@@ -77,7 +74,7 @@ def merge_seq_mods(seq: str,
     return ''.join(seq_list)
 
 
-def get_by_ion_mzs(peptide: pepfrag.Peptide):
+def get_by_ion_mzs(peptide: Peptide):
     """
     Get the b/y-type fragment ions for the peptide.
 

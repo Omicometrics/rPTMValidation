@@ -8,15 +8,14 @@ import collections
 import sys
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
+from pepfrag import FIXED_MASSES, IonType, ModSite, Peptide
+
 from .constants import FIXED_MASSES
 from . import ionscore
 from . import mass_spectrum
 from . import modifications
 from . import proteolysis
 from . import utilities
-
-sys.path.append("../pepfrag")
-from pepfrag import IonType, Peptide
 
 
 DecoyID = \
@@ -91,7 +90,7 @@ class PSM():
         return self.peptide.seq
 
     @property
-    def mods(self) -> List[modifications.ModSite]:
+    def mods(self) -> List[ModSite]:
         """
         Returns the peptide modifications list.
 
@@ -99,7 +98,7 @@ class PSM():
         return self.peptide.mods
 
     @mods.setter
-    def mods(self, val: List[modifications.ModSite]):
+    def mods(self, val: List[ModSite]):
         """
         Sets the peptide modifications list.
 

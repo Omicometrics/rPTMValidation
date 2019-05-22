@@ -20,9 +20,10 @@ import sys
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+from pepfrag import AA_MASSES, FIXED_MASSES, ModSite, Peptide
 import tqdm
 
-from .constants import AA_MASSES, FIXED_MASSES, RESIDUES
+from .constants import RESIDUES
 from . import generate_decoys
 from . import lda
 from . import mass_spectrum
@@ -37,9 +38,6 @@ from . import spectra_readers
 from . import utilities
 from . import validator_base
 from .validator_config import ValidatorConfig
-
-sys.path.append("../pepfrag")
-from pepfrag import Peptide
 
 
 DecoyPeptides = collections.namedtuple("DecoyPeptides",
@@ -137,7 +135,7 @@ def match_decoys(peptide_mz: float, decoys: DecoyPeptides,
                 candidates.extend([
                     Peptide(r_seqs[ii],
                             charge, r_mods[ii] +
-                            [modifications.ModSite(mass, jj + 1, None)])
+                            [ModSite(mass, jj + 1, None)])
                     for ii, jj in seq_res_idxs])
 
     return candidates
@@ -641,7 +639,7 @@ class Validator(validator_base.ValidateBase):
             for seq in seqs]
 
         idxs: List[int] = []
-        mods: List[List[modifications.ModSite]] = []
+        mods: List[List[ModSite]] = []
         masses: List[float] = []
         if target_res is not None:
             # Find the sites of the target residue in the decoy peptides
@@ -669,8 +667,7 @@ class Validator(validator_base.ValidateBase):
         return DecoyPeptides(seqs, var_idxs, idxs, mods, np.array(masses))
 
     def modify_decoys(self, seqs: List[str], res_idxs: List[List[int]])\
-            -> Tuple[List[int], List[List[modifications.ModSite]],
-                     List[float]]:
+            -> Tuple[List[int], List[List[ModSite]], List[float]]:
         """
         Applies the target modification to the decoy peptide sequences.
 
@@ -687,7 +684,7 @@ class Validator(validator_base.ValidateBase):
 
         """
         decoy_idxs: List[int] = []
-        decoy_mods: List[List[modifications.ModSite]] = []
+        decoy_mods: List[List[ModSite]] = []
         decoy_seq_masses: List[float] = []
         for ii, seq in enumerate(seqs):
             # Calculate the mass of the decoy sequence and construct the
@@ -705,13 +702,13 @@ class Validator(validator_base.ValidateBase):
                     decoy_idxs.append(ii)
                     decoy_seq_masses.append(mass + self.mod_mass * len(idxs))
                     decoy_mods.append(
-                        mods + [modifications.ModSite(self.mod_mass, kk + 1,
+                        mods + [ModSite(self.mod_mass, kk + 1,
                                                       self.target_mod)
                                 for kk in idxs])
 
         return decoy_idxs, decoy_mods, decoy_seq_masses
 
-    def gen_fixed_mods(self, seq: str) -> List[modifications.ModSite]:
+    def gen_fixed_mods(self, seq: str) -> List[ModSite]:
         """
         Generates the fixed modifications for the sequence, based on the
         input configuration.
@@ -724,14 +721,14 @@ class Validator(validator_base.ValidateBase):
 
         """
         nterm_mod = self.fixed_residues.get("nterm", None)
-        mods = ([modifications.ModSite(self.unimod.get_mass(nterm_mod),
+        mods = ([ModSite(self.unimod.get_mass(nterm_mod),
                                        "nterm", nterm_mod)]
                 if nterm_mod is not None else [])
         for ii, res in enumerate(seq):
             if res in self.fixed_residues:
                 mod_name = self.fixed_residues[res]
                 mods.append(
-                    modifications.ModSite(self.unimod.get_mass(mod_name),
+                    ModSite(self.unimod.get_mass(mod_name),
                                           ii + 1, mod_name))
 
         return mods

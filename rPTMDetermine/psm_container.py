@@ -12,13 +12,11 @@ import sys
 from typing import Callable, List, Optional, Sequence, Set, Tuple
 
 import pandas as pd
+from pepfrag import ModSite, Peptide
 import tqdm
 
 from . import modifications
 from .peptide_spectrum_match import PSM, SimilarityScore
-
-sys.path.append("../pepfrag")
-from pepfrag import Peptide
 
 
 class PSMContainer(collections.UserList):
@@ -180,7 +178,7 @@ class PSMContainer(collections.UserList):
 
     def get_unique_peptides(
         self, predicate: Optional[Callable[[PSM], bool]] = None)\
-            -> Set[Tuple[str, Tuple[modifications.ModSite]]]:
+            -> Set[Tuple[str, Tuple[ModSite]]]:
         """
         Finds the unique peptides, by sequence and modifications.
 
@@ -194,7 +192,7 @@ class PSMContainer(collections.UserList):
             Set of unique peptides as tuples of sequence and mods.
 
         """
-        peptides: Set[Tuple[str, Tuple[modifications.ModSite]]] = set()
+        peptides: Set[Tuple[str, Tuple[ModSite]]] = set()
         for psm in self.data:
             if predicate is None or predicate(psm):
                 # TODO: typing ignore due to
@@ -203,7 +201,7 @@ class PSMContainer(collections.UserList):
         return peptides
 
     def get_benchmark_peptides(self)\
-            -> Set[Tuple[str, Tuple[modifications.ModSite]]]:
+            -> Set[Tuple[str, Tuple[ModSite]]]:
         """
         Finds the unique peptides, by sequence and modifications, which
         correspond to benchmark peptides.

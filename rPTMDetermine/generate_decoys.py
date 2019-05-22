@@ -6,9 +6,11 @@ Generate decoy peptides from the target protein sequence database.
 import argparse
 import csv
 import os
+import sys
 from typing import List, Tuple
 
-from .constants import AA_MASSES, FIXED_MASSES
+from pepfrag import AA_MASSES, FIXED_MASSES
+
 from . import proteolysis
 from . import readers
 

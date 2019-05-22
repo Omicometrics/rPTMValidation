@@ -4,14 +4,11 @@ A script providing functions for parsing and processing the modifications
 applied to peptides.
 
 """
-import collections
 from typing import List, Sequence, Union
 
-from .constants import MassType
+from pepfrag import MassType, ModSite
+
 from .readers import PTMDB
-
-
-ModSite = collections.namedtuple("ModSite", ["mass", "site", "mod"])
 
 
 class UnknownModificationException(Exception):

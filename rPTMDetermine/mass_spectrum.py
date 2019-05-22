@@ -12,11 +12,9 @@ import sys
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
+from pepfrag import Ion
 
 from .constants import ITRAQ_MASSES
-
-sys.path.append("../pepfrag")
-from ion_generators import Ion
 
 
 Annotation = collections.namedtuple("Annotation",
@@ -41,10 +39,9 @@ class Spectrum():
             charge (int): The charge state of the spectrum precursor.
 
         """
-		peak_list = np.array(peak_list)
-        if peak_list.shape[0] == 2:
-            peak_list = peak_list.T
-        self._peaks = peak_list
+        self._peaks = np.array(peak_list)
+        if self._peaks.shape[0] == 2:
+            self._peaks = self._peaks.T
         self.prec_mz = prec_mz
         self.charge = charge
 
