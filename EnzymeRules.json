@@ -1,0 +1,201 @@
+{
+    "Trypsin": {
+        "Sites": [
+            "KR"
+        ],
+        "Except": [
+            "P"
+        ],
+        "Terminal": [
+            "C"
+        ]
+    },
+    "Trypsin/P": {
+        "Sites": [
+            "KR"
+        ],
+        "Terminal": [
+            "C"
+        ]
+    },
+    "Arg-C": {
+        "Sites": [
+            "R"
+        ],
+        "Except": [
+            "P"
+        ],
+        "Terminal": [
+            "C"
+        ]
+    },
+    "Asp-N": {
+        "Sites": [
+            "BD"
+        ],
+        "Terminal": [
+            "N"
+        ]
+    },
+    "Asp-N_ambic": {
+        "Sites": [
+            "DE"
+        ],
+        "Terminal": [
+            "N"
+        ]
+    },
+    "Chymotrypsin": {
+        "Sites": [
+            "FYWL"
+        ],
+        "Except": [
+            "P"
+        ],
+        "Terminal": [
+            "C"
+        ]
+    },
+    "CNBr": {
+        "Sites": [
+            "M"
+        ],
+        "Terminal": [
+            "C"
+        ]
+    },
+    "CNBr+Trypsin": {
+        "Sites": [
+            "M",
+            "KR"
+        ],
+        "Except": [
+            "",
+            "P"
+        ],
+        "Terminal": [
+            "C",
+            "C"
+        ]
+    },
+    "Formic_acid": {
+        "Sites": [
+            "D"
+        ],
+        "Terminal": [
+            "C"
+        ]
+    },
+    "Lys-C": {
+        "Sites": [
+            "K"
+        ],
+        "Except": [
+            "P"
+        ],
+        "Terminal": [
+            "C"
+        ]
+    },
+    "Lys-C/P": {
+        "Sites": [
+            "K"
+        ],
+        "Terminal": [
+            "C"
+        ]
+    },
+    "LysC+AspN": {
+        "Sites": [
+            "K",
+            "DB"
+        ],
+        "Except": [
+            "P",
+            "P"
+        ],
+        "Terminal": [
+            "C",
+            "N"
+        ]
+    },
+    "Lys-N": {
+        "Sites": [
+            "K"
+        ],
+        "Terminal": [
+            "N"
+        ]
+    },
+    "PepsinA": {
+        "Sites": [
+            "FL"
+        ],
+        "Terminal": [
+            "C"
+        ]
+    },
+    "semiTrypsin": {
+        "Sites": [
+            "KR"
+        ],
+        "Except": [
+            "P"
+        ],
+        "Terminal": [
+            "C"
+        ]
+    },
+    "TrypChymo": {
+        "Sites": [
+            "FYWLKR"
+        ],
+        "Except": [
+            "P"
+        ],
+        "Terminal": [
+            "C"
+        ]
+    },
+    "TrypsinMSIPI": {
+        "Sites": [
+            "KR"
+        ],
+        "Except": [
+            "P"
+        ],
+        "Terminal": [
+            "C"
+        ]
+    },
+    "TrypsinMSIPI/P": {
+        "Sites": [
+            "KR"
+        ],
+        "Terminal": [
+            "C"
+        ]
+    },
+    "V8-DE": {
+        "Sites": [
+            "BDEZ"
+        ],
+        "Except": [
+            "P"
+        ],
+        "Terminal": [
+            "C"
+        ]
+    },
+    "V8-E": {
+        "Sites": [
+            "EZ"
+        ],
+        "Except": [
+            "P"
+        ],
+        "Terminal": [
+            "C"
+        ]
+    }
+}
