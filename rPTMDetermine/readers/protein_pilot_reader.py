@@ -4,55 +4,84 @@ This module provides functions for reading ProteinPilot results
 (PeptideSummary/XML) files.
 
 """
-import collections
 import csv
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-PPRes = collections.namedtuple("PPRes", ["seq", "mods", "theor_z", "spec",
-                                         "time", "conf", "theor_mz", "prec_mz",
-                                         "accs", "names"])
+import rPTMDetermine.modifications as modifications
+
+from .base_reader import Reader
+from .search_result import PeptideType, SearchResult
+
 
 MGF_TITLE_REGEX = re.compile(r"TITLE=Locus:([\d\.]+) ")
 
 
-def _build_ppres(row: Dict[str, Any]) -> PPRes:
+class ProteinPilotReader(Reader):
     """
-    Processes the given row of a Peptide Summary file to produce a PPRes
-    entry.
-
-    Args:
-        row (dict): A row dictionary from the Peptide Summary file.
-
-    Returns:
-        A PPRes namedtuple to represent the row.
+    A class to read ProteinPilot PeptideSummary files.
 
     """
-    return PPRes(row["Sequence"], row["Modifications"], int(row["Theor z"]),
-                 row["Spectrum"], row["Time"], float(row["Conf"]),
-                 float(row["Theor m/z"]), float(row["Prec m/z"]),
-                 row["Accessions"], row["Names"])
+    def read(self, filename: str, min_conf: Optional[float] = None,
+             **kwargs)\
+            -> List[SearchResult]:
+        """
+        Reads the given ProteinPilot Peptide Summary file to extract useful
+        information on sequence, modifications, m/z etc.
 
+        Args:
+            filename (str): The path to the Peptide Summary file.
+            min_conf (float, optional): The minimum confidence threshold.
 
-def read_peptide_summary(summary_file: str, condition=None) -> List[PPRes]:
-    """
-    Reads the given ProteinPilot Peptide Summary file to extract useful
-    information on sequence, modifications, m/z etc.
+        Returns:
+            The read information as a list of SearchResults.
 
-    Args:
-        summary_file (str): The path to the Peptide Summary file.
-        condition (func, optional): A boolean-returning function which
-                                    determines whether a row should be
-                                    returned.
+        """
+        with open(filename, newline='') as fh:
+            reader = csv.DictReader(fh, delimiter='\t')
+            results = []
+            for row in reader:
+                result = self._build_search_result(row)
+                if result is None:
+                    continue
+                if (min_conf is None or (result.confidence is not None
+                                         and result.confidence >= min_conf)):
+                    results.append(result)
+            return results
 
-    Returns:
-        The read information as a list of PPRes NamedTuples.
+    def _build_search_result(self, row: Dict[str, Any])\
+            -> Optional[SearchResult]:
+        """
+        Processes the given row of a Peptide Summary file to produce a
+        SearchResult entry.
 
-    """
-    with open(summary_file, newline='') as fh:
-        reader = csv.DictReader(fh, delimiter='\t')
-        return ([_build_ppres(r) for r in reader] if condition is None
-                else [_build_ppres(r) for r in reader if condition(r)])
+        Args:
+            row (dict): A row dictionary from the Peptide Summary file.
+
+        Returns:
+            A SearchResult to represent the row, or None if the modifications
+            could not be identified.
+
+        """
+        mods = modifications.preparse_mod_string(row["modifications"])
+
+        try:
+            parsed_mods = modifications.parse_mods(mods, self.ptmdb)
+        except modifications.UnknownModificationException:
+            return None
+
+        return SearchResult(row["Sequence"],
+                            parsed_mods,
+                            int(row["Theor z"]),
+                            row["Spectrum"],
+                            # Rank
+                            1,
+                            row["Time"],
+                            float(row["Conf"]),
+                            float(row["Theor m/z"]),
+                            float(row["Prec m/z"]),
+                            PeptideType.decoy if "REVERSED" in row["Names"]
+                            else PeptideType.normal)
 
 
 # TODO: use XML parser

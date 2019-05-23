@@ -4,10 +4,16 @@ A simple module to provide access to the configuration options for
 rPTMDetermine.
 
 """
-
+import enum
 import os
 import sys
 from typing import Any, Dict, List, Optional
+
+
+class SearchEngine(enum.Enum):
+    ProteinPilot = enum.auto()
+    Mascot = enum.auto()
+    Comet = enum.auto()
 
 
 class BaseConfig():
@@ -26,12 +32,20 @@ class BaseConfig():
         self.json_config = json_config
 
         self._required = ["data_sets", "fixed_residues", "target_db_path",
-                          "target_mod", "target_residues"]
+                          "target_mod", "target_residues", "search_engine"]
 
         if extra_required is not None:
             self._required.extend(extra_required)
 
         self._check_required()
+
+    @property
+    def search_engine(self) -> SearchEngine:
+        """
+        The database search engine for which to validate reuslts.
+
+        """
+        return SearchEngine[self.json_config["search_engine"]]
 
     @property
     def data_sets(self) -> Dict[str, Dict[str, Any]]:

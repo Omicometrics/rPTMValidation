@@ -27,7 +27,6 @@ from .constants import RESIDUES
 from . import generate_decoys
 from . import lda
 from . import mass_spectrum
-from . import modifications
 from . import peptides
 from .peptide_spectrum_match import DecoyID, PSM
 from . import proteolysis
@@ -404,43 +403,26 @@ class Validator(validator_base.ValidateBase):
         """
         # Target modification identifications
         psms = []
-
         for set_id, set_info in tqdm.tqdm(self.config.data_sets.items()):
-            data_dir = set_info['data_dir']
-            conf = set_info['confidence']
-
-            summary_files = [os.path.join(data_dir, f)
-                             for f in os.listdir(data_dir)
-                             if 'PeptideSummary' in f and f.endswith('.txt')]
-
-            if not summary_files:
-                continue
+            res_path = os.path.join(set_info["data_dir"], set_info["results"])
 
             # Apply database search FDR control to the results
-            summaries = readers.read_peptide_summary(
-                summary_files[0],
-                condition=lambda r, cf=conf: float(r["Conf"]) >= cf)
-            for summary in summaries:
-                mods = modifications.preparse_mod_string(summary.mods)
+            identifications: List[readers.SearchResult] = (
+                self.reader.read(res_path, min_conf=set_info["confidence"])
+                if "confidence" in set_info else self.reader.read(res_path))
 
-                try:
-                    parsed_mods = modifications.parse_mods(
-                        mods, self.unimod)
-                except modifications.UnknownModificationException:
-                    continue
-
-                if any(f"{self.target_mod}({tr})" in summary.mods
-                       for tr in self.target_residues):
+            for ident in identifications:
+                if any(ms.mod == self.target_mod and isinstance(ms.site, int)
+                       and ident.seq[ms.site - 1] == res for ms in ident.mods
+                       for res in self.target_residues):
                     psms.append(
-                        PSM(set_id, summary.spec,
-                            Peptide(summary.seq, summary.theor_z,
-                                    parsed_mods)))
+                        PSM(set_id, ident.spectrum,
+                            Peptide(ident.seq, ident.charge, ident.mods)))
 
-                self.pp_res[set_id][summary.spec].append(
-                    validator_base.SpecMatch(summary.seq, parsed_mods,
-                                             summary.theor_z, summary.conf,
-                                             "decoy" if "REVERSED"
-                                             in summary.names else "normal"))
+                self.db_res[set_id][ident.spectrum].append(
+                    validator_base.SpecMatch(ident.seq, ident.mods,
+                                             ident.charge, ident.confidence,
+                                             ident.pep_type))
 
         return utilities.deduplicate(psms)
 

@@ -5,12 +5,37 @@ A series of functions used to read different file types.
 """
 from typing import Iterable, List, TextIO, Tuple
 
+from rPTMDetermine.base_config import SearchEngine
 
-class ParserException(Exception):
+from . import comet_reader
+from . import mascot_reader
+from . import protein_pilot_reader
+from .ptmdb import PTMDB
+
+
+def get_reader(search_engine: SearchEngine, ptmdb: PTMDB):
     """
-    A custom exception to be raised during file parse errors.
+    Constructs the appropriate Reader based on the SearchEngine.
+
+    Args:
+        search_engine (SearchEngine): The SearchEngine used for database
+                                      search.
+
+    Returns:
+        Reader.
+
+    Raises:
+        NotImplementedError.
 
     """
+    if search_engine is SearchEngine.ProteinPilot:
+        return protein_pilot_reader.ProteinPilotReader(ptmdb)
+    if search_engine is SearchEngine.Comet:
+        return comet_reader.CometReader(ptmdb)
+    if search_engine is SearchEngine.Mascot:
+        return mascot_reader.MascotReader(ptmdb)
+    raise NotImplementedError(
+        f"Cannot read search results for engine: {search_engine}")
 
 
 def read_fasta_sequences(fasta_file: TextIO) -> Iterable[Tuple[str, str]]:

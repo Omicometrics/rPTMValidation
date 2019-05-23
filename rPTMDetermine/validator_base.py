@@ -21,6 +21,7 @@ from . import proteolysis
 from .peptide_spectrum_match import PSM, UnmodPSM
 from .psm_container import PSMContainer
 from . import readers
+from .readers.base_reader import Reader
 from . import spectra_readers
 from . import utilities
 
@@ -86,8 +87,12 @@ class ValidateBase():
         print("Reading UniMod PTM DB")
         self.unimod = readers.PTMDB(self.config.unimod_ptm_file)
 
-        # All ProteinPilot results
-        self.pp_res: Dict[str, Dict[str, List[SpecMatch]]] =\
+        # The database search reader
+        self.reader: Reader = readers.get_reader(
+            self.config.search_engine, self.unimod)
+
+        # All database search results
+        self.db_res: Dict[str, Dict[str, List[SpecMatch]]] =\
             collections.defaultdict(lambda: collections.defaultdict(list))
 
         self.target_mod = self.config.target_mod
@@ -123,7 +128,7 @@ class ValidateBase():
 
     def _find_unmod_analogues(self, mod_psms: Sequence[PSM]):
         """
-        Finds the unmodified analogues in the ProteinPilot search results.
+        Finds the unmodified analogues in the database search results.
 
         Returns:
 
@@ -150,7 +155,7 @@ class ValidateBase():
                 (mods, merge_peptide_sequence(psm.seq, tuple(mods)),
                  psm.charge))
 
-        for data_id, data in self.pp_res.items():
+        for data_id, data in self.db_res.items():
             print(f"Processing data set {data_id}...")
             unmods = {}
             for spec_id, matches in data.items():

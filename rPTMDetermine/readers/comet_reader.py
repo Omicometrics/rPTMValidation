@@ -4,15 +4,18 @@ This module provides a class for parsing Comet pepXML files.
 
 """
 import operator
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List, Optional
 
 import lxml.etree as etree
+from pepfrag import ModSite
 
+from .base_reader import Reader
+from .parser_exception import ParserException
 from .ptmdb import PTMDB
-from .readers import ParserException
+from .search_result import PeptideType, SearchResult
 
 
-class CometReader():
+class CometReader(Reader):
     """
     Class to read a Comet pepXML file.
 
@@ -33,16 +36,13 @@ class CometReader():
             namespace (str, optional): The pepXML namespace.
 
         """
-        self.ptmdb = ptmdb
+        super().__init__(ptmdb)
+
         self.namespace = ("http://regis-web.systemsbiology.net/pepXML"
                           if namespace is None else namespace)
         self.ns_map = {'x': self.namespace}
 
-    def read(self, filename: str) -> \
-        List[Tuple[str, int, str,
-                   List[Tuple[int, str,
-                              Tuple[Tuple[float, Union[str, int], str], ...],
-                              int, Dict[str, float], str]]]]:
+    def read(self, filename: str, **kwargs) -> List[SearchResult]:
         """
         Reads the specified pepXML file.
 
@@ -83,10 +83,9 @@ class CometReader():
                 if hits:
                     res.append((raw_file, scan_no, spec_id, hits))
 
-        return res
+        return self._build_search_results(res)
 
-    def _process_mods(self, mod_info)\
-            -> List[Tuple[float, Union[str, int], str]]:
+    def _process_mods(self, mod_info) -> List[ModSite]:
         """
         Processes the modification elements of the pepXML search result.
 
@@ -101,7 +100,7 @@ class CometReader():
             return []
 
         mod_nterm_mass = mod_info.get("mod_nterm_mass", None)
-        nterm_mod: Optional[Tuple[float, str, str]] = None
+        nterm_mod: Optional[ModSite] = None
         if mod_nterm_mass is not None:
             mod_nterm_mass = float(mod_nterm_mass)
             name = CometReader._mass_mod_names.get(int(mod_nterm_mass), None)
@@ -111,9 +110,9 @@ class CometReader():
                     "Unrecognized n-terminal modification with mass "
                     f"{mod_nterm_mass}")
 
-            nterm_mod = (mod_nterm_mass, "N-term", name)
+            nterm_mod = ModSite(mod_nterm_mass, "N-term", name)
 
-        mods: List[Tuple[float, Union[str, int], str]] = []
+        mods: List[ModSite] = []
         for mod in mod_info.findall(f"{{{self.namespace}}}mod_aminoacid_mass"):
             mass = (float(mod.get("static")) if "static" in mod.attrib
                     else float(mod.get("variable")))
@@ -124,10 +123,35 @@ class CometReader():
                 raise ParserException(
                     f"Unrecognized modification with mass {mass}")
 
-            mods.append((mass, int(mod.get("position")), mod_name))
+            mods.append(ModSite(mass, int(mod.get("position")), mod_name))
 
         mods = sorted(mods, key=operator.itemgetter(1))
         if nterm_mod is not None:
             mods.insert(0, nterm_mod)
 
         return mods
+
+    def _build_search_results(self, res) -> List[SearchResult]:
+        """
+        Converts the search results to the standard SearchResult class.
+
+        Returns:
+            List of SearchResults.
+
+        """
+        results = []
+        for id_set in res:
+            spec_id = id_set[2].split(":")[1]
+            results.extend([
+                SearchResult(
+                    hit[1],
+                    list(hit[2]),
+                    hit[3],
+                    spec_id,
+                    hit[0],
+                    None,
+                    None,
+                    None,
+                    None,
+                    PeptideType[hit[5]]) for hit in id_set[3]])
+        return results

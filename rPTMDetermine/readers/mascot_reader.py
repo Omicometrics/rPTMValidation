@@ -4,7 +4,7 @@ This module provides a class for reading Mascot dat (MIME) files.
 
 """
 import collections
-import email
+import email.parser
 import operator
 import re
 from typing import Any, Dict, List, Sequence, Tuple
@@ -12,22 +12,27 @@ import urllib.parse
 
 from pepfrag import ModSite
 
-from .readers import ParserException
+from .base_reader import Reader
+from .parser_exception import ParserException
+from .ptmdb import PTMDB
+from .search_result import PeptideType, SearchResult
 
 
-class MascotReader():
+class MascotReader(Reader):
     """
     Class to read Mascot dat/MIME files.
 
     """
-    def __init__(self):
+    def __init__(self, ptmdb: PTMDB):
         """
         Initialize the reader instance.
 
         """
+        super().__init__(ptmdb)
+
         self.mime_parser = email.parser.Parser()
 
-    def read(self, filename: str) -> Dict[str, Dict[str, Any]]:
+    def read(self, filename: str, **kwargs) -> List[SearchResult]:
         """
         Reads the given Mascot dat result file.
 
@@ -42,8 +47,9 @@ class MascotReader():
             file_content = self.mime_parser.parse(fh)
 
         # Extract all payloads from the MIME content
-        payloads: Dict[str, str] = {p.get_param("name"): p.get_payload()
-                                    for p in file_content.walk()}
+        payloads: Dict[str, str] = {
+            str(p.get_param("name")): str(p.get_payload())
+            for p in file_content.walk()}
 
         # Read the relevant parameters
         error_tol_search, decoy_search =\
@@ -72,7 +78,56 @@ class MascotReader():
                                  fixed_mods, pep_type="decoy",
                                  error_tol_search=error_tol_search)
 
-        return res
+        return self._build_search_results(res)
+
+    def _build_search_results(self, res) -> List[SearchResult]:
+        """
+        Converts the results to a standardized list of SearchResults.
+
+        Returns:
+            List of SearchResults.
+
+        """
+        results = []
+        for _, query in res.items():
+            spec_id = query["spectrumid"]
+            results.extend(self._build_search_result(
+                query["target"]["peptides"], spec_id,
+                query["target"]["charge"],
+                query["target"]["mz"], PeptideType.normal))
+            if "decoy" in query:
+                results.extend(self._build_search_result(
+                    query["decoy"]["peptides"], spec_id,
+                    query["decoy"]["charge"],
+                    query["decoy"]["mz"], PeptideType.decoy))
+
+        return results
+
+    def _build_search_result(self, peptides, spec_id, charge, mz, pep_type)\
+            -> List[SearchResult]:
+        """
+        Converts the peptide identifications to a list of SearchResults.
+
+        Args:
+            peptides (dict): A dictionary of peptide information.
+            spec_id (str): The ID of the associated spectrum.
+            charge (int): The charge state of the spectrum.
+            mz (float): The mass/charge ratio.
+            pep_type (PeptideType): The type of the peptide, normal/decoy.
+
+        """
+        return [
+            SearchResult(
+                peptide["sequence"],
+                peptide["modifications"],
+                charge,
+                spec_id,
+                int(rank),
+                None,
+                None,
+                mz,
+                None,
+                pep_type) for rank, peptide in peptides.items()]
 
     def _parse_parameters(self, payload: str) -> Tuple[bool, bool]:
         """

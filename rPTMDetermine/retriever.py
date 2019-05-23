@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 """
-A module for retrieving missed identifications from ProteinPilot search
+A module for retrieving missed identifications from database search
 results.
 
 """
@@ -12,13 +12,14 @@ import json
 import operator
 import os
 import pickle
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
 from pepfrag import IonType, Peptide
 import tqdm
 
+from .base_config import SearchEngine
 from .constants import RESIDUES
 from . import ionscore
 from . import lda
@@ -56,49 +57,28 @@ def get_ion_score(seq, charge, ions, spectrum, tol):
                              spectrum[-1][0] - spectrum[0][0], tol)
 
 
-def get_proteinpilot_results(data_sets, unimod, filter_conf=False):
+def get_search_results(data_sets: Dict[str, Dict[str, Any]],
+                       unimod: readers.PTMDB, search_engine: SearchEngine)\
+        -> Dict[str, Dict[str, List[validator_base.SpecMatch]]]:
     """
-    Reads the ProteinPilot peptide summary files to extract
-    identifications, without testing the confidence threshold.
+    Reads the database search results files to extract identifications.
 
     """
-    pp_res = collections.defaultdict(lambda: collections.defaultdict(list))
+    db_res: Dict[str, Dict[str, List[validator_base.SpecMatch]]] =\
+        collections.defaultdict(lambda: collections.defaultdict(list))
     for set_id, set_info in data_sets.items():
-        data_dir = set_info['data_dir']
-        conf = set_info["confidence"]
+        res_path = os.path.join(set_info["data_dir"], set_info["results"])
 
-        summary_files = [os.path.join(data_dir, f)
-                         for f in os.listdir(data_dir)
-                         if 'PeptideSummary' in f and f.endswith('.txt')]
+        identifications: List[readers.SearchResult] =\
+            readers.get_reader(search_engine, unimod).read(res_path)
 
-        if not summary_files:
-            continue
+        for ident in identifications:
+            db_res[set_id][ident.spectrum].append(
+                validator_base.SpecMatch(ident.seq, ident.mods,
+                                         ident.charge, ident.confidence,
+                                         ident.pep_type))
 
-        # Apply database search FDR control to the results
-        if filter_conf:
-            summaries = readers.read_peptide_summary(
-                summary_files[0],
-                condition=lambda r, cf=conf: float(r["Conf"]) >= cf)
-        else:
-            summaries = readers.read_peptide_summary(
-                summary_files[0])
-        for summary in summaries:
-            mods = modifications.preparse_mod_string(summary.mods)
-
-            try:
-                parsed_mods = modifications.parse_mods(
-                    mods, unimod)
-            except modifications.UnknownModificationException:
-                continue
-
-            pp_res[set_id][summary.spec].append(
-                validator_base.SpecMatch(summary.seq, parsed_mods,
-                                         summary.theor_z,
-                                         summary.conf,
-                                         "decoy" if "REVERSED" in
-                                         summary.names else "normal"))
-
-    return pp_res
+    return db_res
 
 
 def calculate_lda_probs(psms, lda_model, score_stats, features):
@@ -129,7 +109,7 @@ def calculate_lda_probs(psms, lda_model, score_stats, features):
 class Retriever(validator_base.ValidateBase):
     """
     A class for retrieving missed PTM-modified peptide identifications from
-    the search results of ProteinPilot, using the non-modified analogues
+    database search results, using the non-modified analogues
     to guide the search for appropriate modified peptides.
 
     """
@@ -145,8 +125,7 @@ class Retriever(validator_base.ValidateBase):
 
         self.db_ionscores = None
 
-        self.pp_res = get_proteinpilot_results(self.config.data_sets,
-                                               self.unimod)
+        self.db_res = get_search_results(self.config.data_sets, self.unimod)
 
     def retrieve(self):
         """
@@ -237,7 +216,7 @@ class Retriever(validator_base.ValidateBase):
         if self.config.benchmark_file is not None:
             self.identify_benchmarks(psms)
 
-        # Remove the identifications found by ProteinPilot and validated by
+        # Remove the identifications found by database search and validated by
         # Validate
         psms = self._remove_search_ids(psms)
         rec_psms = PSMContainer([p for p in psms if p.target])
@@ -276,7 +255,7 @@ class Retriever(validator_base.ValidateBase):
         """
         allpeps = [(set_id, spec_id, m.seq, tuple(m.mods), m.theor_z,
                     m.pep_type)
-                   for set_id, spectra in self.pp_res.items()
+                   for set_id, spectra in self.db_res.items()
                    for spec_id, matches in spectra.items() for m in matches]
 
         peps = {(x[2], x[3], x[4], x[5]) for x in allpeps if len(x[2]) >= 7
