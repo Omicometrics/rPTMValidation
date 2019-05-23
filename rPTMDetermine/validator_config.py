@@ -6,6 +6,7 @@ rPTMDetermine.
 """
 
 import os
+import sys
 from typing import Any, Dict
 
 from .base_config import BaseConfig
