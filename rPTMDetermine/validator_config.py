@@ -47,3 +47,25 @@ class ValidatorConfig(BaseConfig):
 
         """
         return self.json_config.get("sim_threshold_from_benchmarks", True)
+
+    def _check_required(self):
+        """
+        Checks that the required options have been set in the configuration
+        file.
+
+        This overrides the BaseConfig _check_required method to implement the
+        check on sim_threshold_from_benchmarks.
+
+        """
+        for attr in self._required:
+            try:
+                getattr(self, attr)
+            except KeyError:
+                print(f"Missing required config option: {attr}")
+                sys.exit(1)
+
+        if (not self.sim_threshold_from_benchmarks and
+                self.sim_threshold is None):
+            print("sim_threshold must be specified when not using the "
+                  "benchmark file")
+            sys.exit(1)

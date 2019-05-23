@@ -173,9 +173,3 @@ class BaseConfig():
             except KeyError:
                 print(f"Missing required config option: {attr}")
                 sys.exit(1)
-
-        if (not self.sim_threshold_from_benchmarks and
-                self.sim_threshold is None):
-            print("sim_threshold must be specified when not using the "
-                  "benchmark file")
-            sys.exit(1)
