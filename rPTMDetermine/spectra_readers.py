@@ -6,7 +6,7 @@ A series of functions used to read different spectra file types.
 import base64
 import re
 import struct
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 import zlib
 
 import lxml.etree as etree
@@ -124,7 +124,7 @@ def decodebinary(string: str, default_array_length: int, precision: int = 64,
 
 def mzml_extract_ms1(mzml_file: str,
                      namespace: str = "http://psi.hupo.org/ms/mzml")\
-                     -> List[Dict[str, Any]]:
+                     -> Dict[str, Dict[str, Any]]:
     """
     Extracts the MS1 spectra from the input mzML file.
 
@@ -136,7 +136,7 @@ def mzml_extract_ms1(mzml_file: str,
         A list of the MS1 spectra encoded in dictionaries.
 
     """
-    spectra = []
+    spectra = {}
     ns_map = {'x': namespace}
     # read from xml data
     for event, element in etree.iterparse(mzml_file, events=['end']):
@@ -177,11 +177,13 @@ def mzml_extract_ms1(mzml_file: str,
                             if intensity[ii] > 0]
             mz, intensity = zip(*mz_intensity)
 
-            spectra.append({
+            spec_id = ".".join(re.findall(r"\w+=(\d+)", spectrum_info["id"]))
+
+            spectra[spec_id] = {
                 'mz': mz,
                 'intensity': intensity,
                 'rt': start_time,
                 'info': spectrum_info
-            })
+            }
 
     return spectra
