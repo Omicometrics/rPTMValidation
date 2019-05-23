@@ -108,8 +108,8 @@ def _parse_mod_string(mod_str: str, ptmdb: PTMDB, mass_type: MassType)\
                 f"Failed to detect site for modification {mod_str}")
 
     return ModSite(mass, site, name)
-    
-    
+
+
 def _parse_bar_mod_string(mod_str: str) -> ModSite:
     """
     Parses the vertical bar-separated modification string.
@@ -122,7 +122,7 @@ def _parse_bar_mod_string(mod_str: str) -> ModSite:
 
     """
     mod_list = mod_str.strip().split('|')
-    
+
     site: Union[str, int] = mod_list[1]
     try:
         site = int(site)

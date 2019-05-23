@@ -5,15 +5,12 @@ Module contains a class to define a Peptide Spectrum Match (PSM).
 """
 import bisect
 import collections
-import sys
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from pepfrag import FIXED_MASSES, IonType, ModSite, Peptide
 
-from .constants import FIXED_MASSES
 from . import ionscore
 from . import mass_spectrum
-from . import modifications
 from . import proteolysis
 from . import utilities
 
@@ -55,7 +52,7 @@ class PSM():
 
         # The decoy peptide matched to the spectrum
         self.decoy_id: Optional[DecoyID] = None
-        
+
         # Whether the spectrum has been assigned a peptide considered to be
         # a benchmark peptide
         self.benchmark = False
@@ -71,14 +68,14 @@ class PSM():
         self.lda_prob: Optional[float] = None
         self.decoy_lda_score: Optional[float] = None
         self.decoy_lda_prob: Optional[float] = None
-        
+
         # The localization site probability
         self.site_prob: Optional[float] = None
-        
+
         # Whether the PSM has been corrected by some post-processing, e.g.
         # removal of deamidation
         self.corrected = False
-        
+
         self.target = target
 
     @property
@@ -139,7 +136,7 @@ class PSM():
 
         """
         return f"{self.data_id}_{self.spec_id}_{self.seq}"
-        
+
     @property
     def max_similarity(self):
         """
@@ -212,7 +209,7 @@ class PSM():
         """
         if self.spectrum is None:
             raise RuntimeError("PSM has not been assigned a Spectrum")
-            
+
     def annotate_spectrum(
         self, tol: float = 0.2,
         ion_types: Optional[Dict[IonType, Dict[str, Any]]] = None)\
@@ -262,7 +259,7 @@ class PSM():
             [idx in ann_peak_nums for idx in range(len(self.spectrum))])
 
         denoised_peaks.sort()
-        
+
         ion_anns = {l: (bisect.bisect_left(denoised_peaks, a.peak_num),
                         a.ion_pos)
                     for l, a in anns.items() if a.peak_num in denoised_peaks}
@@ -304,7 +301,8 @@ class PSM():
 
     def _calculate_features(self, ions: dict,
                             denoised_spectrum: mass_spectrum.Spectrum,
-                            target_mod: Optional[str], tol: float) -> Dict[str, float]:
+                            target_mod: Optional[str], tol: float)\
+            -> Dict[str, float]:
         """
         Calculates potential machine learning features from the peptide
         spectrum match.
@@ -408,7 +406,7 @@ class PSM():
     def _calculate_sequence_coverage(self, target_mod: Optional[str],
                                      seq_ions: Iterable[str],
                                      mod_ion_start: Dict[str, int]) \
-                                     -> Dict[str, int]:
+            -> Dict[str, int]:
         """
         Calculates features related to the sequence coverage by the ion
         annotations.

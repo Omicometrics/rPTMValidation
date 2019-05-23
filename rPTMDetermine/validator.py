@@ -703,7 +703,7 @@ class Validator(validator_base.ValidateBase):
                     decoy_seq_masses.append(mass + self.mod_mass * len(idxs))
                     decoy_mods.append(
                         mods + [ModSite(self.mod_mass, kk + 1,
-                                                      self.target_mod)
+                                        self.target_mod)
                                 for kk in idxs])
 
         return decoy_idxs, decoy_mods, decoy_seq_masses
@@ -722,14 +722,14 @@ class Validator(validator_base.ValidateBase):
         """
         nterm_mod = self.fixed_residues.get("nterm", None)
         mods = ([ModSite(self.unimod.get_mass(nterm_mod),
-                                       "nterm", nterm_mod)]
+                         "nterm", nterm_mod)]
                 if nterm_mod is not None else [])
         for ii, res in enumerate(seq):
             if res in self.fixed_residues:
                 mod_name = self.fixed_residues[res]
                 mods.append(
                     ModSite(self.unimod.get_mass(mod_name),
-                                          ii + 1, mod_name))
+                            ii + 1, mod_name))
 
         return mods
 

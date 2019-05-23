@@ -12,7 +12,6 @@ import json
 import operator
 import os
 import pickle
-import sys
 from typing import Dict, List, Tuple
 
 import numpy as np

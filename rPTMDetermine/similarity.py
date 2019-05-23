@@ -45,8 +45,10 @@ def calculate_spectral_similarity(psm1: PSM, psm2: PSM) -> float:
     spectra.
 
     Args:
-        psm1 (peptide_spectrum_match.PSM): The first PSM, with an associated Spectrum.
-        psm2 (peptide_spectrum_match.PSM): The second PSM, with an associated Spectrum.
+        psm1 (peptide_spectrum_match.PSM): The first PSM, with an associated
+                                           Spectrum.
+        psm2 (peptide_spectrum_match.PSM): The second PSM, with an associated
+                                           Spectrum.
 
     Returns:
         float: The dot product similarity of the spectra.

@@ -22,7 +22,7 @@ class Proteolyzer():
     def __init__(self, enzyme: str, enzyme_rules: str = "EnzymeRules.json"):
         """
         Initialize the class instance with the specified enzyme cleavage rule.
-        
+
         Args:
             enzyme (str): An enzyme rule defined in the enzyme_rules file.
             enzyme_rules (str, optional): The JSON file which defines the
@@ -107,7 +107,7 @@ class Proteolyzer():
         if self.proteolytic_regex is None:
             raise RuntimeError("Proteolytic regex not defined")
         return [s for s in self.proteolytic_regex.split(sequence) if s]
-        
+
     def is_cleaved(self, sequence: str) -> bool:
         """
         Evaluates whether a peptide sequence has been proteolytically cleaved
@@ -166,7 +166,8 @@ class Proteolyzer():
         seq_len = len(split_seq)
 
         if seq_len == 1:
-            return (tuple(split_seq[0],) if max_len >= len(split_seq[0]) >= min_len
+            return (tuple(split_seq[0],)
+                    if max_len >= len(split_seq[0]) >= min_len
                     and RESIDUES.issuperset(split_seq[0]) else tuple())
 
         # Get all peptides with zero missed cleavage

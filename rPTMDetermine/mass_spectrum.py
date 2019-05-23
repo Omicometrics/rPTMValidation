@@ -8,7 +8,6 @@ from __future__ import annotations
 import bisect
 import collections
 import operator
-import sys
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np

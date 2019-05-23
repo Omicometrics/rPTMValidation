@@ -11,7 +11,6 @@ import functools
 import itertools
 import math
 import os
-import sys
 from typing import Dict, Iterable, List, Sequence, Tuple
 
 from pepfrag import ModSite, Peptide

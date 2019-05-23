@@ -40,8 +40,8 @@ class CustomPipeline(Pipeline):
             self.decision_function(X),
             self.predict(X)
         ])
-        
-        
+
+
 def calculate_fisher_score(xvals1: np.array, xvals2: np.array) -> float:
     """
     """
@@ -231,7 +231,7 @@ def calculate_score(prob: float, dist_scores) -> float:
          (np.log(prob / s_d) - np.log((1 - prob) / s_t)))
 
     x1 = (-b + np.sqrt((b * b) - (4 * a * c))) / (2 * a)
-    #x2 = (-b - np.sqrt((b * b) - (4 * a * c))) / (2 * a)
+    # x2 = (-b - np.sqrt((b * b) - (4 * a * c))) / (2 * a)
 
     return x1
 
@@ -300,7 +300,7 @@ def _lda_validate(df: pd.DataFrame, features: List[str],
         # Shift the prob_threshold score to match the full distribution
         lda_threshold = calculate_score(
             prob_threshold, _get_dist_stats(y.unique(), preds, scores))
-            
+
         if lda_threshold > 1000:
             print(prob_threshold, _get_dist_stats(y.unique(), preds, scores))
             print(scores)
