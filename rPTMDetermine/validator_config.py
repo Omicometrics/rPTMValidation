@@ -58,12 +58,7 @@ class ValidatorConfig(BaseConfig):
         check on sim_threshold_from_benchmarks.
 
         """
-        for attr in self._required:
-            try:
-                getattr(self, attr)
-            except KeyError:
-                print(f"Missing required config option: {attr}")
-                sys.exit(1)
+        super()._check_required()
 
         if (not self.sim_threshold_from_benchmarks and
                 self.sim_threshold is None):

@@ -4,10 +4,10 @@ A module for evaluating the similarity of two MS/MS spectra, based on their
 ion annotations and intensities.
 
 """
-import tqdm
 from typing import Any, Dict, Iterable, List, Sequence, Set, Tuple
 
 import numpy as np
+import tqdm
 
 from .peptide_spectrum_match import PSM, UnmodPSM
 from .mass_spectrum import Spectrum

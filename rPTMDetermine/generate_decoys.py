@@ -96,7 +96,15 @@ def parse_args():
     return parser.parse_args()
 
 
-if __name__ == "__main__":
+def main():
+    """
+    The main entry point for the CLI.
+
+    """
     args = parse_args()
     generate_decoy_file(args.fasta, proteolysis.Proteolyzer(args.enzyme),
                         decoy_prefix=args.dprefix)
+
+
+if __name__ == "__main__":
+    main()

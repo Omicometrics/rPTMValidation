@@ -59,7 +59,8 @@ class Proteolyzer():
             KeyError
 
         """
-        sites = [''.join(set(sk) & RESIDUES) for sk in self._cleavage_site]
+        sites = [''.join(set(s) & RESIDUES)
+                 for s in self._cleavage_site]
         if not any(sk for sk in sites):
             raise KeyError("Unsupported cleavage sites using the enzyme "
                            f"{self.enzyme}")
@@ -71,21 +72,21 @@ class Proteolyzer():
         sites not exist in the protein sequence.
         """
         enzrules, csx, excepts, termins, siteterminal = [], [], [], [], {}
-        for ii, sk in enumerate(self._cleavage_site):
-            if not sk:
+        for ii, site in enumerate(self._cleavage_site):
+            if not site:
                 continue
-            csx.append(sk)
+            csx.append(site)
             excepts.append(self._exceptions[ii])
             termins.append(self._terminal[ii])
             # set up string split rule
-            rulej = r'([%s])' % sk
+            rulej = r'([%s])' % site
             if self._exceptions[ii]:
                 rulej = r'(?<![%s])' % self._exceptions[ii] + rulej \
                     if self._terminal[ii] == 'N' else\
                     rulej + r'(?![%s])' % self._exceptions[ii]
             enzrules.append(rulej)
             # get the combine direction
-            for rk in sk:
+            for rk in site:
                 siteterminal[rk] = self._terminal[ii]
         self._cleavage_site = tuple(csx)
         self._exceptions = tuple(excepts)
@@ -123,10 +124,7 @@ class Proteolyzer():
 
         """
         # TODO: deal with terminal of cleavage
-        for ii, cleavage_sites in enumerate(self._cleavage_site):
-            if sequence[-1] in cleavage_sites:
-                return True
-        return False
+        return any(sequence[-1] in sites for sites in self._cleavage_site)
 
     def count_missed_cleavages(self, sequence: str) -> int:
         """

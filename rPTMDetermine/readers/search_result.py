@@ -12,6 +12,10 @@ from pepfrag import ModSite
 
 
 class PeptideType(enum.Enum):
+    """
+    An enumeration to represent the two peptide types.
+
+    """
     normal = enum.auto()
     decoy = enum.auto()
 

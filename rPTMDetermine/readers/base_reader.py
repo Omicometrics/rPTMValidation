@@ -1,4 +1,9 @@
 #! /usr/bin/env python
+"""
+A module to provide a base abstract reader to unify the interface for all
+database search result readers.
+
+"""
 import abc
 from typing import List
 

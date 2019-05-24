@@ -138,7 +138,6 @@ class ValidateBase():
         print("Caching PSM sequences...")
         psm_info = []
         for psm in mod_psms:
-            seq = psm.seq
             mods = []
             for mod in psm.mods:
                 try:
@@ -148,7 +147,7 @@ class ValidateBase():
                     continue
 
                 if (mod.mod != self.target_mod and
-                        seq[site - 1] not in self.config.target_residues):
+                        psm.seq[site - 1] not in self.config.target_residues):
                     mods.append(mod)
 
             psm_info.append(
@@ -206,16 +205,16 @@ class ValidateBase():
 
         """
         new_mods = []
-        for ms in mods:
+        for mod_site in mods:
             try:
-                site = int(ms.site)
+                site = int(mod_site.site)
             except ValueError:
-                new_mods.append(ms)
+                new_mods.append(mod_site)
                 continue
 
-            if (ms.mod != self.target_mod and
+            if (mod_site.mod != self.target_mod and
                     seq[site - 1] not in self.config.target_residues):
-                new_mods.append(ms)
+                new_mods.append(mod_site)
 
         return new_mods
 
@@ -294,11 +293,12 @@ class ValidateBase():
         new_psms = []
         for psm in psms:
             seq = psm.seq
-            for ms in psm.mods:
-                if ms.site == "nterm" or ms.site == "cterm":
+            for mod_site in psm.mods:
+                if mod_site.site == "nterm" or mod_site.site == "cterm":
                     continue
-                if (ms.mod == self.target_mod and
-                        seq[int(ms.site) - 1] in self.config.target_residues):
+                if (mod_site.mod == self.target_mod and
+                        seq[int(mod_site.site) - 1] in
+                        self.config.target_residues):
                     new_psms.append(psm)
                     break
         return PSMContainer(new_psms)

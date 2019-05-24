@@ -289,6 +289,8 @@ def plot_validated_recovered_site_probabilities(
         val_psms: Sequence[PSM], rec_psms: Sequence[PSM],
         threshold: float = 0.99, save_path: Optional[str] = None):
     """
+    Plots the site probabilities for validated and recovered identifications.
+
     """
     val_probs = _filter_psms_site_probs(val_psms)
     rec_probs = _filter_psms_site_probs(rec_psms)
@@ -322,6 +324,15 @@ def plot_validated_recovered_site_probabilities(
 def plot_similarity_score_dist(scores: Sequence[float], kde: bool = False,
                                save_path: Optional[str] = None):
     """
+    Plots the distribution of similarity scores using a histogram or a
+    kernel density estimate plot.
+
+    Args:
+        scores (list): The similarity scores.
+        kde (bool, optional): Whether to plot using kernel density estimation
+                              rather than as a histogram.
+        save_path (str, optional): The path to which to save the plot.
+
     """
     scores = sorted(scores)
 
@@ -353,7 +364,7 @@ def plot_spectra(spectra: Sequence[np.array]):
         spectra (list): A list of numpy arrays (n x 2).
 
     """
-    fig, axes = plt.subplots(len(spectra), 1, sharex=True)
+    _, axes = plt.subplots(len(spectra), 1, sharex=True)
     axes = [axes] if len(spectra) == 1 else axes
     for ax, spectrum in zip(axes, spectra):
         ax.stem(spectrum[:, 0], spectrum[:, 1], "black", basefmt=' ',
@@ -384,7 +395,7 @@ def plot_fisher_scores(scores: Dict[str, float],
 
     # Sort the features by score
     features, feature_scores = zip(*sorted(list(zip(features, feature_scores)),
-                                   key=lambda x: x[1], reverse=True))
+                                           key=lambda x: x[1], reverse=True))
 
     plt.plot(features, feature_scores, "o")
     ax = plt.gca()

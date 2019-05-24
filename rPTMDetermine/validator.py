@@ -4,14 +4,12 @@ Validate PTM identifications derived from shotgun proteomics tandem mass
 spectra.
 
 """
-import argparse
 from bisect import bisect_left
 import collections
 import copy
 import csv
 import functools
 import itertools
-import json
 import multiprocessing as mp
 import operator
 import os
@@ -20,8 +18,9 @@ import sys
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
-from pepfrag import AA_MASSES, FIXED_MASSES, ModSite, Peptide
 import tqdm
+
+from pepfrag import AA_MASSES, FIXED_MASSES, ModSite, Peptide
 
 from .constants import RESIDUES
 from . import generate_decoys
@@ -714,46 +713,3 @@ class Validator(validator_base.ValidateBase):
                             ii + 1, mod_name))
 
         return mods
-
-
-def parse_args():
-    """
-    Parses the command line arguments to the script.
-
-    Returns:
-        argparse.Namespace: The parsed command line arguments.
-
-    """
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "config",
-        help=("The path to the JSON configuration file. "
-              "See example_input.json for an example"))
-    return parser.parse_args()
-
-
-def main():
-    """
-    The main entry point for the rPTMDetermine code.
-
-    """
-    args = parse_args()
-    with open(args.config) as handle:
-        conf = json.load(handle)
-
-    validator = Validator(conf)
-    validator.validate()
-
-    with open(validator.file_prefix + "validated_psms", "wb") as fh:
-        pickle.dump(validator.psms, fh)
-
-    validator.localize()
-
-    write_results(validator.file_prefix + "results.csv", validator.psms)
-
-    with open(validator.file_prefix + "final_psms", "wb") as fh:
-        pickle.dump(validator.psms, fh)
-
-
-if __name__ == '__main__':
-    main()

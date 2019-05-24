@@ -9,11 +9,12 @@ import collections
 import csv
 import os
 import sys
-from typing import Callable, List, Optional, Sequence, Set, Tuple
+from typing import Callable, List, Optional, Sequence, Set, Tuple, Union
 
 import pandas as pd
-from pepfrag import ModSite, Peptide
 import tqdm
+
+from pepfrag import ModSite, Peptide
 
 from . import modifications
 from .peptide_spectrum_match import PSM, SimilarityScore
@@ -30,18 +31,19 @@ class PSMContainer(collections.UserList):
         Initialize the instance of the class.
 
         """
+        super().__init__()
         # TODO
         # The generic type of self.data needs to be overridden, but this is
         # problematic due to https://github.com/python/mypy/issues/5846
         self.data = psms if psms is not None else []
 
-    def __getitem__(self, slice):
+    def __getitem__(self, idx: Union[int, slice]):
         """
         Override the __getitem__ method to return a PSMContainer if a list
         would normally be returned.
 
         """
-        res = self.data[slice]
+        res = self.data[idx]
         return PSMContainer(res) if isinstance(res, list) else res
 
     def clean_fragment_ions(self):
@@ -177,7 +179,7 @@ class PSMContainer(collections.UserList):
         return best_psms
 
     def get_unique_peptides(
-        self, predicate: Optional[Callable[[PSM], bool]] = None)\
+            self, predicate: Optional[Callable[[PSM], bool]] = None)\
             -> Set[Tuple[str, Tuple[ModSite]]]:
         """
         Finds the unique peptides, by sequence and modifications.

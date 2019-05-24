@@ -92,42 +92,40 @@ class MascotReader(Reader):
         for _, query in res.items():
             spec_id = query["spectrumid"]
             results.extend(self._build_search_result(
-                query["target"]["peptides"], spec_id,
-                query["target"]["charge"],
-                query["target"]["mz"], PeptideType.normal))
+                query["target"], spec_id, PeptideType.normal))
             if "decoy" in query:
                 results.extend(self._build_search_result(
-                    query["decoy"]["peptides"], spec_id,
-                    query["decoy"]["charge"],
-                    query["decoy"]["mz"], PeptideType.decoy))
+                    query["decoy"], spec_id, PeptideType.decoy))
 
         return results
 
-    def _build_search_result(self, peptides, spec_id, charge, mz, pep_type)\
+    def _build_search_result(self, query, spec_id, pep_type)\
             -> List[SearchResult]:
         """
         Converts the peptide identifications to a list of SearchResults.
 
         Args:
-            peptides (dict): A dictionary of peptide information.
+            query (dict): A dictionary of query information, including
+                          peptides.
             spec_id (str): The ID of the associated spectrum.
-            charge (int): The charge state of the spectrum.
-            mz (float): The mass/charge ratio.
             pep_type (PeptideType): The type of the peptide, normal/decoy.
+
+        Returns:
+            List of SearchResults.
 
         """
         return [
             SearchResult(
                 peptide["sequence"],
                 peptide["modifications"],
-                charge,
+                query["charge"],
                 spec_id,
                 int(rank),
                 None,
                 None,
-                mz,
+                query["mz"],
                 None,
-                pep_type) for rank, peptide in peptides.items()]
+                pep_type) for rank, peptide in query["peptides"].items()]
 
     def _parse_parameters(self, payload: str) -> Tuple[bool, bool]:
         """
@@ -278,19 +276,19 @@ class MascotReader(Reader):
             pep_seq = peptide["sequence"]
 
             mods = []
-            for ms in peptide["modifications"]:
-                if ms.mass is not None:
-                    mods.append(ms)
+            for mod_site in peptide["modifications"]:
+                if mod_site.mass is not None:
+                    mods.append(mod_site)
                     continue
 
-                if ms.site == 0:
+                if mod_site.site == 0:
                     # N-terminus
                     mods.append(ModSite(mass, "nterm", mod_name))
-                elif ms.site == len(pep_seq) + 1:
+                elif mod_site.site == len(pep_seq) + 1:
                     # C-terminus
                     mods.append(ModSite(mass, "cterm", mod_name))
-                elif mod_res == pep_seq[ms.site - 1]:
-                    mods.append(ModSite(mass, ms.site, mod_name))
+                elif mod_res == pep_seq[mod_site.site - 1]:
+                    mods.append(ModSite(mass, mod_site.site, mod_name))
 
             peptide["modifications"] = tuple(mods)
 

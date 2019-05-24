@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from pepfrag import FIXED_MASSES, IonType, ModSite, Peptide
 
+from .constants import DEFAULT_FRAGMENT_IONS
 from . import ionscore
 from . import mass_spectrum
 from . import proteolysis
@@ -211,8 +212,8 @@ class PSM():
             raise RuntimeError("PSM has not been assigned a Spectrum")
 
     def annotate_spectrum(
-        self, tol: float = 0.2,
-        ion_types: Optional[Dict[IonType, Dict[str, Any]]] = None)\
+            self, tol: float = 0.2,
+            ion_types: Optional[Dict[IonType, Dict[str, Any]]] = None)\
             -> Dict[str, mass_spectrum.Annotation]:
         """
         Annotates the mass spectrum using the theoretical ions of the peptide.
@@ -227,17 +228,10 @@ class PSM():
         """
         self._check_spectrum_initialized()
 
-        if ion_types is None:
-            ion_types = {
-                IonType.precursor: {"neutral_losses": ["H2O", "NH3"]},
-                IonType.imm: {},
-                IonType.b: {"neutral_losses": ["H2O", "NH3"]},
-                IonType.y: {"neutral_losses": ["H2O", "NH3"]},
-                IonType.a: {"neutral_losses": []}
-            }
-
         # Get the theoretical ions for the peptide
-        ions = self.peptide.fragment(ion_types=ion_types)
+        ions = self.peptide.fragment(
+            ion_types=DEFAULT_FRAGMENT_IONS if ion_types is None
+            else ion_types)
 
         return self.spectrum.annotate(ions, tol=tol)
 

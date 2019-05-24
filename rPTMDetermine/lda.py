@@ -44,6 +44,15 @@ class CustomPipeline(Pipeline):
 
 def calculate_fisher_score(xvals1: np.array, xvals2: np.array) -> float:
     """
+    Calculates the Fisher score of a feature distribution.
+
+    Args:
+        xvals1 (np.array): The first class feature values.
+        xvals2 (np.array): The second class feature values.
+
+    Returns:
+        The Fisher score as a float.
+
     """
     return ((xvals1.mean() - xvals2.mean()) ** 2) / \
            (xvals1.std() ** 2 + xvals2.std() ** 2)
@@ -224,16 +233,17 @@ def calculate_score(prob: float, dist_scores) -> float:
     m_t, s_t = dist_scores[1]
     m_d, s_d = dist_scores[0]
 
-    a = - 2. * s_d * s_d + 2. * s_t * s_t
-    b = 4. * m_t * s_d * s_d - 4. * m_d * s_t * s_t
-    c = (- 2. * s_d * s_d * m_t * m_t + 2. * s_t * s_t * m_d * m_d -
-         (4. * s_d * s_d * s_t * s_t) *
-         (np.log(prob / s_d) - np.log((1 - prob) / s_t)))
+    a_coef = - 2. * s_d * s_d + 2. * s_t * s_t
+    b_coef = 4. * m_t * s_d * s_d - 4. * m_d * s_t * s_t
+    c_coef = (- 2. * s_d * s_d * m_t * m_t + 2. * s_t * s_t * m_d * m_d -
+              (4. * s_d * s_d * s_t * s_t) *
+              (np.log(prob / s_d) - np.log((1 - prob) / s_t)))
 
-    x1 = (-b + np.sqrt((b * b) - (4 * a * c))) / (2 * a)
-    # x2 = (-b - np.sqrt((b * b) - (4 * a * c))) / (2 * a)
+    # x2 = ((-b_coef - np.sqrt((b_coef * b_coef) - (4 * a_coef * c_coef))) /
+    #        (2 * a_coef))
 
-    return x1
+    return ((-b_coef + np.sqrt((b_coef * b_coef) - (4 * a_coef * c_coef))) /
+            (2 * a_coef))
 
 
 def lda_model(df: pd.DataFrame, features: List[str],
@@ -268,7 +278,7 @@ def lda_model(df: pd.DataFrame, features: List[str],
 
 def _lda_validate(df: pd.DataFrame, features: List[str],
                   full_lda_threshold: float,
-                  prob_threshold: float = 0.99, cv: int = 10)\
+                  prob_threshold: float = 0.99, folds: int = 10)\
         -> Tuple[float, pd.DataFrame, CustomPipeline]:
     """
     Trains and uses an LDA validation model using cross-validation.
@@ -277,9 +287,7 @@ def _lda_validate(df: pd.DataFrame, features: List[str],
         df (pandas.DataFrame): The features and target labels for the PSMs.
         features (list): The names of the feature columns.
         full_lda_threshold (float):
-        cv (int, optional): If None, no cross validation will be used.
-                            Otherwise, this should be an integer for the
-                            number of folds.
+        folds (int, optional): The integer number of CV folds.
 
     Returns:
 
@@ -289,9 +297,8 @@ def _lda_validate(df: pd.DataFrame, features: List[str],
 
     pipeline = _lda_pipeline()
 
-    skf = StratifiedKFold(n_splits=cv)
     results = np.zeros((len(X), 3))
-    for train_idx, test_idx in skf.split(X, y):
+    for train_idx, test_idx in StratifiedKFold(n_splits=folds).split(X, y):
         model = pipeline.fit(X.iloc[train_idx], y.iloc[train_idx])
         X_test = X.iloc[test_idx]
         scores = model.decision_function(X_test)
@@ -301,13 +308,7 @@ def _lda_validate(df: pd.DataFrame, features: List[str],
         lda_threshold = calculate_score(
             prob_threshold, _get_dist_stats(y.unique(), preds, scores))
 
-        if lda_threshold > 1000:
-            print(prob_threshold, _get_dist_stats(y.unique(), preds, scores))
-            print(scores)
-            print(lda_threshold)
-
         scores += full_lda_threshold - lda_threshold
-        print(full_lda_threshold, lda_threshold)
 
         results[test_idx, 0], results[test_idx, 1] = scores, preds
         results[test_idx, 2] = calculate_probs(y.unique(), preds, scores)[0][1]

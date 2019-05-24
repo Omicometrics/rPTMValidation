@@ -1,3 +1,8 @@
+"""
+Expose the public readers API.
+
+"""
+
 from .comet_reader import CometReader
 from .mascot_reader import MascotReader
 from .protein_pilot_reader import ProteinPilotReader

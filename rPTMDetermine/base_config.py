@@ -11,6 +11,11 @@ from typing import Any, Dict, List, Optional
 
 
 class SearchEngine(enum.Enum):
+    """
+    An enumeration to represent the search engines for which the tool can be
+    used.
+
+    """
     ProteinPilot = enum.auto()
     Mascot = enum.auto()
     Comet = enum.auto()

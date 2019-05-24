@@ -4,23 +4,22 @@ A module for retrieving missed identifications from database search
 results.
 
 """
-import argparse
 import collections
 import csv
 import itertools
-import json
 import operator
 import os
 import pickle
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
-from pepfrag import IonType, Peptide
 import tqdm
 
+from pepfrag import Peptide
+
 from .base_config import SearchEngine
-from .constants import RESIDUES
+from .constants import DEFAULT_FRAGMENT_IONS, RESIDUES
 from . import ionscore
 from . import lda
 from . import modifications
@@ -125,7 +124,8 @@ class Retriever(validator_base.ValidateBase):
 
         self.db_ionscores = None
 
-        self.db_res = get_search_results(self.config.data_sets, self.unimod)
+        self.db_res = get_search_results(self.config.data_sets, self.unimod,
+                                         self.config.search_engine)
 
     def retrieve(self):
         """
@@ -340,8 +340,8 @@ class Retriever(validator_base.ValidateBase):
         """
         better = []
         for pepk in tqdm.tqdm(peptides):
-            seq, modx, c, pep_type = pepk
-            pmass = Peptide(seq, c, modx).mass
+            seq, modx, charge, pep_type = pepk
+            pmass = Peptide(seq, charge, modx).mass
             # Check for free (non-modified target residue)
             if modx is None:
                 mix = [i for i, sk in enumerate(seq)
@@ -355,7 +355,7 @@ class Retriever(validator_base.ValidateBase):
                 continue
             modj = [] if modx is None else list(modx)
             for nk in range(min(3, len(mix))):
-                cmz = (pmass + self.mod_mass * (nk + 1)) / c + 1.0073
+                cmz = (pmass + self.mod_mass * (nk + 1)) / charge + 1.0073
                 bix, = np.where((prec_mzs >= cmz - tol) &
                                 (prec_mzs <= cmz + tol))
                 if bix.size == 0:
@@ -366,14 +366,9 @@ class Retriever(validator_base.ValidateBase):
                         [modifications.ModSite(self.mod_mass, j + 1,
                                                self.config.target_mod)
                          for j in lx]
-                    mod_peptide = Peptide(seq, c, modk)
-                    all_ions = mod_peptide.fragment(ion_types={
-                        IonType.precursor: {"neutral_losses": ["H2O", "NH3"]},
-                        IonType.imm: {},
-                        IonType.b: {"neutral_losses": ["H2O", "NH3"]},
-                        IonType.y: {"neutral_losses": ["H2O", "NH3"]},
-                        IonType.a: {"neutral_losses": []}
-                    })
+                    mod_peptide = Peptide(seq, charge, modk)
+                    all_ions =\
+                        mod_peptide.fragment(ion_types=DEFAULT_FRAGMENT_IONS)
                     by_ions = [i for i in all_ions
                                if (i[1][0] == "y" or i[1][0] == "b")
                                and "-" not in i[1]]
@@ -407,7 +402,7 @@ class Retriever(validator_base.ValidateBase):
                         except KeyError:
                             continue
 
-                        score = get_ion_score(seq, c, list(by_anns[diff]),
+                        score = get_ion_score(seq, charge, list(by_anns[diff]),
                                               spec[:jjm + 1, :], 0.2)
 
                         # Filter to those PSMs whose ion scores, before
@@ -425,13 +420,13 @@ class Retriever(validator_base.ValidateBase):
 
                         score = psm.features["MatchScore"]
 
-                        psm.peptide._clean_fragment_ions()
+                        psm.peptide.clean_fragment_ions()
 
                         if round(score, 4) >= dbscore:
                             better.append(psm)
         return better
 
-    def _remove_search_ids(self, psms, types=None):
+    def _remove_search_ids(self, psms: PSMContainer):
         """
         Removes the database search-identified results from the list of
         recovered PSMs.
@@ -452,7 +447,8 @@ class Retriever(validator_base.ValidateBase):
 
         return psms.ids_not_in(results)
 
-    def write_results(self, psms, csv_file, pickle_file=None):
+    def write_results(self, psms: Sequence[PSM], csv_file: str,
+                      pickle_file: str = None):
         """
         Write the results to a CSV file and, optionally, a pickle file.
 
@@ -461,8 +457,8 @@ class Retriever(validator_base.ValidateBase):
             with open(pickle_file, "wb") as fh:
                 pickle.dump(psms, fh)
 
-        with open(csv_file, "w", newline="") as fh:
-            writer = csv.writer(fh, delimiter="\t")
+        with open(csv_file, "w", newline="") as fh2:
+            writer = csv.writer(fh2, delimiter="\t")
             writer.writerow(["DataID", "SpectrumID", "Sequence", "Mods",
                              "Charge", "IonScore", "rPTMDetermineScore",
                              "SimilarityScore"])
@@ -516,36 +512,3 @@ class Retriever(validator_base.ValidateBase):
 
         """
         return self._build_model(self.config.unmod_model_file)
-
-
-def parse_args():
-    """
-    Parses the command line arguments to the script.
-
-    Returns:
-        argparse.Namespace: The parsed command line arguments.
-
-    """
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "config",
-        help=("The path to the JSON configuration file. "
-              "See example_input.json for an example"))
-    return parser.parse_args()
-
-
-def main():
-    """
-    The main entry point for the rPTMDetermine code.
-
-    """
-    args = parse_args()
-    with open(args.config) as handle:
-        conf = json.load(handle)
-
-    retriever = Retriever(conf)
-    retriever.retrieve()
-
-
-if __name__ == '__main__':
-    main()
