@@ -461,7 +461,7 @@ class Retriever(validator_base.ValidateBase):
             writer = csv.writer(fh2, delimiter="\t")
             writer.writerow(["DataID", "SpectrumID", "Sequence", "Mods",
                              "Charge", "IonScore", "rPTMDetermineScore",
-                             "SimilarityScore"])
+                             "SimilarityScore", "SiteProbability"])
             for psm in psms:
                 writer.writerow([
                     psm.data_id,
@@ -471,7 +471,8 @@ class Retriever(validator_base.ValidateBase):
                     psm.charge,
                     psm.features["MatchScore"],
                     psm.lda_score,
-                    psm.max_similarity
+                    psm.max_similarity,
+                    psm.site_prob
                 ])
 
     def _build_model(self, model_file: str)\
