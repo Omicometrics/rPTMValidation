@@ -63,7 +63,7 @@ class ProteinPilotReader(Reader):
             could not be identified.
 
         """
-        mods = modifications.preparse_mod_string(row["modifications"])
+        mods = modifications.preparse_mod_string(row["Modifications"])
 
         try:
             parsed_mods = modifications.parse_mods(mods, self.ptmdb)
