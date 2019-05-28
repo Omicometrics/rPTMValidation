@@ -8,9 +8,8 @@ import csv
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-import rPTMDetermine.modifications as modifications
-
 from .base_reader import Reader
+from . import modifications
 from .search_result import PeptideType, SearchResult
 
 

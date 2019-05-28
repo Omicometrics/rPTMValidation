@@ -8,7 +8,7 @@ from typing import Sequence, Union
 
 from pepfrag import AA_MASSES, FIXED_MASSES, IonType, ModSite, Peptide
 
-from . import modifications
+from .readers import preparse_mod_string
 
 
 Ion = collections.namedtuple("Ion", ["mass", "label", "pos"])
@@ -48,7 +48,7 @@ def merge_seq_mods(seq: str,
 
     """
     if isinstance(mods, str):
-        mod_str = modifications.preparse_mod_string(mods)
+        mod_str = preparse_mod_string(mods)
         mods = [ModSite(None, *m.split("@")[::-1])
                 for m in mod_str.split(";") if m]
 

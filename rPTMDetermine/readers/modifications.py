@@ -4,11 +4,11 @@ A script providing functions for parsing and processing the modifications
 applied to peptides.
 
 """
-from typing import List, Sequence, Union
+from typing import List, Union
 
 from pepfrag import MassType, ModSite
 
-from .readers import PTMDB
+from .ptmdb import PTMDB
 
 
 class UnknownModificationException(Exception):
@@ -16,29 +16,6 @@ class UnknownModificationException(Exception):
     A custom exception to be used if an unknown modification type is found.
 
     """
-
-
-def get_mod_mass(mod_sites: Sequence[ModSite], mod: str) -> float:
-    """
-    Retrieves the mass of the target modification.
-
-    Args:
-        mod_sites (list): A list of ModSite namedtuples.
-        mod (str): The name of the modification for which to retrieve
-                   the mass.
-
-    Returns:
-        The mass associated with the modification as a float.
-
-    Raises:
-        UnknownModificationException
-
-    """
-    for mod_site in mod_sites:
-        if mod_site.mod == mod:
-            return mod_site.mass
-    raise UnknownModificationException(
-        f"Mass not found for modification {mod} within {mod_sites}")
 
 
 def preparse_mod_string(mods: str) -> str:

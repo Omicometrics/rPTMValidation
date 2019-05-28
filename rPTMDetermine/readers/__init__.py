@@ -5,6 +5,8 @@ Expose the public readers API.
 
 from .comet_reader import CometReader
 from .mascot_reader import MascotReader
+from .modifications import (parse_mods, preparse_mod_string,
+                            UnknownModificationException)
 from .protein_pilot_reader import ProteinPilotReader
 from .ptmdb import PTMDB
 from .readers import get_reader, read_fasta_sequences
@@ -14,6 +16,9 @@ from .uniprot import read_uniprot_ptms
 __all__ = [
     "CometReader",
     "MascotReader",
+    "parse_mods",
+    "preparse_mod_string",
+    "UnknownModificationException",
     "ProteinPilotReader",
     "PTMDB",
     "get_reader",

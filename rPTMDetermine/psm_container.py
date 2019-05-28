@@ -16,8 +16,8 @@ import tqdm
 
 from pepfrag import ModSite, Peptide
 
-from . import modifications
 from .peptide_spectrum_match import PSM, SimilarityScore
+from .readers import parse_mods
 
 
 class PSMContainer(collections.UserList):
@@ -266,7 +266,7 @@ def read_csv(csv_file: str, ptmdb, spectra=None, sep: str = "\t")\
                 Peptide(
                     row["Sequence"],
                     int(row["Charge"]),
-                    modifications.parse_mods(row["Modifications"], ptmdb)
+                    parse_mods(row["Modifications"], ptmdb)
                 )
             )
             psm.lda_score = float(row["rPTMDetermineScore"])
