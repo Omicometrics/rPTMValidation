@@ -13,9 +13,12 @@ import math
 import os
 from typing import Dict, Iterable, List, Sequence, Tuple
 
+import tqdm
+
 from pepfrag import ModSite, Peptide
 
 from . import lda
+from . import mass_spectrum
 from . import peptides
 from . import proteolysis
 from .peptide_spectrum_match import PSM, UnmodPSM
@@ -302,3 +305,30 @@ class ValidateBase():
                     new_psms.append(psm)
                     break
         return PSMContainer(new_psms)
+
+    def read_mass_spectra(self) -> \
+            Dict[str, Dict[str, mass_spectrum.Spectrum]]:
+        """
+        Reads the mass spectra from the configured spectra_files.
+
+        Returns:
+            Dictionary mapping data set ID to spectra (dict).
+
+        """
+        all_spectra = {}
+        for set_id, data_conf in tqdm.tqdm(self.config.data_sets.items()):
+            for spec_file in data_conf["spectra_files"]:
+                spec_file_path = os.path.join(data_conf["data_dir"], spec_file)
+
+                if not os.path.isfile(spec_file_path):
+                    raise FileNotFoundError(
+                        f"Spectra file {spec_file_path} not found")
+
+                spectra = spectra_readers.read_spectra_file(spec_file_path)
+
+                for _, spec in spectra.items():
+                    spec.centroid().remove_itraq()
+
+                all_spectra[set_id] = spectra
+
+        return all_spectra

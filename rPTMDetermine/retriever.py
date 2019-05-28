@@ -16,19 +16,17 @@ import numpy as np
 import pandas as pd
 import tqdm
 
-from pepfrag import Peptide
+from pepfrag import ModSite, Peptide
 
 from .base_config import SearchEngine
 from .constants import DEFAULT_FRAGMENT_IONS, RESIDUES
 from . import ionscore
 from . import lda
-from . import modifications
 from .peptide_spectrum_match import PSM
 from .psm_container import PSMContainer
 from . import readers
 from .retriever_config import RetrieverConfig
 from . import similarity
-from . import spectra_readers
 from . import validator_base
 
 
@@ -135,7 +133,7 @@ class Retriever(validator_base.ValidateBase):
         """
         print("Extracting peptide candidates...")
         peptides = self._get_peptides()
-        all_spectra = self._get_spectra()
+        all_spectra = self.read_mass_spectra()
 
         print("Building LDA validation models...")
         model, score_stats, _, features = self.build_model()
@@ -267,25 +265,6 @@ class Retriever(validator_base.ValidateBase):
 
         return list(peps2)
 
-    def _get_spectra(self):
-        """
-        """
-        spectra = {}
-        for set_id, data_conf in tqdm.tqdm(self.config.data_sets.items()):
-            spec_file = os.path.join(data_conf['data_dir'],
-                                     data_conf['spectra_file'])
-
-            if not os.path.isfile(spec_file):
-                raise FileNotFoundError(f"Spectra file {spec_file} not found")
-
-            set_spectra = spectra_readers.read_spectra_file(spec_file)
-            for _, spec in set_spectra.items():
-                spec.centroid().remove_itraq()
-
-            spectra[set_id] = set_spectra
-
-        return spectra
-
     def _get_ionscores(self, spec_ids):
         """
         """
@@ -363,8 +342,7 @@ class Retriever(validator_base.ValidateBase):
 
                 for lx in itertools.combinations(mix, nk + 1):
                     modk = modj + \
-                        [modifications.ModSite(self.mod_mass, j + 1,
-                                               self.config.target_mod)
+                        [ModSite(self.mod_mass, j + 1, self.config.target_mod)
                          for j in lx]
                     mod_peptide = Peptide(seq, charge, modk)
                     all_ions =\

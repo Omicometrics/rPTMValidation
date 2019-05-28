@@ -32,7 +32,6 @@ from . import proteolysis
 from .psm_container import PSMContainer
 from . import readers
 from . import similarity
-from . import spectra_readers
 from . import utilities
 from . import validator_base
 from .validator_config import ValidatorConfig
@@ -433,19 +432,11 @@ class Validator(validator_base.ValidateBase):
             The PSM objects, now with their associated mass spectra.
 
         """
-        for set_id, data_conf in tqdm.tqdm(self.config.data_sets.items()):
-            spec_file = os.path.join(data_conf['data_dir'],
-                                     data_conf['spectra_file'])
-
-            if not os.path.isfile(spec_file):
-                raise FileNotFoundError(f"Spectra file {spec_file} not found")
-
-            spectra = spectra_readers.read_spectra_file(spec_file)
-
-            for psm in self.psms:
+        all_spectra = self.read_mass_spectra()
+        for psm in self.psms:
+            for set_id, spectra in all_spectra.items():
                 if psm.data_id == set_id and psm.spec_id in spectra:
                     psm.spectrum = spectra[psm.spec_id]
-                    psm.spectrum = psm.spectrum.centroid().remove_itraq()
 
         return self.psms
 
