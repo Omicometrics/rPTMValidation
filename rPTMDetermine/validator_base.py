@@ -141,6 +141,7 @@ class ValidateBase():
         print("Caching PSM sequences...")
         psm_info = []
         for psm in mod_psms:
+            # Filter the modifications to remove the target modification
             mods = []
             for mod in psm.mods:
                 try:
@@ -156,34 +157,29 @@ class ValidateBase():
             psm_info.append(
                 (mods, merge_peptide_sequence(psm.seq, tuple(mods)),
                  psm.charge))
+                 
+        all_spectra = self.read_mass_spectra()
 
         for data_id, data in self.db_res.items():
             print(f"Processing data set {data_id}...")
             unmods = {}
             for spec_id, matches in data.items():
-                pp_peptides = [(
+                db_peptides = [(
                     merge_peptide_sequence(match.seq, tuple(match.mods)),
                     match.theor_z) for match in matches]
                 res = [(mod_psms[idx], mods)
                        for idx, (mods, pep_str, charge) in enumerate(psm_info)
-                       if (pep_str, charge) in pp_peptides]
+                       if (pep_str, charge) in db_peptides]
                 if res:
                     unmods[spec_id] = res
 
             if not unmods:
                 continue
 
-            spec_file = os.path.join(
-                self.config.data_sets[data_id]["data_dir"],
-                self.config.data_sets[data_id]["spectra_file"])
-
-            print(f"Reading {spec_file}...")
-            spectra = spectra_readers.read_spectra_file(spec_file)
-
             print(f"Processing {len(unmods)} spectra...")
 
             for spec_id, _psms in unmods.items():
-                spec = spectra[spec_id].centroid().remove_itraq()
+                spec = all_spectra[data_id][spec_id]
 
                 for psm, mods in _psms:
                     unmod_psms.append(
@@ -316,8 +312,11 @@ class ValidateBase():
 
         """
         all_spectra = {}
-        for set_id, data_conf in tqdm.tqdm(self.config.data_sets.items()):
-            for spec_file in data_conf["spectra_files"]:
+        for data_conf_id, data_conf in tqdm.tqdm(
+                self.config.data_sets.items()):
+            for set_id, spec_file in tqdm.tqdm(
+                    data_conf["spectra_files"].items(),
+                    desc=f"Processing {data_conf_id}"):
                 spec_file_path = os.path.join(data_conf["data_dir"], spec_file)
 
                 if not os.path.isfile(spec_file_path):

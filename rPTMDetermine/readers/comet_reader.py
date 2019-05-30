@@ -141,13 +141,14 @@ class CometReader(Reader):
         """
         results = []
         for id_set in res:
-            spec_id = id_set[2].split(":")[1]
+            data_id, spec_id = id_set[2].split(":")
             results.extend([
                 SearchResult(
                     hit[1],
                     list(hit[2]),
                     hit[3],
                     spec_id,
+                    data_id,
                     hit[0],
                     None,
                     None,

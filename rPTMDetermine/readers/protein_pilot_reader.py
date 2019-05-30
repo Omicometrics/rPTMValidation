@@ -73,6 +73,7 @@ class ProteinPilotReader(Reader):
                             parsed_mods,
                             int(row["Theor z"]),
                             row["Spectrum"],
+                            None,
                             # Rank
                             1,
                             row["Time"],

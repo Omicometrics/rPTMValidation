@@ -68,7 +68,8 @@ class MascotReader(Reader):
         # Assign spectrum IDs to the querys
         for query_id in res.keys():
             query = payloads[f"query{query_id}"]
-            res[query_id]["spectrumid"] = self._get_query_title(query)
+            res[query_id]["spectrumid"] = \
+                self._get_query_title(query).split(" ")[0]
 
         # Extract the identified peptides for each spectrum query
         self._parse_peptides(payloads["peptides"], res, var_mods, fixed_mods,
@@ -90,10 +91,14 @@ class MascotReader(Reader):
         """
         results = []
         for _, query in res.items():
+            if "peptides" not in query["target"]:
+                continue
             spec_id = query["spectrumid"]
             results.extend(self._build_search_result(
                 query["target"], spec_id, PeptideType.normal))
             if "decoy" in query:
+                if "peptides" not in query["decoy"]:
+                    continue
                 results.extend(self._build_search_result(
                     query["decoy"], spec_id, PeptideType.decoy))
 
@@ -114,12 +119,14 @@ class MascotReader(Reader):
             List of SearchResults.
 
         """
+        data_id, spec_id = spec_id.split(":")
         return [
             SearchResult(
                 peptide["sequence"],
                 peptide["modifications"],
                 query["charge"],
                 spec_id,
+                data_id,
                 int(rank),
                 None,
                 None,
@@ -231,6 +238,10 @@ class MascotReader(Reader):
         for key, value in entries.items():
             # Filter out unrequired keys
             if key.count("_") > 1:
+                continue
+                
+            if value == "-1":
+                # No peptide assigned to the spectrum
                 continue
 
             query_no, rank = self._get_query_num_rank(key)

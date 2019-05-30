@@ -408,16 +408,23 @@ class Validator(validator_base.ValidateBase):
             identifications: List[readers.SearchResult] = (
                 self.reader.read(res_path, min_conf=set_info["confidence"])
                 if "confidence" in set_info else self.reader.read(res_path))
+                
+            # Filter to rank 1 identifications for validation
+            identifications = [ident for ident in identifications
+                               if ident.rank == 1]
 
             for ident in identifications:
+                dataset = (ident.dataset if ident.dataset is not None
+                           else set_id)
+            
                 if any(ms.mod == self.target_mod and isinstance(ms.site, int)
                        and ident.seq[ms.site - 1] == res for ms in ident.mods
                        for res in self.target_residues):
                     psms.append(
-                        PSM(set_id, ident.spectrum,
+                        PSM(dataset, ident.spectrum,
                             Peptide(ident.seq, ident.charge, ident.mods)))
 
-                self.db_res[set_id][ident.spectrum].append(
+                self.db_res[dataset][ident.spectrum].append(
                     validator_base.SpecMatch(ident.seq, ident.mods,
                                              ident.charge, ident.confidence,
                                              ident.pep_type))
@@ -433,8 +440,8 @@ class Validator(validator_base.ValidateBase):
 
         """
         all_spectra = self.read_mass_spectra()
-        for psm in self.psms:
-            for set_id, spectra in all_spectra.items():
+        for set_id, spectra in all_spectra.items():
+            for psm in self.psms:
                 if psm.data_id == set_id and psm.spec_id in spectra:
                     psm.spectrum = spectra[psm.spec_id]
 

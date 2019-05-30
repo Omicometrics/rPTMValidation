@@ -32,6 +32,7 @@ class SearchResult():
     mods: List[ModSite]
     charge: int
     spectrum: str
+    dataset: Optional[str]
     rank: int
     time: Optional[str]
     confidence: Optional[float]
