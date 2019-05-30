@@ -84,8 +84,7 @@ class ProteinPilotReader(Reader):
 
 
 # TODO: use XML parser
-def read_proteinpilot_xml(filename: str) -> List[
-        Tuple[str, List[Tuple[str, str, int, float, float, float, str]]]]:
+def read_proteinpilot_xml(filename: str) -> Dict[str, Dict[str, dict]]:
     """
     Reads the full ProteinPilot search results in XML format.
     Note that reading this file using an XML parser does not appear to be
@@ -97,41 +96,49 @@ def read_proteinpilot_xml(filename: str) -> List[
     Returns:
 
     """
-    res: List[
-        Tuple[str, List[Tuple[str, str, int, float, float, float, str]]]] = []
+    res: Dict[str, Dict[str, dict]] = {}
     with open(filename, 'r') as f:
-        hits: List[Tuple[str, str, int, float, float, float, str]] = []
-        t = False
+        read_identification = False
         for line in f:
-            sx = re.findall('"([^"]*)"', line.rstrip())
+            if line[0] != '<':
+                    continue
+            rline = line.rstrip()
             if line.startswith('<SPECTRUM'):
-                queryid = sx[6]
-                pms = float(sx[4])
-                t = True
-            elif t:
-                if line.startswith('<MATCH'):
-                    sline = line.rstrip().split('=')
-                    for ii, prop in enumerate(sx):
-                        if sline[ii].endswith('charge'):
-                            ck = int(prop)  # charge
-                        if sline[ii].endswith('confidence'):
-                            conf = float(prop)  # confidence
-                        if sline[ii].endswith('seq'):
-                            pk = prop  # sequence
-                        if sline[ii].endswith('type'):
-                            nk = 'decoy' if int(prop) == 1 else 'normal'
-                        if sline[ii].endswith('score'):
-                            sk = float(prop)
+                read_identification = True
+                sx = dict(re.findall(' (.+?)\="([^"]*)"', rline))
+                queryid = sx['xml:id']
+                pmz = float(sx['precursormass'])
+                rank: int = 0
+                hits: Dict[str, dict] = {}
+            elif read_identification:
+                sx = dict(re.findall(' (.+?)\="([^"]*)"', rline))
+                if rline.startswith('<MATCH'):
+                    rank += 1
+                    ck = int(sx['charge']) # charge
+                    conf = float(sx['confidence'])   # confidence
+                    seq = sx['seq']   # sequence
+                    nk = 'decoy' if int(sx['type'])==1 else 'normal'
+                    sk = float(sx['score'])
                     modj = []
-                elif line.startswith('<MOD_FEATURE'):
-                    j = int(sx[1])
-                    modj.append('%s(%s)@%d' % (sx[0], pk[j-1], j))
-                elif line.startswith('<TERM_MOD_FEATURE'):
-                    if not sx[0].startswith('No'):
-                        modj.insert(0, 'iTRAQ8plex@N-term')
-                elif line.startswith('</MATCH>'):
-                    hits.append((pk, ';'.join(modj), ck, pms, conf, sk, nk))
-                elif line.startswith('</SPECTRUM>'):
-                    res.append((queryid, hits))
-                    hits, t = [], False
+                elif rline.startswith('<MOD_FEATURE'):
+                    modj.append((None, int(sx['pos']), sx['mod']))
+                elif rline.startswith('<TERM_MOD_FEATURE'):
+                    if sx['mod'][:3] != 'No ':
+                        modj.insert(0, (None, 'nterm', sx['mod']))
+                elif rline.startswith('</MATCH>'):
+                    hits[rank] = {}
+                    hits[rank]['seq'] = seq
+                    hits[rank]['charge'] = ck
+                    hits[rank]['modifications'] = tuple(modj)
+                    hits[rank]['confidence'] = conf
+                    hits[rank]['score'] = sk
+                    hits[rank]['note'] = nk
+                elif rline.startswith('</SPECTRUM>'):
+                    if rank>0:
+                        res[queryid] = {}
+                        res[queryid]['hits'] = hits
+                        res[queryid]['pmz'] = pmz
+                        hits: Dict[str, dict] = {}
+                    # close reading current spectrum identifications
+                    read_identification = False
     return res
