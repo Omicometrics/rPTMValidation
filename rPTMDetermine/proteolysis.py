@@ -8,10 +8,14 @@ Note that the 'none' type cleavage is not supported currently.
 
 """
 import json
+import os
 import re
 from typing import List, Optional, Pattern, Tuple
 
 from .constants import RESIDUES
+
+
+DEFAULT_RULES = os.path.join(os.path.dirname(__file__), "EnzymeRules.json")
 
 
 class Proteolyzer():
@@ -19,7 +23,7 @@ class Proteolyzer():
     A class for cleaving peptides according to the given enzyme cleavage rule.
 
     """
-    def __init__(self, enzyme: str, enzyme_rules: str = "EnzymeRules.json"):
+    def __init__(self, enzyme: str, enzyme_rules: str = DEFAULT_RULES):
         """
         Initialize the class instance with the specified enzyme cleavage rule.
 
