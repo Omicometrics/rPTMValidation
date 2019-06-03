@@ -3,6 +3,7 @@ Expose the public readers API.
 
 """
 
+from .base_reader import Reader
 from .comet_reader import CometReader
 from .mascot_reader import MascotReader
 from .modifications import (parse_mods, preparse_mod_string,
@@ -14,6 +15,7 @@ from .search_result import PeptideType, SearchResult
 from .uniprot import read_uniprot_ptms
 
 __all__ = [
+    "Reader",
     "CometReader",
     "MascotReader",
     "parse_mods",

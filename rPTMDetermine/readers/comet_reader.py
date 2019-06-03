@@ -4,7 +4,7 @@ This module provides a class for parsing Comet pepXML files.
 
 """
 import operator
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import lxml.etree as etree
 from pepfrag import ModSite
@@ -42,12 +42,16 @@ class CometReader(Reader):
                           if namespace is None else namespace)
         self.ns_map = {'x': self.namespace}
 
-    def read(self, filename: str, **kwargs) -> List[SearchResult]:
+    def read(self, filename: str,
+             predicate: Optional[Callable[[SearchResult], bool]] = None,
+             **kwargs) -> List[SearchResult]:
         """
         Reads the specified pepXML file.
 
         Args:
             filename (str): The path to the pepXML file.
+            predicate (Callable, optional): An optional predicate to filter
+                                            results.
 
         Returns:
 
@@ -148,11 +152,7 @@ class CometReader(Reader):
                     list(hit[2]),
                     hit[3],
                     spec_id,
-                    data_id,
                     hit[0],
-                    None,
-                    None,
-                    None,
-                    None,
-                    PeptideType[hit[5]]) for hit in id_set[3]])
+                    PeptideType[hit[5]],
+                    dataset=data_id) for hit in id_set[3]])
         return results

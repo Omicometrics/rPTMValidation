@@ -10,7 +10,7 @@ import itertools
 import operator
 import os
 import pickle
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -18,7 +18,6 @@ import tqdm
 
 from pepfrag import ModSite, Peptide
 
-from .base_config import SearchEngine
 from .constants import DEFAULT_FRAGMENT_IONS, RESIDUES
 from . import ionscore
 from . import lda
@@ -52,30 +51,6 @@ def get_ion_score(seq, charge, ions, spectrum, tol):
 
     return ionscore.ionscore(len(seq), spectrum.shape[0], nseq,
                              spectrum[-1][0] - spectrum[0][0], tol)
-
-
-def get_search_results(data_sets: Dict[str, Dict[str, Any]],
-                       unimod: readers.PTMDB, search_engine: SearchEngine)\
-        -> Dict[str, Dict[str, List[validator_base.SpecMatch]]]:
-    """
-    Reads the database search results files to extract identifications.
-
-    """
-    db_res: Dict[str, Dict[str, List[validator_base.SpecMatch]]] =\
-        collections.defaultdict(lambda: collections.defaultdict(list))
-    for set_id, set_info in data_sets.items():
-        res_path = os.path.join(set_info["data_dir"], set_info["results"])
-
-        identifications: List[readers.SearchResult] =\
-            readers.get_reader(search_engine, unimod).read(res_path)
-
-        for ident in identifications:
-            db_res[set_id][ident.spectrum].append(
-                validator_base.SpecMatch(ident.seq, ident.mods,
-                                         ident.charge, ident.confidence,
-                                         ident.pep_type))
-
-    return db_res
 
 
 def calculate_lda_probs(psms, lda_model, score_stats, features):
@@ -122,8 +97,7 @@ class Retriever(validator_base.ValidateBase):
 
         self.db_ionscores = None
 
-        self.db_res = get_search_results(self.config.data_sets, self.unimod,
-                                         self.config.search_engine)
+        self.db_res = self._get_search_results()
 
     def retrieve(self):
         """
@@ -245,6 +219,29 @@ class Retriever(validator_base.ValidateBase):
 
         self.write_results(rec_psms,
                            self.file_prefix + "recovered_results.csv")
+
+    def _get_search_results(self) \
+            -> Dict[str, Dict[str, List[validator_base.SpecMatch]]]:
+        """
+        Reads the database search results files to extract identifications.
+
+        """
+        db_res: Dict[str, Dict[str, List[validator_base.SpecMatch]]] =\
+            collections.defaultdict(lambda: collections.defaultdict(list))
+
+        for set_id, set_info in self.config.data_sets.items():
+            res_path = os.path.join(set_info["data_dir"], set_info["results"])
+
+            identifications: List[readers.SearchResult] = \
+                self.reader.read(res_path)
+
+            for ident in identifications:
+                db_res[set_id][ident.spectrum].append(
+                    validator_base.SpecMatch(ident.seq, ident.mods,
+                                             ident.charge, ident.confidence,
+                                             ident.pep_type))
+
+        return db_res
 
     def _get_peptides(self):
         """

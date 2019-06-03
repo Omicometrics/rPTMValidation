@@ -405,18 +405,20 @@ class Validator(validator_base.ValidateBase):
             res_path = os.path.join(set_info["data_dir"], set_info["results"])
 
             # Apply database search FDR control to the results
-            identifications: List[readers.SearchResult] = (
-                self.reader.read(res_path, min_conf=set_info["confidence"])
-                if "confidence" in set_info else self.reader.read(res_path))
-                
-            # Filter to rank 1 identifications for validation
-            identifications = [ident for ident in identifications
-                               if ident.rank == 1]
+            identifications: List[readers.SearchResult] = \
+                self.reader.read(res_path,
+                                 predicate=self._fdr_filter(set_info))
 
             for ident in identifications:
+                if (ident.pep_type == readers.PeptideType.decoy or
+                        ident.rank != 1 or "X" in ident.seq):
+                    # Filter to rank 1, target identifications for validation
+                    # and ignore placeholder amino acid residue identifications
+                    continue
+
                 dataset = (ident.dataset if ident.dataset is not None
                            else set_id)
-            
+
                 if any(ms.mod == self.target_mod and isinstance(ms.site, int)
                        and ident.seq[ms.site - 1] == res for ms in ident.mods
                        for res in self.target_residues):

@@ -6,7 +6,7 @@ search identification.
 """
 import dataclasses
 import enum
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pepfrag import ModSite
 
@@ -32,10 +32,12 @@ class SearchResult():
     mods: List[ModSite]
     charge: int
     spectrum: str
-    dataset: Optional[str]
     rank: int
-    time: Optional[str]
-    confidence: Optional[float]
-    theor_mz: Optional[float]
-    prec_mz: Optional[float]
     pep_type: PeptideType
+    dataset: Optional[str] = None
+    time: Optional[str] = None
+    confidence: Optional[float] = None
+    theor_mz: Optional[float] = None
+    prec_mz: Optional[float] = None
+    ionscore: Optional[float] = None
+    extra: Dict[str, Any] = dataclasses.field(default_factory=dict)

@@ -180,6 +180,14 @@ class BaseConfig():
         """
         return self.json_config.get("exclude_features", [])
 
+    @property
+    def fdr(self) -> Optional[float]:
+        """
+        The false discovery rate to be applied.
+
+        """
+        return self.json_config.get("fdr", None)
+
     def _check_required(self):
         """
         Checks that the required options have been set in the configuration

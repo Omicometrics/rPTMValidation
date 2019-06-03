@@ -11,12 +11,13 @@ import functools
 import itertools
 import math
 import os
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import tqdm
 
 from pepfrag import ModSite, Peptide
 
+from .base_config import SearchEngine
 from . import lda
 from . import mass_spectrum
 from . import peptides
@@ -24,7 +25,6 @@ from . import proteolysis
 from .peptide_spectrum_match import PSM, UnmodPSM
 from .psm_container import PSMContainer
 from . import readers
-from .readers.base_reader import Reader
 from . import spectra_readers
 from . import utilities
 
@@ -91,7 +91,7 @@ class ValidateBase():
         self.unimod = readers.PTMDB(self.config.unimod_ptm_file)
 
         # The database search reader
-        self.reader: Reader = readers.get_reader(
+        self.reader: readers.Reader = readers.get_reader(
             self.config.search_engine, self.unimod)
 
         # All database search results
@@ -129,6 +129,26 @@ class ValidateBase():
                 psm.benchmark = (peptides.merge_seq_mods(psm.seq, psm.mods)
                                  in benchmarks)
 
+    def _fdr_filter(self, data_config) -> \
+            Optional[Callable[[readers.SearchResult], bool]]:
+        """
+        Provides an FDR filter function for processing database search results.
+
+        Args:
+            data_config (dict)
+
+        Returns:
+            Predicate for determining if an identification passes FDR control.
+
+        """
+        if self.config.search_engine == SearchEngine.ProteinPilot:
+            return lambda res: res.confidence >= data_config["confidence"]
+        if self.config.search_engine == SearchEngine.Mascot:
+            return lambda res: res.ionscore is not None and res.ionscore >= \
+                readers.mascot_reader.get_identity_threshold(
+                    self.config.fdr, res.extra["num_matches"])
+        return None
+
     def _find_unmod_analogues(self, mod_psms: Sequence[PSM]):
         """
         Finds the unmodified analogues in the database search results.
@@ -157,7 +177,7 @@ class ValidateBase():
             psm_info.append(
                 (mods, merge_peptide_sequence(psm.seq, tuple(mods)),
                  psm.charge))
-                 
+
         all_spectra = self.read_mass_spectra()
 
         for data_id, data in self.db_res.items():
