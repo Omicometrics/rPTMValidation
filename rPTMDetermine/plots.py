@@ -84,8 +84,7 @@ def plot_scores(psms: List[PSM], lda_threshold: float,
     plt.ylabel("rPTMDetermine Score", fontproperties=FONT)
 
     # Calculate the x-position for the score annotation
-    ann_x_pos = ([(ii, ds) for ii, ds in enumerate(decoy_scores)
-                  if ds > lda_threshold][-1][0] + 0.05 * len(decoy_scores))
+    ann_x_pos = decoy_scores[0] + 0.05 * len(decoy_scores)
 
     plt.annotate(f"$s_{{PD}}$={lda_threshold:.2f}",
                  (ann_x_pos, lda_threshold + 0.05 * max(target_scores)),
