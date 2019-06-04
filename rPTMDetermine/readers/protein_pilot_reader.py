@@ -5,8 +5,9 @@ This module provides functions for reading ProteinPilot results
 
 """
 import csv
+import dataclasses
 import re
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Optional, Sequence
 
 from .base_reader import Reader
 from . import modifications
@@ -16,14 +17,24 @@ from .search_result import PeptideType, SearchResult
 MGF_TITLE_REGEX = re.compile(r"TITLE=Locus:([\d\.]+) ")
 
 
-class ProteinPilotReader(Reader):
+@dataclasses.dataclass
+class ProteinPilotSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
+
+    __slots__ = ("time", "confidence", "prec_mz",)
+
+    time: str
+    confidence: float
+    prec_mz: float
+
+
+class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
     """
     A class to read ProteinPilot PeptideSummary files.
 
     """
     def read(self, filename: str,
              predicate: Optional[Callable[[SearchResult], bool]] = None,
-             **kwargs) -> List[SearchResult]:
+             **kwargs) -> Sequence[SearchResult]:
         """
         Reads the given ProteinPilot Peptide Summary file to extract useful
         information on sequence, modifications, m/z etc.
@@ -49,7 +60,7 @@ class ProteinPilotReader(Reader):
             return results
 
     def _build_search_result(self, row: Dict[str, Any])\
-            -> Optional[SearchResult]:
+            -> Optional[ProteinPilotSearchResult]:
         """
         Processes the given row of a Peptide Summary file to produce a
         SearchResult entry.
@@ -58,8 +69,8 @@ class ProteinPilotReader(Reader):
             row (dict): A row dictionary from the Peptide Summary file.
 
         Returns:
-            A SearchResult to represent the row, or None if the modifications
-            could not be identified.
+            A ProteinPilotSearchResult to represent the row, or None if the
+            modifications could not be identified.
 
         """
         mods = modifications.preparse_mod_string(row["Modifications"])
@@ -69,17 +80,18 @@ class ProteinPilotReader(Reader):
         except modifications.UnknownModificationException:
             return None
 
-        return SearchResult(
-            row["Sequence"],
-            parsed_mods,
-            int(row["Theor z"]),
-            row["Spectrum"],
-            1,
-            PeptideType.decoy if "REVERSED" in row["Names"]
+        return ProteinPilotSearchResult(
+            seq=row["Sequence"],
+            mods=parsed_mods,
+            charge=int(row["Theor z"]),
+            spectrum=row["Spectrum"],
+            dataset=None,
+            rank=1,
+            pep_type=PeptideType.decoy if "REVERSED" in row["Names"]
             else PeptideType.normal,
+            theor_mz=float(row["Theor m/z"]),
             time=row["Time"],
             confidence=float(row["Conf"]),
-            theor_mz=float(row["Theor m/z"]),
             prec_mz=float(row["Prec m/z"]))
 
 

@@ -6,7 +6,7 @@ search identification.
 """
 import dataclasses
 import enum
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from pepfrag import ModSite
 
@@ -21,23 +21,22 @@ class PeptideType(enum.Enum):
 
 
 @dataclasses.dataclass
-class SearchResult():
+class SearchResult():  # pylint: disable=too-few-public-methods
     """
     A data class to store information about an identification from a database
     search engine. All search engine readers should return a list of
     SearchResult objects in order to standardize the interface.
 
     """
+
+    __slots__ = ("seq", "mods", "charge", "spectrum", "dataset", "rank",
+                 "pep_type", "theor_mz",)
+
     seq: str
     mods: List[ModSite]
     charge: int
     spectrum: str
+    dataset: Optional[str]
     rank: int
     pep_type: PeptideType
-    dataset: Optional[str] = None
-    time: Optional[str] = None
-    confidence: Optional[float] = None
-    theor_mz: Optional[float] = None
-    prec_mz: Optional[float] = None
-    ionscore: Optional[float] = None
-    extra: Dict[str, Any] = dataclasses.field(default_factory=dict)
+    theor_mz: Optional[float]

@@ -30,8 +30,7 @@ from . import utilities
 
 
 SpecMatch = collections.namedtuple("SpecMatch",
-                                   ["seq", "mods", "theor_z", "conf",
-                                    "pep_type"])
+                                   ["seq", "mods", "theor_z", "pep_type"])
 
 
 @functools.lru_cache(maxsize=1024)
@@ -142,11 +141,15 @@ class ValidateBase():
 
         """
         if self.config.search_engine == SearchEngine.ProteinPilot:
-            return lambda res: res.confidence >= data_config["confidence"]
+            return lambda res: \
+                isinstance(res, readers.ProteinPilotSearchResult) and \
+                res.confidence >= data_config["confidence"]
         if self.config.search_engine == SearchEngine.Mascot:
-            return lambda res: res.ionscore is not None and res.ionscore >= \
+            return lambda res: \
+                isinstance(res, readers.MascotSearchResult) and \
+                res.ionscore is not None and res.ionscore >= \
                 readers.mascot_reader.get_identity_threshold(
-                    self.config.fdr, res.extra["num_matches"])
+                    self.config.fdr, res.num_matches)
         return None
 
     def _find_unmod_analogues(self, mod_psms: Sequence[PSM]):

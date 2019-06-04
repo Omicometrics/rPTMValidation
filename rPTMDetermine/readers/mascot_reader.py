@@ -4,6 +4,7 @@ This module provides a class for reading Mascot dat (MIME) files.
 
 """
 import collections
+import dataclasses
 import email.parser
 import functools
 import math
@@ -23,6 +24,17 @@ from .search_result import PeptideType, SearchResult
 QUERY_NUM_REGEX = re.compile(r"[a-z]+(\d+)")
 
 
+@dataclasses.dataclass
+class MascotSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
+
+    __slots__ = ("ionscore", "deltamass", "proteins", "num_matches",)
+
+    ionscore: float
+    deltamass: float
+    proteins: Tuple[str]
+    num_matches: int
+
+
 @functools.lru_cache()
 def get_identity_threshold(fdr: float, num_matches: int) -> float:
     """
@@ -37,7 +49,7 @@ def get_identity_threshold(fdr: float, num_matches: int) -> float:
     return (-10 * math.log10(fdr / num_matches)) - 13
 
 
-class MascotReader(Reader):
+class MascotReader(Reader):  # pylint: disable=too-few-public-methods
     """
     Class to read Mascot dat/MIME files.
 
@@ -53,7 +65,7 @@ class MascotReader(Reader):
 
     def read(self, filename: str,
              predicate: Optional[Callable[[SearchResult], bool]] = None,
-             **kwargs) -> List[SearchResult]:
+             **kwargs) -> Sequence[SearchResult]:
         """
         Reads the given Mascot dat result file.
 
@@ -105,15 +117,15 @@ class MascotReader(Reader):
         return self._build_search_results(res, predicate)
 
     def _build_search_results(
-        self,
-        res,
-        predicate: Optional[Callable[[SearchResult], bool]]) \
-            -> List[SearchResult]:
+            self,
+            res,
+            predicate: Optional[Callable[[SearchResult], bool]]) \
+            -> List[MascotSearchResult]:
         """
         Converts the results to a standardized list of SearchResults.
 
         Returns:
-            List of SearchResults.
+            List of MascotSearchResults.
 
         """
         results = []
@@ -136,12 +148,12 @@ class MascotReader(Reader):
         return results
 
     def _build_search_result(
-        self,
-        query: Dict[str, Any],
-        spec_id: str,
-        pep_type: PeptideType,
-        predicate: Optional[Callable[[SearchResult], bool]])\
-            -> List[SearchResult]:
+            self,
+            query: Dict[str, Any],
+            spec_id: str,
+            pep_type: PeptideType,
+            predicate: Optional[Callable[[SearchResult], bool]]) \
+            -> List[MascotSearchResult]:
         """
         Converts the peptide identifications to a list of SearchResults.
 
@@ -152,26 +164,24 @@ class MascotReader(Reader):
             pep_type (PeptideType): The type of the peptide, normal/decoy.
 
         Returns:
-            List of SearchResults.
+            List of MascotSearchResults.
 
         """
         data_id, spec_id = spec_id.split(":")
         results = [
-            SearchResult(
-                peptide["sequence"],
-                peptide["modifications"],
-                query["charge"],
-                spec_id,
-                int(rank),
-                pep_type,
-                data_id,
+            MascotSearchResult(
+                seq=peptide["sequence"],
+                mods=peptide["modifications"],
+                charge=query["charge"],
+                spectrum=spec_id,
+                dataset=data_id,
+                rank=int(rank),
+                pep_type=pep_type,
                 theor_mz=query["mz"],
                 ionscore=peptide["ionscore"],
-                extra={
-                    "deltamass": peptide["deltamass"],
-                    "proteins": peptide["proteins"],
-                    "num_matches": query["num_matches"],
-                })
+                deltamass=peptide["deltamass"],
+                proteins=peptide["proteins"],
+                num_matches=query["num_matches"])
             for rank, peptide in query["peptides"].items()]
         return (results if predicate is None
                 else [r for r in results if predicate(r)])

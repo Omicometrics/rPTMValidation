@@ -405,7 +405,7 @@ class Validator(validator_base.ValidateBase):
             res_path = os.path.join(set_info["data_dir"], set_info["results"])
 
             # Apply database search FDR control to the results
-            identifications: List[readers.SearchResult] = \
+            identifications: Sequence[readers.SearchResult] = \
                 self.reader.read(res_path,
                                  predicate=self._fdr_filter(set_info))
 
@@ -428,8 +428,7 @@ class Validator(validator_base.ValidateBase):
 
                 self.db_res[dataset][ident.spectrum].append(
                     validator_base.SpecMatch(ident.seq, ident.mods,
-                                             ident.charge, ident.confidence,
-                                             ident.pep_type))
+                                             ident.charge, ident.pep_type))
 
         return utilities.deduplicate(psms)
 

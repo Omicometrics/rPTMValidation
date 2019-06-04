@@ -3,8 +3,9 @@
 This module provides a class for parsing Comet pepXML files.
 
 """
+import dataclasses
 import operator
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Sequence
 
 import lxml.etree as etree
 from pepfrag import ModSite
@@ -15,7 +16,13 @@ from .ptmdb import PTMDB
 from .search_result import PeptideType, SearchResult
 
 
-class CometReader(Reader):
+@dataclasses.dataclass
+class CometSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
+
+    __slots__ = ()
+
+
+class CometReader(Reader):  # pylint: disable=too-few-public-methods
     """
     Class to read a Comet pepXML file.
 
@@ -44,7 +51,7 @@ class CometReader(Reader):
 
     def read(self, filename: str,
              predicate: Optional[Callable[[SearchResult], bool]] = None,
-             **kwargs) -> List[SearchResult]:
+             **kwargs) -> Sequence[SearchResult]:
         """
         Reads the specified pepXML file.
 
@@ -135,24 +142,25 @@ class CometReader(Reader):
 
         return mods
 
-    def _build_search_results(self, res) -> List[SearchResult]:
+    def _build_search_results(self, res) -> List[CometSearchResult]:
         """
         Converts the search results to the standard SearchResult class.
 
         Returns:
-            List of SearchResults.
+            List of CometSearchResults.
 
         """
         results = []
         for id_set in res:
             data_id, spec_id = id_set[2].split(":")
             results.extend([
-                SearchResult(
-                    hit[1],
-                    list(hit[2]),
-                    hit[3],
-                    spec_id,
-                    hit[0],
-                    PeptideType[hit[5]],
-                    dataset=data_id) for hit in id_set[3]])
+                CometSearchResult(
+                    seq=hit[1],
+                    mods=list(hit[2]),
+                    charge=hit[3],
+                    spectrum=spec_id,
+                    dataset=data_id,
+                    rank=hit[0],
+                    pep_type=PeptideType[hit[5]],
+                    theor_mz=None) for hit in id_set[3]])
         return results
