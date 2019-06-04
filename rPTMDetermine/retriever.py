@@ -7,10 +7,9 @@ results.
 import collections
 import csv
 import itertools
-import operator
 import os
 import pickle
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Sequence, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -21,6 +20,7 @@ from pepfrag import ModSite, Peptide
 from .constants import DEFAULT_FRAGMENT_IONS, RESIDUES
 from . import ionscore
 from . import lda
+from . import mass_spectrum
 from .peptide_spectrum_match import PSM
 from .psm_container import PSMContainer
 from . import readers
@@ -67,7 +67,7 @@ def calculate_lda_probs(psms, lda_model, score_stats, features):
     """
     # Convert PSMContainer to a pandas DataFrame
     batch_size = 10000
-    for ii in range(0, len(psms), batch_size):
+    for ii in tqdm.tqdm(range(0, len(psms), batch_size)):
         batch_psms = psms[ii:ii + batch_size]
 
         psms_df = batch_psms.to_df()
@@ -97,6 +97,7 @@ class Retriever(validator_base.ValidateBase):
 
         self.db_ionscores = None
 
+        print("Reading database search results...")
         self.db_res = self._get_search_results()
 
     def retrieve(self):
@@ -122,7 +123,7 @@ class Retriever(validator_base.ValidateBase):
         prec_mzs = np.array(prec_mzs)
 
         print("Reading database ion scores...")
-        self.db_ionscores = self._get_ionscores(spec_ids)
+        self.db_ionscores = self._get_ionscores()
 
         print("Finding better modified PSMs...")
         psms = self._get_better_matches(peptides, all_spectra, spec_ids,
@@ -147,6 +148,7 @@ class Retriever(validator_base.ValidateBase):
             pickle.dump(psms, fh)
 
         # Attempt to correct for misassigned deamidation
+        print("Attempting to correct misassigned deamidation...")
         psms = lda.apply_deamidation_correction(
             model, score_stats, psms, features, self.target_mod,
             self.proteolyzer)
@@ -232,79 +234,67 @@ class Retriever(validator_base.ValidateBase):
         for set_id, set_info in self.config.data_sets.items():
             res_path = os.path.join(set_info["data_dir"], set_info["results"])
 
-            identifications: List[readers.SearchResult] = \
+            identifications: Sequence[readers.SearchResult] = \
                 self.reader.read(res_path)
 
             for ident in identifications:
                 db_res[set_id][ident.spectrum].append(
                     validator_base.SpecMatch(ident.seq, ident.mods,
-                                             ident.charge, ident.confidence,
-                                             ident.pep_type))
+                                             ident.charge, ident.pep_type))
 
         return db_res
 
-    def _get_peptides(self):
+    def _get_peptides(self) \
+            -> List[Tuple[str, Tuple[ModSite, ...], int, readers.PeptideType]]:
         """
         Retrieves the candidate peptides from the database search results.
 
         """
-        allpeps = [(set_id, spec_id, m.seq, tuple(m.mods), m.theor_z,
-                    m.pep_type)
-                   for set_id, spectra in self.db_res.items()
-                   for spec_id, matches in spectra.items() for m in matches]
+        allpeps: List[Tuple[str, str, str, Tuple[ModSite, ...], int,
+                            readers.PeptideType]] = \
+            [(set_id, spec_id, m.seq, tuple(m.mods), m.theor_z,
+              m.pep_type)
+             for set_id, spectra in self.db_res.items()
+             for spec_id, matches in spectra.items()
+             for m in matches]
 
-        peps = {(x[2], x[3], x[4], x[5]) for x in allpeps if len(x[2]) >= 7
-                and set(RESIDUES).issuperset(x[2]) and
-                any(res in x[2] for res in self.config.target_residues)}
+        peps: Set[Tuple[str, Tuple[ModSite, ...], int,
+                        readers.PeptideType]] = \
+            {(x[2], tuple(self._filter_mods(x[3], x[2])), x[4], x[5])
+             for x in allpeps if len(x[2]) >= 7 and
+             set(RESIDUES).issuperset(x[2]) and
+             any(r in x[2] for r in self.config.target_residues)}
 
-        peps2 = {(x[0], tuple(self._filter_mods(x[1], x[0])), x[2], x[3])
-                 for x in peps}
+        return list(peps)
 
-        return list(peps2)
-
-    def _get_ionscores(self, spec_ids):
+    def _get_ionscores(self) \
+            -> Dict[str, Dict[str, float]]:
         """
+        Reads the ion scores from all databases from the configured file.
+
         """
-        ionscores = collections.defaultdict(
-            lambda: collections.defaultdict(list))
+        ionscores: Dict[str, Dict[str, float]] = collections.defaultdict(dict)
         with open(self.config.db_ionscores_file, 'r') as fh:
             for line in fh:
-                xk = line.rstrip().split()
-                for xj in xk[2:]:
-                    if xj.startswith('ms'):
-                        bk = [float(jk) for jk in xj.split(':')[1].split(',')]
-                        ionscores[xk[0]][xk[1]].append(('res', 'ms', max(bk)))
-                    elif xj.startswith('ct'):
-                        bk = [float(jk) for jk in xj.split(':')[1].split(',')]
-                        ionscores[xk[0]][xk[1]].append(('res', 'ct', max(bk)))
-                    elif xj.startswith('pp'):
-                        bk = [float(jk) for jk in xj.split(':')[1].split(',')]
-                        ionscores[xk[0]][xk[1]].append(('res', 'pp', max(bk)))
+                content = line.rstrip().split()
+                data_id, spec_id = content[0], content[1]
+                for scores in content[2:]:
+                    score = max(
+                        [float(s) for s in scores.split(":")[1].split(",")])
+                    if (spec_id not in ionscores[data_id] or
+                            score > ionscores[data_id][spec_id]):
+                        ionscores[data_id][spec_id] = score
 
-        ionscores2 = collections.defaultdict(dict)
-        for ky1, ky2 in spec_ids:
-            try:
-                bx = max([xk for xk in ionscores[ky1][ky2]
-                          if isinstance(xk, tuple)],
-                         key=operator.itemgetter(2))
-            except ValueError:
-                continue
-            bx2 = [max(xk, key=operator.itemgetter(2))
-                   for xk in ionscores[ky1][ky2] if isinstance(xk, list)]
-            m = 0
-            if bx2:
-                if bx2[0][2] > m:
-                    m = bx2[0][2]
-            if bx:
-                if bx[2] > m:
-                    m = bx[2]
+        return ionscores
 
-            ionscores2[ky1][ky2] = m
-
-        return ionscores2
-
-    def _get_better_matches(self, peptides, spectra, spec_ids, prec_mzs,
-                            tol):
+    def _get_better_matches(
+            self,
+            peptides: List[Tuple[str, Tuple[ModSite, ...], int,
+                                 readers.PeptideType]],
+            spectra: Dict[str, Dict[str, mass_spectrum.Spectrum]],
+            spec_ids: List[Tuple[str, str]],
+            prec_mzs: np.array,
+            tol: float) -> List[PSM]:
         """
         Finds the PSMs which are better than those found for other database
         search engines.
@@ -314,7 +304,7 @@ class Retriever(validator_base.ValidateBase):
         Returns:
 
         """
-        better = []
+        better: List[PSM] = []
         for pepk in tqdm.tqdm(peptides):
             seq, modx, charge, pep_type = pepk
             pmass = Peptide(seq, charge, modx).mass
@@ -342,23 +332,28 @@ class Retriever(validator_base.ValidateBase):
                         [ModSite(self.mod_mass, j + 1, self.config.target_mod)
                          for j in lx]
                     mod_peptide = Peptide(seq, charge, modk)
-                    all_ions =\
+                    by_ions = [
+                        i for i in
                         mod_peptide.fragment(ion_types=DEFAULT_FRAGMENT_IONS)
-                    by_ions = [i for i in all_ions
-                               if (i[1][0] == "y" or i[1][0] == "b")
-                               and "-" not in i[1]]
+                        if (i[1][0] == "y" or i[1][0] == "b")
+                        and "-" not in i[1]
+                    ]
                     by_mzs = np.array([i[0] for i in by_ions])
+                    by_anns = np.array([i[1] for i in by_ions])
                     by_mzs_u = by_mzs + 0.2
                     by_mzs_l = by_mzs - 0.2
-                    by_anns = np.array([i[1] for i in by_ions])
                     for kk in bix:
+                        try:
+                            dbscore = self.db_ionscores[
+                                spec_ids[kk][0]][spec_ids[kk][1]]
+                        except KeyError:
+                            continue
+
                         spec = spectra[spec_ids[kk][0]][spec_ids[kk][1]]
 
                         if len(spec) < 5:
                             continue
 
-                        # Check whether the ionscore is close to the search
-                        # engine scores
                         mzk = spec[:, 0]
                         thix = mzk.searchsorted(by_mzs_l)
                         thix2 = mzk.searchsorted(by_mzs_u)
@@ -369,12 +364,6 @@ class Retriever(validator_base.ValidateBase):
 
                         jjm = thix[diff].max()
                         if jjm <= 5:
-                            continue
-
-                        try:
-                            dbscore = self.db_ionscores[
-                                spec_ids[kk][0]][spec_ids[kk][1]]
-                        except KeyError:
                             continue
 
                         score = get_ion_score(seq, charge, list(by_anns[diff]),
@@ -388,20 +377,18 @@ class Retriever(validator_base.ValidateBase):
 
                         psm = PSM(spec_ids[kk][0], spec_ids[kk][1],
                                   mod_peptide, spectrum=spec,
-                                  target=(pep_type == "normal"))
+                                  target=(
+                                      pep_type == readers.PeptideType.normal))
 
                         psm.extract_features(self.config.target_mod,
                                              self.proteolyzer)
-
-                        score = psm.features["MatchScore"]
-
                         psm.peptide.clean_fragment_ions()
 
-                        if round(score, 4) >= dbscore:
+                        if round(psm.features["MatchScore"], 4) >= dbscore:
                             better.append(psm)
         return better
 
-    def _remove_search_ids(self, psms: PSMContainer):
+    def _remove_search_ids(self, psms: PSMContainer) -> PSMContainer:
         """
         Removes the database search-identified results from the list of
         recovered PSMs.
@@ -465,8 +452,8 @@ class Retriever(validator_base.ValidateBase):
         """
         df = pd.read_csv(model_file, index_col=0)
 
-        features: List[str] = list(df.columns.values)
-        features = [f for f in features if f not in MODEL_REMOVE_COLS and
+        features = [f for f in df.columns.values
+                    if f not in MODEL_REMOVE_COLS and
                     f not in self.config.exclude_features]
 
         return (*lda.lda_model(df, features), features)
