@@ -7,9 +7,10 @@ from __future__ import annotations  # Imported for lazy evaluation of types
 
 import collections
 import csv
+import operator
 import os
 import sys
-from typing import Callable, List, Optional, Sequence, Set, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import pandas as pd
 import tqdm
@@ -20,7 +21,7 @@ from .peptide_spectrum_match import PSM, SimilarityScore
 from .readers import parse_mods
 
 
-class PSMContainer(collections.UserList):
+class PSMContainer(collections.UserList):  # pylint: disable=too-many-ancestors
     """
     A class to provide a customized iterable container of PSMs. The class
     builds upon the UserList class and extends the functionality.
@@ -158,25 +159,12 @@ class PSMContainer(collections.UserList):
             PSMContainer of filtered PSMs.
 
         """
-        seen: Set[Tuple[str, str]] = set()
-        best_psms = PSMContainer()
-        for psm in tqdm.tqdm(self.data):
-            data_id, spec_id = psm.data_id, psm.spec_id
-            comb_id = (data_id, spec_id)
-            if comb_id in seen:
-                continue
-            seen.add(comb_id)
+        index: Dict[Tuple[str, str], List[PSM]] = collections.defaultdict(list)
+        for psm in self.data:
+            index[(psm.data_id, psm.spec_id)].append(psm)
 
-            max_score, max_score_psm = psm.lda_score, psm
-            count = 0
-            for other_psm in self.get_by_id(data_id, spec_id):
-                count += 1
-                if other_psm.lda_score > max_score:
-                    max_score, max_score_psm = other_psm.lda_score, other_psm
-
-            best_psms.append(max_score_psm)
-
-        return best_psms
+        return PSMContainer([max(psms, key=operator.attrgetter("lda_score"))
+                             for psms in index.values()])
 
     def get_unique_peptides(
             self, predicate: Optional[Callable[[PSM], bool]] = None)\
