@@ -426,9 +426,7 @@ class Validator(validator_base.ValidateBase):
                         PSM(dataset, ident.spectrum,
                             Peptide(ident.seq, ident.charge, ident.mods)))
 
-                self.db_res[dataset][ident.spectrum].append(
-                    validator_base.SpecMatch(ident.seq, ident.mods,
-                                             ident.charge, ident.pep_type))
+                self.db_res[dataset][ident.spectrum].append(ident)
 
         return utilities.deduplicate(psms)
 

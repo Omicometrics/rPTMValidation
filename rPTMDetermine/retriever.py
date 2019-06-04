@@ -223,12 +223,12 @@ class Retriever(validator_base.ValidateBase):
                            self.file_prefix + "recovered_results.csv")
 
     def _get_search_results(self) \
-            -> Dict[str, Dict[str, List[validator_base.SpecMatch]]]:
+            -> Dict[str, Dict[str, List[readers.SearchResult]]]:
         """
         Reads the database search results files to extract identifications.
 
         """
-        db_res: Dict[str, Dict[str, List[validator_base.SpecMatch]]] =\
+        db_res: Dict[str, Dict[str, List[readers.SearchResult]]] =\
             collections.defaultdict(lambda: collections.defaultdict(list))
 
         for set_id, set_info in self.config.data_sets.items():
@@ -238,9 +238,7 @@ class Retriever(validator_base.ValidateBase):
                 self.reader.read(res_path)
 
             for ident in identifications:
-                db_res[set_id][ident.spectrum].append(
-                    validator_base.SpecMatch(ident.seq, ident.mods,
-                                             ident.charge, ident.pep_type))
+                db_res[set_id][ident.spectrum].append(ident)
 
         return db_res
 
@@ -252,7 +250,7 @@ class Retriever(validator_base.ValidateBase):
         """
         allpeps: List[Tuple[str, str, str, Tuple[ModSite, ...], int,
                             readers.PeptideType]] = \
-            [(set_id, spec_id, m.seq, tuple(m.mods), m.theor_z,
+            [(set_id, spec_id, m.seq, tuple(m.mods), m.charge,
               m.pep_type)
              for set_id, spectra in self.db_res.items()
              for spec_id, matches in spectra.items()

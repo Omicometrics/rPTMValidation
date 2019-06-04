@@ -29,10 +29,6 @@ from . import spectra_readers
 from . import utilities
 
 
-SpecMatch = collections.namedtuple("SpecMatch",
-                                   ["seq", "mods", "theor_z", "pep_type"])
-
-
 @functools.lru_cache(maxsize=1024)
 def merge_peptide_sequence(seq: str, mods: Tuple[ModSite, ...]) -> str:
     """
@@ -94,7 +90,7 @@ class ValidateBase():
             self.config.search_engine, self.unimod)
 
         # All database search results
-        self.db_res: Dict[str, Dict[str, List[SpecMatch]]] =\
+        self.db_res: Dict[str, Dict[str, List[readers.SearchResult]]] = \
             collections.defaultdict(lambda: collections.defaultdict(list))
 
         self.target_mod = self.config.target_mod
@@ -189,7 +185,7 @@ class ValidateBase():
             for spec_id, matches in data.items():
                 db_peptides = [(
                     merge_peptide_sequence(match.seq, tuple(match.mods)),
-                    match.theor_z) for match in matches]
+                    match.charge) for match in matches]
                 res = [(mod_psms[idx], mods)
                        for idx, (mods, pep_str, charge) in enumerate(psm_info)
                        if (pep_str, charge) in db_peptides]
