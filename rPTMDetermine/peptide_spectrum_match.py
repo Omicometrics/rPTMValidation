@@ -31,6 +31,12 @@ class PSM():
     Spectrum object, while the peptide is a composed pepfrag.Peptide.
 
     """
+
+    __slots__ = ("data_id", "spec_id", "peptide", "__spectrum", "decoy_id",
+                 "benchmark", "similarity_scores", "features", "lda_score",
+                 "lda_prob", "decoy_lda_score", "decoy_lda_prob", "site_prob",
+                 "corrected", "target",)
+
     def __init__(self, data_id: Optional[str], spec_id: Optional[str],
                  peptide: Peptide, spectrum=None, target=True):
         """

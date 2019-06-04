@@ -8,7 +8,7 @@ from __future__ import annotations
 import bisect
 import collections
 import operator
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from pepfrag import Ion
@@ -27,6 +27,9 @@ class Spectrum():
     exploring the mass spectrum.
 
     """
+
+    __slots__ = ("_peaks", "prec_mz", "charge",)
+
     def __init__(self, peak_list: List[List[float]], prec_mz: float,
                  charge: int):
         """
@@ -55,7 +58,7 @@ class Spectrum():
         """
         return self._peaks.__iter__()
 
-    def __getitem__(self, indices: Union[int, Sequence[int]]) -> np.array:
+    def __getitem__(self, indices: Any) -> np.array:
         """
         Implements the __getitem__ method for the Spectrum class, using the
         composed numpy array.
