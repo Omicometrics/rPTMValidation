@@ -10,7 +10,6 @@ import copy
 import csv
 import functools
 import itertools
-import multiprocessing as mp
 import operator
 import os
 import pickle
@@ -256,9 +255,6 @@ class Validator(validator_base.ValidateBase):
         # The LDA validation model for scoring
         self.model = None
         self.mod_features = None
-
-        # Used for multiprocessing throughout the class methods
-        self.pool = mp.Pool()
 
     def validate(self):
         """

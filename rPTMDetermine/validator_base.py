@@ -10,6 +10,7 @@ import copy
 import functools
 import itertools
 import math
+import multiprocessing as mp
 import os
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -109,6 +110,9 @@ class ValidateBase():
             os.makedirs(output_dir, exist_ok=True)
 
         self.file_prefix = f"{output_dir}/{path_str}_"
+
+        # Used for multiprocessing throughout the class methods
+        self.pool = mp.Pool()
 
     def identify_benchmarks(self, psms: Sequence[PSM]):
         """
