@@ -95,7 +95,8 @@ class Retriever(validator_base.ValidateBase):
         """
         super().__init__(RetrieverConfig(json_config))
 
-        self.db_ionscores = None
+        print("Reading database ion scores...")
+        self.db_ionscores = self._get_ionscores()
 
         print("Reading database search results...")
         self.db_res = self._get_search_results()
@@ -121,9 +122,6 @@ class Retriever(validator_base.ValidateBase):
                 spec_ids.append((set_id, spec_id))
                 prec_mzs.append(spec.prec_mz)
         prec_mzs = np.array(prec_mzs)
-
-        print("Reading database ion scores...")
-        self.db_ionscores = self._get_ionscores()
 
         print("Finding better modified PSMs...")
         psms = self._get_better_matches(peptides, all_spectra, spec_ids,
@@ -276,12 +274,12 @@ class Retriever(validator_base.ValidateBase):
             for line in fh:
                 content = line.rstrip().split()
                 data_id, spec_id = content[0], content[1]
-                for scores in content[2:]:
+                for field in content[2:]:
                     try:
                         score = max(
-                            [float(s) for s in scores.split(":")[1].split(",")
-                             if any(s.startswith(p)
-                                    for p in ["ms", "pp", "ct"])])
+                            float(s) for s in field.split(":")[1].split(",")
+                            if any(field.startswith(p + ":")
+                                   for p in ["ms", "pp", "ct"]))
                     except ValueError:
                         continue
                     if (spec_id not in ionscores[data_id] or
@@ -303,26 +301,33 @@ class Retriever(validator_base.ValidateBase):
         search engines.
 
         Args:
+            peptides (list): The peptide candidates.
+            spectra (dict): A nested dictionary, keyed by the data set ID, then
+                            the spectrum ID. Values are the mass spectra.
+            spec_ids (list): A list of (Data ID, Spectrum ID) tuples.
+            prec_mzs (numpy.array): The precursor mass/charge ratios.
+            tol (float): The mass/charge ratio tolerance.
 
         Returns:
+            A list of PSM objects representing those matches better than other
+            matches from database search engines.
 
         """
         better: List[PSM] = []
-        for pepk in tqdm.tqdm(peptides):
-            seq, modx, charge, pep_type = pepk
-            pmass = Peptide(seq, charge, modx).mass
+        for (seq, mods, charge, pep_type) in tqdm.tqdm(peptides):
+            pmass = Peptide(seq, charge, mods).mass
             # Check for free (non-modified target residue)
-            if modx is None:
+            if mods is None:
                 mix = [i for i, sk in enumerate(seq)
                        if sk in self.config.target_residues]
             else:
                 mix = [i for i, sk in enumerate(seq)
                        if sk in self.config.target_residues
-                       and not any(jk == i + 1 for _, jk, _ in modx
+                       and not any(jk == i + 1 for _, jk, _ in mods
                                    if isinstance(jk, int))]
             if not mix:
                 continue
-            modj = [] if modx is None else list(modx)
+            modj = [] if mods is None else list(mods)
             for nk in range(min(3, len(mix))):
                 cmz = (pmass + self.mod_mass * (nk + 1)) / charge + 1.0073
                 bix, = np.where((prec_mzs >= cmz - tol) &
