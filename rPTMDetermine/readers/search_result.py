@@ -21,20 +21,22 @@ class PeptideType(enum.Enum):
 
 
 @dataclasses.dataclass
-class SearchResult():
+class SearchResult():  # pylint: disable=too-few-public-methods
     """
     A data class to store information about an identification from a database
     search engine. All search engine readers should return a list of
     SearchResult objects in order to standardize the interface.
 
     """
+
+    __slots__ = ("seq", "mods", "charge", "spectrum", "dataset", "rank",
+                 "pep_type", "theor_mz",)
+
     seq: str
     mods: List[ModSite]
     charge: int
     spectrum: str
+    dataset: Optional[str]
     rank: int
-    time: Optional[str]
-    confidence: Optional[float]
-    theor_mz: Optional[float]
-    prec_mz: Optional[float]
     pep_type: PeptideType
+    theor_mz: Optional[float]

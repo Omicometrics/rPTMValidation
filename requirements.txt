@@ -1,0 +1,9 @@
+cython
+lxml.etree
+matplotlib
+numpy
+pandas
+scipy
+seaborn
+sklearn
+tqdm

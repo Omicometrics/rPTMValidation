@@ -3,10 +3,12 @@
 This module provides a class for reading the UniMod database.
 
 """
-import csv
+import collections
 import functools
 import re
-from typing import Iterator, Optional, Tuple
+from typing import Any, Dict, Iterator, Optional, Tuple
+
+import lxml.etree as etree
 
 from pepfrag import MassType
 from rPTMDetermine.constants import ELEMENT_MASSES
@@ -16,21 +18,25 @@ MOD_FORMULA_REGEX = re.compile(r"(\w+)\(([0-9]+)\)")
 UNIMOD_FORMULA_REGEX = re.compile(r"(\w+)\(?([0-9-]+)?\)?")
 
 
+UnimodEntry = collections.namedtuple(
+    "UnimodEntry",
+    ["name", "full_name", "mono_mass", "avg_mass", "composition"])
+
+
 class PTMDB():
     """
     A class representing the UniMod PTM DB data structure.
 
     """
-    _mono_mass_key = "Monoisotopic mass"
-    _avg_mass_key = "Average mass"
+    _mono_mass_key = "mono_mass"
+    _avg_mass_key = "avg_mass"
     _mass_keys = [_mono_mass_key, _avg_mass_key]
-    _psi_name_key = "PSI-MS Name"
-    _interim_name_key = "Interim name"
-    _name_keys = [_psi_name_key, _interim_name_key]
-    _desc_key = 'Description'
-    _comp_key = 'Composition'
+    _name_key = "name"
+    _full_name_key = "full_name"
+    _name_keys = [_name_key, _full_name_key]
+    _comp_key = "composition"
 
-    def __init__(self, ptm_file):
+    def __init__(self, ptm_file: str):
         """
         Initializes the class by setting up the composed dictionary.
 
@@ -38,21 +44,28 @@ class PTMDB():
             ptm_file (str): The path to the UniMod PTM file.
 
         """
-        self._data = {
+        self._data: Dict[str, Any] = {
             PTMDB._mono_mass_key: [],
             PTMDB._avg_mass_key: [],
             PTMDB._comp_key: [],
             # Each of the below keys store a dictionary mapping their
             # position in the above lists
-            PTMDB._psi_name_key: {},
-            PTMDB._interim_name_key: {},
-            PTMDB._desc_key: {}
+            PTMDB._name_key: {},
+            PTMDB._full_name_key: {}
         }
 
-        with open(ptm_file, newline='') as fh:
-            reader = csv.DictReader(fh, delimiter='\t')
-            for row in reader:
-                self._add_entry(row)
+        namespace = "http://www.unimod.org/xmlns/schema/unimod_2"
+        ns_map = {"x": namespace}
+        for event, element in etree.iterparse(ptm_file, events=["end"]):
+            if event == "end" and element.tag == f"{{{namespace}}}mod":
+                delta = element.xpath("x:delta", namespaces=ns_map)[0]
+                self._add_entry(
+                    UnimodEntry(
+                        element.get("title"),
+                        element.get("full_name"),
+                        float(delta.get("mono_mass")),
+                        float(delta.get("avge_mass")),
+                        delta.get("composition")))
 
         self._reversed = {key: {v: k for k, v in self._data[key].items()}
                           for key in PTMDB._name_keys}
@@ -63,12 +76,12 @@ class PTMDB():
 
         """
         for idx, mono in enumerate(self._data[PTMDB._mono_mass_key]):
-            name = (self._reversed[PTMDB._psi_name_key][idx]
-                    if idx in self._reversed[PTMDB._psi_name_key]
-                    else self._reversed[PTMDB._interim_name_key][idx])
+            name = (self._reversed[PTMDB._name_key][idx]
+                    if idx in self._reversed[PTMDB._name_key]
+                    else self._reversed[PTMDB._full_name_key][idx])
             yield (name, mono, self._data[PTMDB._avg_mass_key][idx])
 
-    def _add_entry(self, entry):
+    def _add_entry(self, entry: UnimodEntry):
         """
         Adds a new entry to the database.
 
@@ -78,13 +91,12 @@ class PTMDB():
         """
         pos = len(self._data[PTMDB._mono_mass_key])
         for key in PTMDB._mass_keys:
-            self._data[key].append(float(entry[key]))
+            self._data[key].append(float(getattr(entry, key)))
         for key in PTMDB._name_keys:
-            self._data[key][entry[key]] = pos
-        self._data[PTMDB._desc_key][entry[key].replace(' ', '').lower()] = pos
-        self._data[PTMDB._comp_key].append(entry[PTMDB._comp_key])
+            self._data[key][getattr(entry, key)] = pos
+        self._data[PTMDB._comp_key].append(entry.composition)
 
-    def _get_idx(self, name: str) -> int:
+    def _get_idx(self, name: str) -> Optional[int]:
         """
         Retrieves the index of the specified modification, i.e. its position
         in the mass and composition lists.
@@ -96,18 +108,17 @@ class PTMDB():
             The integer index of the modification, or None.
 
         """
-        # Try matching either of the two name fields, using PSI-MS Name first
+        # Try matching either of the two name fields,
+        # using the short name first
         for key in PTMDB._name_keys:
             idx = self._data[key].get(name, None)
             if idx is not None:
                 return idx
-
-        # Try matching the description
-        name = name.replace(' ', '')
-        return self._data[PTMDB._desc_key].get(name.lower(), None)
+        return None
 
     @functools.lru_cache()
-    def get_mass(self, name, mass_type=MassType.mono):
+    def get_mass(self, name: str, mass_type: MassType = MassType.mono) \
+            -> Optional[float]:
         """
         Retrieves the mass of the specified modification.
 
@@ -119,12 +130,12 @@ class PTMDB():
             The mass as a float or None.
 
         """
-        mass_key = (PTMDB._mass_keys[0] if mass_type is MassType.mono
-                    else PTMDB._mass_keys[1])
+        key = (PTMDB._mono_mass_key if mass_type is MassType.mono
+               else PTMDB._avg_mass_key)
 
         idx = self._get_idx(name)
         if idx is not None:
-            return self._data[mass_key][idx]
+            return self._data[key][idx]
 
         # Try matching the modification name
         name = name.replace(' ', '')
@@ -134,7 +145,7 @@ class PTMDB():
         return None
 
     @functools.lru_cache()
-    def get_formula(self, name):
+    def get_formula(self, name: str) -> Optional[Dict[str, int]]:
         """
         Retrieves the modification formula, in terms of its elemental
         composition.
@@ -173,9 +184,9 @@ class PTMDB():
                else PTMDB._avg_mass_key)
         for idx, db_mass in enumerate(self._data[key]):
             if abs(mass - db_mass) < 0.001:
-                return (self._reversed[PTMDB._psi_name_key][idx]
-                        if idx in self._reversed[PTMDB._psi_name_key]
-                        else self._reversed[PTMDB._interim_name_key][idx])
+                return (self._reversed[PTMDB._name_key][idx]
+                        if idx in self._reversed[PTMDB._name_key]
+                        else self._reversed[PTMDB._full_name_key][idx])
         return None
 
 

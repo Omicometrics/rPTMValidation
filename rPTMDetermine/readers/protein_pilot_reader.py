@@ -5,8 +5,9 @@ This module provides functions for reading ProteinPilot results
 
 """
 import csv
+import dataclasses
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Sequence
 
 from .base_reader import Reader
 from . import modifications
@@ -16,21 +17,32 @@ from .search_result import PeptideType, SearchResult
 MGF_TITLE_REGEX = re.compile(r"TITLE=Locus:([\d\.]+) ")
 
 
-class ProteinPilotReader(Reader):
+@dataclasses.dataclass
+class ProteinPilotSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
+
+    __slots__ = ("time", "confidence", "prec_mz",)
+
+    time: str
+    confidence: float
+    prec_mz: float
+
+
+class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
     """
     A class to read ProteinPilot PeptideSummary files.
 
     """
-    def read(self, filename: str, min_conf: Optional[float] = None,
-             **kwargs)\
-            -> List[SearchResult]:
+    def read(self, filename: str,
+             predicate: Optional[Callable[[SearchResult], bool]] = None,
+             **kwargs) -> Sequence[SearchResult]:
         """
         Reads the given ProteinPilot Peptide Summary file to extract useful
         information on sequence, modifications, m/z etc.
 
         Args:
             filename (str): The path to the Peptide Summary file.
-            min_conf (float, optional): The minimum confidence threshold.
+            predicate (Callable, optional): An optional predicate to filter
+                                            results.
 
         Returns:
             The read information as a list of SearchResults.
@@ -43,13 +55,12 @@ class ProteinPilotReader(Reader):
                 result = self._build_search_result(row)
                 if result is None:
                     continue
-                if (min_conf is None or (result.confidence is not None
-                                         and result.confidence >= min_conf)):
+                if predicate is None or predicate(result):
                     results.append(result)
             return results
 
     def _build_search_result(self, row: Dict[str, Any])\
-            -> Optional[SearchResult]:
+            -> Optional[ProteinPilotSearchResult]:
         """
         Processes the given row of a Peptide Summary file to produce a
         SearchResult entry.
@@ -58,8 +69,8 @@ class ProteinPilotReader(Reader):
             row (dict): A row dictionary from the Peptide Summary file.
 
         Returns:
-            A SearchResult to represent the row, or None if the modifications
-            could not be identified.
+            A ProteinPilotSearchResult to represent the row, or None if the
+            modifications could not be identified.
 
         """
         mods = modifications.preparse_mod_string(row["Modifications"])
@@ -69,18 +80,19 @@ class ProteinPilotReader(Reader):
         except modifications.UnknownModificationException:
             return None
 
-        return SearchResult(row["Sequence"],
-                            parsed_mods,
-                            int(row["Theor z"]),
-                            row["Spectrum"],
-                            # Rank
-                            1,
-                            row["Time"],
-                            float(row["Conf"]),
-                            float(row["Theor m/z"]),
-                            float(row["Prec m/z"]),
-                            PeptideType.decoy if "REVERSED" in row["Names"]
-                            else PeptideType.normal)
+        return ProteinPilotSearchResult(
+            seq=row["Sequence"],
+            mods=parsed_mods,
+            charge=int(row["Theor z"]),
+            spectrum=row["Spectrum"],
+            dataset=None,
+            rank=1,
+            pep_type=PeptideType.decoy if "REVERSED" in row["Names"]
+            else PeptideType.normal,
+            theor_mz=float(row["Theor m/z"]),
+            time=row["Time"],
+            confidence=float(row["Conf"]),
+            prec_mz=float(row["Prec m/z"]))
 
 
 # TODO: use XML parser
@@ -101,23 +113,23 @@ def read_proteinpilot_xml(filename: str) -> Dict[str, Dict[str, dict]]:
         read_identification = False
         for line in f:
             if line[0] != '<':
-                    continue
+                continue
             rline = line.rstrip()
             if line.startswith('<SPECTRUM'):
                 read_identification = True
-                sx = dict(re.findall(' (.+?)\="([^"]*)"', rline))
+                sx = dict(re.findall(r' (.+?)\="([^"]*)"', rline))
                 queryid = sx['xml:id']
                 pmz = float(sx['precursormass'])
                 rank: int = 0
                 hits: Dict[str, dict] = {}
             elif read_identification:
-                sx = dict(re.findall(' (.+?)\="([^"]*)"', rline))
+                sx = dict(re.findall(r' (.+?)\="([^"]*)"', rline))
                 if rline.startswith('<MATCH'):
                     rank += 1
-                    ck = int(sx['charge']) # charge
+                    ck = int(sx['charge'])  # charge
                     conf = float(sx['confidence'])   # confidence
                     seq = sx['seq']   # sequence
-                    nk = 'decoy' if int(sx['type'])==1 else 'normal'
+                    nk = 'decoy' if int(sx['type']) == 1 else 'normal'
                     sk = float(sx['score'])
                     modj = []
                 elif rline.startswith('<MOD_FEATURE'):
@@ -134,7 +146,7 @@ def read_proteinpilot_xml(filename: str) -> Dict[str, Dict[str, dict]]:
                     hits[rank]['score'] = sk
                     hits[rank]['note'] = nk
                 elif rline.startswith('</SPECTRUM>'):
-                    if rank>0:
+                    if rank > 0:
                         res[queryid] = {}
                         res[queryid]['hits'] = hits
                         res[queryid]['pmz'] = pmz

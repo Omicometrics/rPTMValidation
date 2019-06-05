@@ -4,10 +4,13 @@ This module provides a class for reading Mascot dat (MIME) files.
 
 """
 import collections
+import dataclasses
 import email.parser
+import functools
+import math
 import operator
 import re
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 import urllib.parse
 
 from pepfrag import ModSite
@@ -18,7 +21,35 @@ from .ptmdb import PTMDB
 from .search_result import PeptideType, SearchResult
 
 
-class MascotReader(Reader):
+QUERY_NUM_REGEX = re.compile(r"[a-z]+(\d+)")
+
+
+@dataclasses.dataclass
+class MascotSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
+
+    __slots__ = ("ionscore", "deltamass", "proteins", "num_matches",)
+
+    ionscore: float
+    deltamass: float
+    proteins: Tuple[str]
+    num_matches: int
+
+
+@functools.lru_cache()
+def get_identity_threshold(fdr: float, num_matches: int) -> float:
+    """
+    Calculates the identity threshold with the given FDR and number of
+    matches.
+
+    Returns:
+        The identity threshold as a float.
+
+    """
+    # Includes empirical correction of -13
+    return (-10 * math.log10(fdr / num_matches)) - 13
+
+
+class MascotReader(Reader):  # pylint: disable=too-few-public-methods
     """
     Class to read Mascot dat/MIME files.
 
@@ -32,13 +63,17 @@ class MascotReader(Reader):
 
         self.mime_parser = email.parser.Parser()
 
-    def read(self, filename: str, **kwargs) -> List[SearchResult]:
+    def read(self, filename: str,
+             predicate: Optional[Callable[[SearchResult], bool]] = None,
+             **kwargs) -> Sequence[SearchResult]:
         """
         Reads the given Mascot dat result file.
 
         Args:
             filename (str): The path to the Mascot database search results
                             file.
+            predicate (Callable, optional): An optional predicate to filter
+                                            results.
 
         Returns:
 
@@ -68,7 +103,8 @@ class MascotReader(Reader):
         # Assign spectrum IDs to the querys
         for query_id in res.keys():
             query = payloads[f"query{query_id}"]
-            res[query_id]["spectrumid"] = self._get_query_title(query)
+            res[query_id]["spectrumid"] = \
+                self._get_query_title(query).split(" ")[0]
 
         # Extract the identified peptides for each spectrum query
         self._parse_peptides(payloads["peptides"], res, var_mods, fixed_mods,
@@ -78,29 +114,46 @@ class MascotReader(Reader):
                                  fixed_mods, pep_type="decoy",
                                  error_tol_search=error_tol_search)
 
-        return self._build_search_results(res)
+        return self._build_search_results(res, predicate)
 
-    def _build_search_results(self, res) -> List[SearchResult]:
+    def _build_search_results(
+            self,
+            res,
+            predicate: Optional[Callable[[SearchResult], bool]]) \
+            -> List[MascotSearchResult]:
         """
         Converts the results to a standardized list of SearchResults.
 
         Returns:
-            List of SearchResults.
+            List of MascotSearchResults.
 
         """
         results = []
         for _, query in res.items():
+            if "peptides" not in query["target"]:
+                continue
+
             spec_id = query["spectrumid"]
             results.extend(self._build_search_result(
-                query["target"], spec_id, PeptideType.normal))
+                query["target"], spec_id, PeptideType.normal,
+                predicate))
             if "decoy" in query:
+                if "peptides" not in query["decoy"]:
+                    continue
+
                 results.extend(self._build_search_result(
-                    query["decoy"], spec_id, PeptideType.decoy))
+                    query["decoy"], spec_id, PeptideType.decoy,
+                    predicate))
 
         return results
 
-    def _build_search_result(self, query, spec_id, pep_type)\
-            -> List[SearchResult]:
+    def _build_search_result(
+            self,
+            query: Dict[str, Any],
+            spec_id: str,
+            pep_type: PeptideType,
+            predicate: Optional[Callable[[SearchResult], bool]]) \
+            -> List[MascotSearchResult]:
         """
         Converts the peptide identifications to a list of SearchResults.
 
@@ -111,21 +164,27 @@ class MascotReader(Reader):
             pep_type (PeptideType): The type of the peptide, normal/decoy.
 
         Returns:
-            List of SearchResults.
+            List of MascotSearchResults.
 
         """
-        return [
-            SearchResult(
-                peptide["sequence"],
-                peptide["modifications"],
-                query["charge"],
-                spec_id,
-                int(rank),
-                None,
-                None,
-                query["mz"],
-                None,
-                pep_type) for rank, peptide in query["peptides"].items()]
+        data_id, spec_id = spec_id.split(":")
+        results = [
+            MascotSearchResult(
+                seq=peptide["sequence"],
+                mods=peptide["modifications"],
+                charge=query["charge"],
+                spectrum=spec_id,
+                dataset=data_id,
+                rank=int(rank),
+                pep_type=pep_type,
+                theor_mz=query["mz"],
+                ionscore=peptide["ionscore"],
+                deltamass=peptide["deltamass"],
+                proteins=peptide["proteins"],
+                num_matches=query["num_matches"])
+            for rank, peptide in query["peptides"].items()]
+        return (results if predicate is None
+                else [r for r in results if predicate(r)])
 
     def _parse_parameters(self, payload: str) -> Tuple[bool, bool]:
         """
@@ -198,20 +257,22 @@ class MascotReader(Reader):
         """
         entries = self._payload_to_dict(payload)
         for key, value in entries.items():
-            if not key.startswith("qexp"):
+            match = QUERY_NUM_REGEX.match(key)
+            if match is None:
                 continue
+            query_no = match.group(1)
 
-            vals = value.split(",")
-            mass, charge = float(vals[0]), int(vals[1].rstrip("+"))
+            if pep_type not in res[query_no]:
+                res[query_no][pep_type] = {}
 
-            query_no = key.lstrip("qexp")
-            if not query_no:
-                continue
+            if key.startswith("qexp"):
+                vals = value.split(",")
+                mass, charge = float(vals[0]), int(vals[1].rstrip("+"))
 
-            res[query_no][pep_type] = {
-                "mz": mass,
-                "charge": charge
-            }
+                res[query_no][pep_type]["mz"] = mass
+                res[query_no][pep_type]["charge"] = charge
+            elif key.startswith("qmatch"):
+                res[query_no][pep_type]["num_matches"] = int(value)
 
     def _parse_peptides(self, payload: str, res, var_mods, fixed_mods,
                         pep_type: str = "target",
@@ -231,6 +292,10 @@ class MascotReader(Reader):
         for key, value in entries.items():
             # Filter out unrequired keys
             if key.count("_") > 1:
+                continue
+
+            if value == "-1":
+                # No peptide assigned to the spectrum
                 continue
 
             query_no, rank = self._get_query_num_rank(key)

@@ -10,13 +10,15 @@ import copy
 import functools
 import itertools
 import math
+import multiprocessing as mp
 import os
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import tqdm
 
 from pepfrag import ModSite, Peptide
 
+from .base_config import SearchEngine
 from . import lda
 from . import mass_spectrum
 from . import peptides
@@ -24,14 +26,8 @@ from . import proteolysis
 from .peptide_spectrum_match import PSM, UnmodPSM
 from .psm_container import PSMContainer
 from . import readers
-from .readers.base_reader import Reader
 from . import spectra_readers
 from . import utilities
-
-
-SpecMatch = collections.namedtuple("SpecMatch",
-                                   ["seq", "mods", "theor_z", "conf",
-                                    "pep_type"])
 
 
 @functools.lru_cache(maxsize=1024)
@@ -91,11 +87,11 @@ class ValidateBase():
         self.unimod = readers.PTMDB(self.config.unimod_ptm_file)
 
         # The database search reader
-        self.reader: Reader = readers.get_reader(
+        self.reader: readers.Reader = readers.get_reader(
             self.config.search_engine, self.unimod)
 
         # All database search results
-        self.db_res: Dict[str, Dict[str, List[SpecMatch]]] =\
+        self.db_res: Dict[str, Dict[str, List[readers.SearchResult]]] = \
             collections.defaultdict(lambda: collections.defaultdict(list))
 
         self.target_mod = self.config.target_mod
@@ -115,6 +111,9 @@ class ValidateBase():
 
         self.file_prefix = f"{output_dir}/{path_str}_"
 
+        # Used for multiprocessing throughout the class methods
+        self.pool = mp.Pool()
+
     def identify_benchmarks(self, psms: Sequence[PSM]):
         """
         Labels the PSMs which are in the benchmark set of peptides.
@@ -129,6 +128,30 @@ class ValidateBase():
                 psm.benchmark = (peptides.merge_seq_mods(psm.seq, psm.mods)
                                  in benchmarks)
 
+    def _fdr_filter(self, data_config) -> \
+            Optional[Callable[[readers.SearchResult], bool]]:
+        """
+        Provides an FDR filter function for processing database search results.
+
+        Args:
+            data_config (dict)
+
+        Returns:
+            Predicate for determining if an identification passes FDR control.
+
+        """
+        if self.config.search_engine == SearchEngine.ProteinPilot:
+            return lambda res: \
+                isinstance(res, readers.ProteinPilotSearchResult) and \
+                res.confidence >= data_config["confidence"]
+        if self.config.search_engine == SearchEngine.Mascot:
+            return lambda res: \
+                isinstance(res, readers.MascotSearchResult) and \
+                res.ionscore is not None and res.ionscore >= \
+                readers.mascot_reader.get_identity_threshold(
+                    self.config.fdr, res.num_matches)
+        return None
+
     def _find_unmod_analogues(self, mod_psms: Sequence[PSM]):
         """
         Finds the unmodified analogues in the database search results.
@@ -141,6 +164,7 @@ class ValidateBase():
         print("Caching PSM sequences...")
         psm_info = []
         for psm in mod_psms:
+            # Filter the modifications to remove the target modification
             mods = []
             for mod in psm.mods:
                 try:
@@ -157,33 +181,28 @@ class ValidateBase():
                 (mods, merge_peptide_sequence(psm.seq, tuple(mods)),
                  psm.charge))
 
+        all_spectra = self.read_mass_spectra()
+
         for data_id, data in self.db_res.items():
             print(f"Processing data set {data_id}...")
             unmods = {}
             for spec_id, matches in data.items():
-                pp_peptides = [(
+                db_peptides = [(
                     merge_peptide_sequence(match.seq, tuple(match.mods)),
-                    match.theor_z) for match in matches]
+                    match.charge) for match in matches]
                 res = [(mod_psms[idx], mods)
                        for idx, (mods, pep_str, charge) in enumerate(psm_info)
-                       if (pep_str, charge) in pp_peptides]
+                       if (pep_str, charge) in db_peptides]
                 if res:
                     unmods[spec_id] = res
 
             if not unmods:
                 continue
 
-            spec_file = os.path.join(
-                self.config.data_sets[data_id]["data_dir"],
-                self.config.data_sets[data_id]["spectra_file"])
-
-            print(f"Reading {spec_file}...")
-            spectra = spectra_readers.read_spectra_file(spec_file)
-
             print(f"Processing {len(unmods)} spectra...")
 
             for spec_id, _psms in unmods.items():
-                spec = spectra[spec_id].centroid().remove_itraq()
+                spec = all_spectra[data_id][spec_id]
 
                 for psm, mods in _psms:
                     unmod_psms.append(
@@ -316,8 +335,11 @@ class ValidateBase():
 
         """
         all_spectra = {}
-        for set_id, data_conf in tqdm.tqdm(self.config.data_sets.items()):
-            for spec_file in data_conf["spectra_files"]:
+        for data_conf_id, data_conf in tqdm.tqdm(
+                self.config.data_sets.items()):
+            for set_id, spec_file in tqdm.tqdm(
+                    data_conf["spectra_files"].items(),
+                    desc=f"Processing {data_conf_id}"):
                 spec_file_path = os.path.join(data_conf["data_dir"], spec_file)
 
                 if not os.path.isfile(spec_file_path):

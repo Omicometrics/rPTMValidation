@@ -116,7 +116,9 @@ class BaseConfig():
             FileNotFoundError
 
         """
-        path = self.json_config.get("unimod_ptm_file", "unimod.txt")
+        path = self.json_config.get(
+            "unimod_ptm_file",
+            os.path.join(os.path.dirname(__file__), "unimod.xml"))
         if not os.path.exists(path):
             raise FileNotFoundError(f"UniMod PTM file not found at {path}")
         return path
@@ -179,6 +181,14 @@ class BaseConfig():
 
         """
         return self.json_config.get("exclude_features", [])
+
+    @property
+    def fdr(self) -> Optional[float]:
+        """
+        The false discovery rate to be applied.
+
+        """
+        return self.json_config.get("fdr", None)
 
     def _check_required(self):
         """

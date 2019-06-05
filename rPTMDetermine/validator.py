@@ -10,7 +10,6 @@ import copy
 import csv
 import functools
 import itertools
-import multiprocessing as mp
 import operator
 import os
 import pickle
@@ -257,9 +256,6 @@ class Validator(validator_base.ValidateBase):
         self.model = None
         self.mod_features = None
 
-        # Used for multiprocessing throughout the class methods
-        self.pool = mp.Pool()
-
     def validate(self):
         """
         Validates the identifications in the input data files.
@@ -405,22 +401,28 @@ class Validator(validator_base.ValidateBase):
             res_path = os.path.join(set_info["data_dir"], set_info["results"])
 
             # Apply database search FDR control to the results
-            identifications: List[readers.SearchResult] = (
-                self.reader.read(res_path, min_conf=set_info["confidence"])
-                if "confidence" in set_info else self.reader.read(res_path))
+            identifications: Sequence[readers.SearchResult] = \
+                self.reader.read(res_path,
+                                 predicate=self._fdr_filter(set_info))
 
             for ident in identifications:
+                if (ident.pep_type == readers.PeptideType.decoy or
+                        ident.rank != 1 or "X" in ident.seq):
+                    # Filter to rank 1, target identifications for validation
+                    # and ignore placeholder amino acid residue identifications
+                    continue
+
+                dataset = (ident.dataset if ident.dataset is not None
+                           else set_id)
+
                 if any(ms.mod == self.target_mod and isinstance(ms.site, int)
                        and ident.seq[ms.site - 1] == res for ms in ident.mods
                        for res in self.target_residues):
                     psms.append(
-                        PSM(set_id, ident.spectrum,
+                        PSM(dataset, ident.spectrum,
                             Peptide(ident.seq, ident.charge, ident.mods)))
 
-                self.db_res[set_id][ident.spectrum].append(
-                    validator_base.SpecMatch(ident.seq, ident.mods,
-                                             ident.charge, ident.confidence,
-                                             ident.pep_type))
+                self.db_res[dataset][ident.spectrum].append(ident)
 
         return utilities.deduplicate(psms)
 
@@ -433,8 +435,8 @@ class Validator(validator_base.ValidateBase):
 
         """
         all_spectra = self.read_mass_spectra()
-        for psm in self.psms:
-            for set_id, spectra in all_spectra.items():
+        for set_id, spectra in all_spectra.items():
+            for psm in self.psms:
                 if psm.data_id == set_id and psm.spec_id in spectra:
                     psm.spectrum = spectra[psm.spec_id]
 
