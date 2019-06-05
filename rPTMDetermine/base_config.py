@@ -116,7 +116,9 @@ class BaseConfig():
             FileNotFoundError
 
         """
-        path = self.json_config.get("unimod_ptm_file", "unimod.txt")
+        path = self.json_config.get(
+            "unimod_ptm_file",
+            os.path.join(os.path.dirname(__file__), "unimod.xml"))
         if not os.path.exists(path):
             raise FileNotFoundError(f"UniMod PTM file not found at {path}")
         return path
