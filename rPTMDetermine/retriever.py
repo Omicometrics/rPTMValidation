@@ -277,8 +277,13 @@ class Retriever(validator_base.ValidateBase):
                 content = line.rstrip().split()
                 data_id, spec_id = content[0], content[1]
                 for scores in content[2:]:
-                    score = max(
-                        [float(s) for s in scores.split(":")[1].split(",")])
+                    try:
+                        score = max(
+                            [float(s) for s in scores.split(":")[1].split(",")
+                             if any(s.startswith(p)
+                                    for p in ["ms", "pp", "ct"])])
+                    except ValueError:
+                        continue
                     if (spec_id not in ionscores[data_id] or
                             score > ionscores[data_id][spec_id]):
                         ionscores[data_id][spec_id] = score
