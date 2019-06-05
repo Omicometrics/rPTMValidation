@@ -392,7 +392,8 @@ class Retriever(validator_base.ValidateBase):
                                              self.proteolyzer)
                         psm.peptide.clean_fragment_ions()
 
-                        if round(psm.features["MatchScore"], 4) >= dbscore:
+                        # TODO: broken by normalizing MatchScore to the peptide length?
+                        if round(psm.features.MatchScore, 4) >= dbscore:
                             better.append(psm)
         return better
 
@@ -439,7 +440,7 @@ class Retriever(validator_base.ValidateBase):
                     psm.seq,
                     ",".join("{:6f}|{}|{}".format(*ms) for ms in psm.mods),
                     psm.charge,
-                    psm.features["MatchScore"],
+                    psm.features.MatchScore,
                     psm.lda_score,
                     psm.max_similarity,
                     psm.site_prob

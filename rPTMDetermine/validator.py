@@ -14,7 +14,7 @@ import operator
 import os
 import pickle
 import sys
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 import tqdm
@@ -26,7 +26,7 @@ from . import generate_decoys
 from . import lda
 from . import mass_spectrum
 from . import peptides
-from .peptide_spectrum_match import DecoyID, PSM
+from .peptide_spectrum_match import DecoyID, Features, PSM
 from . import proteolysis
 from .psm_container import PSMContainer
 from . import readers
@@ -171,7 +171,7 @@ def write_results(output_file: str, psms: Sequence[PSM],
         psms (list of peptide_spectrum_match.PSMs): The resulting PSMs.
 
     """
-    feature_names = list(psms[0].features.keys())
+    feature_names = list(psms[0].features.feature_names())
     with open(output_file, 'w', newline='') as handle:
         writer = csv.writer(handle, delimiter="\t")
         # Write the header row
@@ -200,16 +200,15 @@ def write_results(output_file: str, psms: Sequence[PSM],
                    psm.site_prob if psm.site_prob is not None else ""]
 
             if include_features:
-                row.extend([f"{psm.features[f]:.8f}" for f in feature_names])
-                row.extend([f"{psm.decoy_id.features[f]:.8f}"
-                            for f in feature_names])
+                row.extend([f"{val:.8f}" for _, val in psm.features])
+                row.extend([f"{val:.8f}" for _, val in psm.decoy_id.features])
 
             writer.writerow(row)
 
 
 def decoy_features(decoy_peptide: Peptide, spec: mass_spectrum.Spectrum,
                    target_mod: str,
-                   proteolyzer: proteolysis.Proteolyzer) -> Dict[str, float]:
+                   proteolyzer: proteolysis.Proteolyzer) -> Features:
     """
     Calculates the PSM features for the decoy peptide and spectrum
     combination. This function is defined here in order to be picklable
