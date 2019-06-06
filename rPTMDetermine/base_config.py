@@ -19,6 +19,8 @@ class SearchEngine(enum.Enum):
     ProteinPilot = enum.auto()
     Mascot = enum.auto()
     Comet = enum.auto()
+    XTandem = enum.auto()
+    TPP = enum.auto()
 
 
 class BaseConfig():
