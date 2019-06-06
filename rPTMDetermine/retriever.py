@@ -127,7 +127,6 @@ class Retriever(validator_base.ValidateBase):
         psms = self._get_better_matches(peptides, all_spectra, spec_ids,
                                         prec_mzs,
                                         tol=self.config.retrieval_tolerance)
-        psms = PSMContainer(psms)
 
         print("Calculating rPTMDetermine probabilities...")
         calculate_lda_probs(psms, model, score_stats, features)
@@ -146,7 +145,7 @@ class Retriever(validator_base.ValidateBase):
             sum(p.corrected for p in psms)))
 
         print("Finding unmodified analogue PSMs...")
-        unmod_psms = PSMContainer(self._find_unmod_analogues(psms))
+        unmod_psms = self._find_unmod_analogues(psms)
 
         print("Calculating unmodified PSM features...")
         for psm in tqdm.tqdm(unmod_psms):
@@ -260,7 +259,7 @@ class Retriever(validator_base.ValidateBase):
             spectra: Dict[str, Dict[str, mass_spectrum.Spectrum]],
             spec_ids: List[Tuple[str, str]],
             prec_mzs: np.array,
-            tol: float) -> List[PSM]:
+            tol: float) -> PSMContainer[PSM]:
         """
         Finds the PSMs which are better than those found for other database
         search engines.
@@ -278,7 +277,7 @@ class Retriever(validator_base.ValidateBase):
             matches from database search engines.
 
         """
-        better: List[PSM] = []
+        better: PSMContainer[PSM] = PSMContainer()
         for (seq, mods, charge, pep_type) in tqdm.tqdm(peptides):
             pmass = Peptide(seq, charge, mods).mass
             # Check for free (non-modified target residue)
