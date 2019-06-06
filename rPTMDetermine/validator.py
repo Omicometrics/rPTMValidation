@@ -26,7 +26,7 @@ from . import generate_decoys
 from . import lda
 from . import mass_spectrum
 from . import peptides
-from .peptide_spectrum_match import DecoyID, PSM
+from .peptide_spectrum_match import DecoyID, PSM, UnmodPSM
 from . import proteolysis
 from .psm_container import PSMContainer
 from . import readers
@@ -249,8 +249,8 @@ class Validator(validator_base.ValidateBase):
         self.fixed_residues = self.config.fixed_residues
 
         # To be set later
-        self.psms: List[PSM] = []
-        self.unmod_psms = None
+        self.psms: PSMContainer[PSM] = PSMContainer()
+        self.unmod_psms: PSMContainer[UnmodPSM] = PSMContainer()
 
         # The LDA validation model for scoring
         self.model = None
@@ -426,7 +426,7 @@ class Validator(validator_base.ValidateBase):
 
         return utilities.deduplicate(psms)
 
-    def _process_mass_spectra(self) -> List[PSM]:
+    def _process_mass_spectra(self) -> PSMContainer:
         """
         Processes the input mass spectra to match to their peptides.
 
