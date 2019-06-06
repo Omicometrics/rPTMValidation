@@ -19,7 +19,7 @@ from sklearn.preprocessing import StandardScaler
 
 from .peptide_spectrum_match import PSM
 from . import proteolysis
-from .psm_container import PSMContainer
+from .psm_container import PSMContainer, PSMType
 
 # Silence this since it arises when converting ints to float in StandardScaler
 warnings.filterwarnings(action='ignore', category=DataConversionWarning)
@@ -380,10 +380,11 @@ def calculate_scores(model: CustomPipeline, psms: List[PSM],
 
 
 def apply_deamidation_correction(pipeline: CustomPipeline, dist_stats,
-                                 psms: List[PSM],
+                                 psms: PSMContainer[PSMType],
                                  features: List[str],
                                  target_mod: Optional[str],
-                                 proteolyzer: proteolysis.Proteolyzer):
+                                 proteolyzer: proteolysis.Proteolyzer) \
+        -> PSMContainer[PSMType]:
     """
     Removes the deamidation modification from applicable peptide
     identifications and revalides using the trained LDA model. If the score
@@ -393,7 +394,7 @@ def apply_deamidation_correction(pipeline: CustomPipeline, dist_stats,
 
     Args:
         pipeline (sklearn.Pipeline): The trained LDA pipeline.
-        psms (list): The validated PSMs.
+        psms (PSMContainer): The validated PSMs.
         target_mod (str): The modification under validation.
         proteolyzer (proteolysis.Proteolyzer)
 

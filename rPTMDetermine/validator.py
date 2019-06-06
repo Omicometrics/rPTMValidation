@@ -28,7 +28,7 @@ from . import mass_spectrum
 from . import peptides
 from .peptide_spectrum_match import DecoyID, PSM, UnmodPSM
 from . import proteolysis
-from .psm_container import PSMContainer
+from .psm_container import PSMContainer, PSMType
 from . import readers
 from . import similarity
 from . import utilities
@@ -283,13 +283,13 @@ class Validator(validator_base.ValidateBase):
         print(f"Total {len(self.psms)} identifications")
 
         print("Generating decoy PSMs...")
-        self.psms = list(itertools.chain(
+        self.psms = PSMContainer(itertools.chain(
             *[self._generate_decoy_matches(res, self.psms)
               for res in self.target_residues]))
 
         # Convert the PSMs to a pandas DataFrame, including a "target" column
         # to distinguish target and decoy peptides
-        mod_df = PSMContainer(self.psms).to_df()
+        mod_df = self.psms.to_df()
 
         # Validate the PSMs using LDA
         print("Validating PSMs...")
@@ -336,7 +336,7 @@ class Validator(validator_base.ValidateBase):
         self.unmod_psms = self._generate_decoy_matches(None, self.unmod_psms)
 
         # Validate the unmodified PSMs using LDA
-        unmod_df = PSMContainer(self.unmod_psms).to_df()
+        unmod_df = self.unmod_psms.to_df()
 
         print("Validating unmodified analogues...")
         unmod_features = [f for f in list(self.unmod_psms[0].features.keys())
@@ -426,7 +426,7 @@ class Validator(validator_base.ValidateBase):
 
         return utilities.deduplicate(psms)
 
-    def _process_mass_spectra(self) -> PSMContainer:
+    def _process_mass_spectra(self) -> PSMContainer[PSM]:
         """
         Processes the input mass spectra to match to their peptides.
 
@@ -443,7 +443,8 @@ class Validator(validator_base.ValidateBase):
         return self.psms
 
     def _generate_decoy_matches(self, target_res: Optional[str],
-                                psms: List[PSM]) -> List[PSM]:
+                                psms: PSMContainer[PSMType]) \
+            -> PSMContainer[PSMType]:
         """
 
         Args:

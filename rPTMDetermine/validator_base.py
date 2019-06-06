@@ -152,17 +152,20 @@ class ValidateBase():
                     self.config.fdr, res.num_matches)
         return None
 
-    def _find_unmod_analogues(self, mod_psms: Sequence[PSM]):
+    def _find_unmod_analogues(self, mod_psms: Sequence[PSM]) \
+            -> PSMContainer[UnmodPSM]:
         """
         Finds the unmodified analogues in the database search results.
 
         Returns:
+            PSMContainer of UnmodPSMs.
 
         """
-        unmod_psms = []
+        unmod_psms: List[UnmodPSM] = []
 
         print("Caching PSM sequences...")
-        psm_info = []
+        psm_info: Dict[Tuple[str, int], List[Tuple[PSM, List[ModSite]]]] = \
+            collections.defaultdict(list)
         for psm in mod_psms:
             # Filter the modifications to remove the target modification
             mods = []
@@ -177,22 +180,21 @@ class ValidateBase():
                         psm.seq[site - 1] not in self.config.target_residues):
                     mods.append(mod)
 
-            psm_info.append(
-                (mods, merge_peptide_sequence(psm.seq, tuple(mods)),
-                 psm.charge))
+            psm_info[(merge_peptide_sequence(psm.seq, tuple(mods)),
+                      psm.charge)].append((psm, mods))
 
         all_spectra = self.read_mass_spectra()
 
         for data_id, data in self.db_res.items():
             print(f"Processing data set {data_id}...")
-            unmods = {}
+            unmods: Dict[str, List[Tuple[PSM, List[ModSite]]]] = {}
             for spec_id, matches in data.items():
-                db_peptides = {(
-                    merge_peptide_sequence(match.seq, tuple(match.mods)),
-                    match.charge) for match in matches}
-                res = [(mod_psms[idx], mods)
-                       for idx, (mods, pep_str, charge) in enumerate(psm_info)
-                       if (pep_str, charge) in db_peptides]
+                res: List[Tuple[PSM, List[ModSite]]] = []
+                for match in matches:
+                    res.extend(
+                        psm_info[(merge_peptide_sequence(match.seq,
+                                                         tuple(match.mods)),
+                                  match.charge)])
                 if res:
                     unmods[spec_id] = res
 
@@ -210,7 +212,7 @@ class ValidateBase():
                                  Peptide(psm.seq, psm.charge, mods),
                                  spectrum=spec))
 
-        return utilities.deduplicate(unmod_psms)
+        return PSMContainer(utilities.deduplicate(unmod_psms))
 
     def _filter_mods(self, mods: Iterable[ModSite], seq: str)\
             -> List[ModSite]:
