@@ -187,9 +187,9 @@ class ValidateBase():
             print(f"Processing data set {data_id}...")
             unmods = {}
             for spec_id, matches in data.items():
-                db_peptides = [(
+                db_peptides = {(
                     merge_peptide_sequence(match.seq, tuple(match.mods)),
-                    match.charge) for match in matches]
+                    match.charge) for match in matches}
                 res = [(mod_psms[idx], mods)
                        for idx, (mods, pep_str, charge) in enumerate(psm_info)
                        if (pep_str, charge) in db_peptides]
