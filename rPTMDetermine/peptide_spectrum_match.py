@@ -473,6 +473,9 @@ class UnmodPSM(PSM):
     an identifier which makes the unmodified PSM to its modified counterpart.
 
     """
+
+    __slots__ = ("mod_psm_uid",)
+
     def __init__(self, mod_psm_uid: str, *args, **kwargs) -> None:
         """
         Initialize the UnmodPSM object by storing the modified PSM ID and
