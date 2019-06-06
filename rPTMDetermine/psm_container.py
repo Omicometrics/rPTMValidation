@@ -168,7 +168,6 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
             Index dictionary mapping values to positions.
 
         """
-        # TODO: implementation using lambdas for checking
         index: Dict[Tuple[str, ...], List[int]] = collections.defaultdict(list)
         for idx, psm in enumerate(self.data):
             index[tuple([getattr(psm, a) for a in attributes])].append(idx)
