@@ -206,11 +206,10 @@ class ValidateBase():
             for spec_id, _psms in unmods.items():
                 spec = all_spectra[data_id][spec_id]
 
-                for psm, mods in _psms:
-                    unmod_psms.append(
-                        UnmodPSM(psm.uid, data_id, spec_id,
-                                 Peptide(psm.seq, psm.charge, mods),
-                                 spectrum=spec))
+                unmod_psms.extend([
+                    UnmodPSM(psm.uid, data_id, spec_id,
+                             Peptide(psm.seq, psm.charge, mods),
+                             spectrum=spec) for psm, mods in _psms])
 
         return PSMContainer(utilities.deduplicate(unmod_psms))
 
@@ -250,7 +249,7 @@ class ValidateBase():
         localizes the modification site by computing site probabilities.
 
         """
-        for ii, psm in enumerate(psms):
+        for ii, psm in tqdm.tqdm(enumerate(psms)):
             # Only localize those PSMs which pass the rPTMDetermine score and
             # similarity score thresholds
             if (psm.lda_prob is None or psm.lda_prob < spd_prob_threshold or
