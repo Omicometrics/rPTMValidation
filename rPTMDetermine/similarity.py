@@ -29,13 +29,14 @@ def calculate_similarity_scores(mod_psms: PSMContainer[PSM],
         The modified PSMs, with their similarity scores now set.
 
     """
-    index = unmod_psms.get_index(("mod_psm_uid",))
+    index: Dict[Tuple[str, ...], List[int]] = \
+        unmod_psms.get_index(("mod_psm_uid",))
 
     for psm in tqdm.tqdm(mod_psms):
         psm.similarity_scores.extend(
             [SimilarityScore(upsm.data_id, upsm.spec_id,
                              calculate_spectral_similarity(psm, upsm))
-             for upsm in [unmod_psms[ii] for ii in index[psm.uid]]])
+             for upsm in [unmod_psms[ii] for ii in index[(psm.uid,)]]])
         psm.peptide.fragment_ions = None
     return mod_psms
 
