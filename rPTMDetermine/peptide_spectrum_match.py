@@ -32,7 +32,7 @@ class PSM():
 
     """
 
-    __slots__ = ("data_id", "spec_id", "peptide", "__spectrum", "decoy_id",
+    __slots__ = ("data_id", "spec_id", "peptide", "_spectrum", "decoy_id",
                  "benchmark", "similarity_scores", "features", "lda_score",
                  "lda_prob", "decoy_lda_score", "decoy_lda_prob", "site_prob",
                  "corrected", "target",)
@@ -55,7 +55,7 @@ class PSM():
         self.peptide = peptide
 
         # This can be set later before processing occurs
-        self.__spectrum = spectrum
+        self.spectrum = spectrum
 
         # The decoy peptide matched to the spectrum
         self.decoy_id: Optional[DecoyID] = None
@@ -123,7 +123,7 @@ class PSM():
         Returns the composed mass_spectrum.Spectrum.
 
         """
-        return self.__spectrum
+        return self._spectrum
 
     @spectrum.setter
     def spectrum(self, val):
@@ -134,7 +134,7 @@ class PSM():
         if val is not None and not isinstance(val, mass_spectrum.Spectrum):
             raise TypeError(
                 "Setting PSM.spectrum requires a mass_spectrum.Spectrum")
-        self.__spectrum = val
+        self._spectrum = val
 
     @property
     def uid(self):
@@ -188,7 +188,8 @@ class PSM():
             Official string representation.
 
         """
-        return f"<{self.__class__.__name__} {self.__dict__}>"
+        out = {s: getattr(self, s) for s in __class__.__slots__}
+        return f"<{self.__class__.__name__} {out}>"
 
     def __hash__(self):
         """
