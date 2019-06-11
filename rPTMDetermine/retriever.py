@@ -127,23 +127,13 @@ class Retriever(validator_base.ValidateBase):
         psms = self._get_better_matches(peptides, all_spectra, spec_ids,
                                         prec_mzs,
                                         tol=self.config.retrieval_tolerance)
-        psms = PSMContainer(psms)
-
-        with open(self.file_prefix + "psms1", "wb") as fh:
-            pickle.dump(psms, fh)
 
         print("Calculating rPTMDetermine probabilities...")
         calculate_lda_probs(psms, model, score_stats, features)
 
-        with open(self.file_prefix + "psms2", "wb") as fh:
-            pickle.dump(psms, fh)
-
         # Keep only the best match (in terms of LDA score) for each spectrum
         print("Retaining best PSM for each spectrum...")
         psms = psms.get_best_psms()
-
-        with open(self.file_prefix + "psms3", "wb") as fh:
-            pickle.dump(psms, fh)
 
         # Attempt to correct for misassigned deamidation
         print("Attempting to correct misassigned deamidation...")
@@ -154,21 +144,12 @@ class Retriever(validator_base.ValidateBase):
         print("Deamidation removed from {} PSMs".format(
             sum(p.corrected for p in psms)))
 
-        with open(self.file_prefix + "psms4", "wb") as fh:
-            pickle.dump(psms, fh)
-
         print("Finding unmodified analogue PSMs...")
-        unmod_psms = PSMContainer(self._find_unmod_analogues(psms))
-
-        with open(self.file_prefix + "unmod_psms1", "wb") as fh:
-            pickle.dump(unmod_psms, fh)
+        unmod_psms = self._find_unmod_analogues(psms)
 
         print("Calculating unmodified PSM features...")
         for psm in tqdm.tqdm(unmod_psms):
             psm.extract_features(None, self.proteolyzer)
-
-        with open(self.file_prefix + "unmod_psms2", "wb") as fh:
-            pickle.dump(unmod_psms, fh)
 
         print("Calculating rPTMDetermine scores for unmodified analogues...")
         calculate_lda_probs(unmod_psms, unmod_model, unmod_score_stats,
@@ -176,14 +157,8 @@ class Retriever(validator_base.ValidateBase):
 
         unmod_psms = unmod_psms.filter_lda_prob()
 
-        with open(self.file_prefix + "unmod_psms4", "wb") as fh:
-            pickle.dump(unmod_psms, fh)
-
         print("Calculating similarity scores...")
         psms = similarity.calculate_similarity_scores(psms, unmod_psms)
-
-        with open(self.file_prefix + "psms5", "wb") as fh:
-            pickle.dump(psms, fh)
 
         if self.config.benchmark_file is not None:
             self.identify_benchmarks(psms)
@@ -193,32 +168,21 @@ class Retriever(validator_base.ValidateBase):
         psms = self._remove_search_ids(psms)
         rec_psms = PSMContainer([p for p in psms if p.target])
 
-        with open(self.file_prefix + "psms6", "wb") as fh:
-            pickle.dump(psms, fh)
-
         rec_psms = rec_psms.filter_lda_similarity(0.99,
                                                   self.config.sim_threshold)
-
-        with open(self.file_prefix + "rec_psms1", "wb") as fh:
-            pickle.dump(rec_psms, fh)
 
         print("Localizing modification site(s)...")
         self._localize(rec_psms, model, features, 0.99,
                        self.config.sim_threshold)
-
-        with open(self.file_prefix + "rec_psms2", "wb") as fh:
-            pickle.dump(rec_psms, fh)
 
         rec_psms = self.filter_localizations(rec_psms)
 
         rec_psms = rec_psms.filter_site_prob(
             self.config.site_localization_threshold)
 
-        with open(self.file_prefix + "rec_psms3", "wb") as fh:
-            pickle.dump(rec_psms, fh)
-
         self.write_results(rec_psms,
-                           self.file_prefix + "recovered_results.csv")
+                           self.file_prefix + "recovered_results.csv",
+                           pickle_file=self.file_prefix + "rec_psms")
 
     def _get_search_results(self) \
             -> Dict[str, Dict[str, List[readers.SearchResult]]]:
@@ -295,7 +259,7 @@ class Retriever(validator_base.ValidateBase):
             spectra: Dict[str, Dict[str, mass_spectrum.Spectrum]],
             spec_ids: List[Tuple[str, str]],
             prec_mzs: np.array,
-            tol: float) -> List[PSM]:
+            tol: float) -> PSMContainer[PSM]:
         """
         Finds the PSMs which are better than those found for other database
         search engines.
@@ -313,7 +277,7 @@ class Retriever(validator_base.ValidateBase):
             matches from database search engines.
 
         """
-        better: List[PSM] = []
+        better: PSMContainer[PSM] = PSMContainer()
         for (seq, mods, charge, pep_type) in tqdm.tqdm(peptides):
             pmass = Peptide(seq, charge, mods).mass
             # Check for free (non-modified target residue)

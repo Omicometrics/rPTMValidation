@@ -10,7 +10,8 @@ import csv
 import operator
 import os
 import sys
-from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import (Callable, Dict, Generic, List, Optional, overload,
+                    Sequence, Set, Tuple, TypeVar)
 
 import pandas as pd
 
@@ -20,13 +21,16 @@ from .peptide_spectrum_match import PSM, SimilarityScore
 from .readers import parse_mods
 
 
-class PSMContainer(collections.UserList):  # pylint: disable=too-many-ancestors
+PSMType = TypeVar("PSMType", bound=PSM)
+
+
+class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=too-many-ancestors
     """
     A class to provide a customized iterable container of PSMs. The class
     builds upon the UserList class and extends the functionality.
 
     """
-    def __init__(self, psms: Optional[List[PSM]] = None):
+    def __init__(self, psms: Optional[List[PSMType]] = None):
         """
         Initialize the instance of the class.
 
@@ -37,12 +41,13 @@ class PSMContainer(collections.UserList):  # pylint: disable=too-many-ancestors
         # problematic due to https://github.com/python/mypy/issues/5846
         self.data = psms if psms is not None else []
 
-    def __getitem__(self, idx: Union[int, slice]):
-        """
-        Override the __getitem__ method to return a PSMContainer if a list
-        would normally be returned.
+    @overload
+    def __getitem__(self, idx: int) -> PSMType: ...
 
-        """
+    @overload
+    def __getitem__(self, idx: slice) -> PSMContainer[PSMType]: ...
+
+    def __getitem__(self, idx):
         res = self.data[idx]
         return PSMContainer(res) if isinstance(res, list) else res
 
@@ -54,7 +59,7 @@ class PSMContainer(collections.UserList):  # pylint: disable=too-many-ancestors
         for psm in self.data:
             psm.clean_fragment_ions()
 
-    def get_by_seq(self, seq: str) -> PSMContainer:
+    def get_by_seq(self, seq: str) -> PSMContainer[PSMType]:
         """
         Retrieves the PSMs with the given peptide sequence.
 
@@ -67,7 +72,7 @@ class PSMContainer(collections.UserList):  # pylint: disable=too-many-ancestors
         """
         return PSMContainer([p for p in self.data if p.seq == seq])
 
-    def get_by_id(self, data_id: str, spec_id: str) -> PSMContainer:
+    def get_by_id(self, data_id: str, spec_id: str) -> PSMContainer[PSMType]:
         """
         Retrieves the PSMs with the given identifiers.
 
@@ -82,7 +87,8 @@ class PSMContainer(collections.UserList):  # pylint: disable=too-many-ancestors
         return PSMContainer([p for p in self.data if p.data_id == data_id and
                              p.spec_id == spec_id])
 
-    def filter_lda_prob(self, threshold: float = 0.99) -> PSMContainer:
+    def filter_lda_prob(self, threshold: float = 0.99) \
+            -> PSMContainer[PSMType]:
         """
         Filters the PSMs to those with an LDA probability exceeding the
         threshold value.
@@ -98,7 +104,7 @@ class PSMContainer(collections.UserList):  # pylint: disable=too-many-ancestors
             [p for p in self.data if p.lda_prob >= threshold])
 
     def filter_lda_similarity(self, lda_threshold: float,
-                              sim_threshold: float) -> PSMContainer:
+                              sim_threshold: float) -> PSMContainer[PSMType]:
         """
         Filters the PSMs to those with an LDA prob exceeding the threshold
         value and a maximum similarity score exceeding the similarity score
@@ -116,7 +122,7 @@ class PSMContainer(collections.UserList):  # pylint: disable=too-many-ancestors
             [p for p in self.data if p.lda_prob >= lda_threshold and
              p.max_similarity >= sim_threshold])
 
-    def filter_site_prob(self, threshold: float) -> PSMContainer:
+    def filter_site_prob(self, threshold: float) -> PSMContainer[PSMType]:
         """
         Filters the PSMs to those without a site probability or with a site
         probability exceeding the threshold.
@@ -133,7 +139,7 @@ class PSMContainer(collections.UserList):  # pylint: disable=too-many-ancestors
             p.site_prob >= threshold])
 
     def ids_not_in(self, exclude_ids: Sequence[Tuple[str, str]])\
-            -> PSMContainer:
+            -> PSMContainer[PSMType]:
         """
         Filters the PSMs to those whose (data_id, spec_id) pair is not in the
         exclude list provided.
@@ -149,7 +155,26 @@ class PSMContainer(collections.UserList):  # pylint: disable=too-many-ancestors
             [p for p in self.data
              if (p.data_id, p.spec_id) not in exclude_ids])
 
-    def get_best_psms(self) -> PSMContainer:
+    def get_index(self, attributes: Sequence[str]) \
+            -> Dict[Tuple[str, ...], List[int]]:
+        """
+        Builds a dictionary index mapping the values of the given attribute to
+        a list of positions in the PSMContainer.
+
+        Args:
+            attribute (str): The PSM attribute on which to build an index.
+
+        Returns:
+            Index dictionary mapping values to positions.
+
+        """
+        index: Dict[Tuple[str, ...], List[int]] = collections.defaultdict(list)
+        for idx, psm in enumerate(self.data):
+            index[tuple([getattr(psm, a) for a in attributes])].append(idx)
+
+        return index
+
+    def get_best_psms(self) -> PSMContainer[PSMType]:
         """
         Extracts only the PSM with the highest LDA score for each spectrum
         matched by any number of peptides.
@@ -158,12 +183,11 @@ class PSMContainer(collections.UserList):  # pylint: disable=too-many-ancestors
             PSMContainer of filtered PSMs.
 
         """
-        index: Dict[Tuple[str, str], List[PSM]] = collections.defaultdict(list)
-        for psm in self.data:
-            index[(psm.data_id, psm.spec_id)].append(psm)
+        index = self.get_index(("data_id", "spec_id"))
 
-        return PSMContainer([max(psms, key=operator.attrgetter("lda_score"))
-                             for psms in index.values()])
+        return PSMContainer([max([self.data[i] for i in indices],
+                                 key=operator.attrgetter("lda_score"))
+                             for indices in index.values()])
 
     def get_unique_peptides(
             self, predicate: Optional[Callable[[PSM], bool]] = None)\

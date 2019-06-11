@@ -4,17 +4,20 @@ A series of functions used to read different spectra file types.
 
 """
 import base64
+import itertools
 import re
 import struct
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 import zlib
+
+import numpy as np
 
 import lxml.etree as etree
 
-from . import mass_spectrum
+from .mass_spectrum import Spectrum
 
 
-MGF_TITLE_REGEX = re.compile(r"TITLE=Locus:([\d\.]+) ")
+MGF_TITLE_REGEX = re.compile(r"Locus:([\d\.]+) ")
 
 
 class ParserException(Exception):
@@ -24,14 +27,7 @@ class ParserException(Exception):
     """
 
 
-END_IONS_LEN = 8
-TITLE_LEN = 5
-PEPMASS_LEN = 7
-BEGIN_IONS_LEN = 10
-CHARGE_LEN = 6
-
-
-def read_mgf_file(spec_file: str) -> Dict[str, mass_spectrum.Spectrum]:
+def read_mgf_file(spec_file: str) -> Dict[str, Spectrum]:
     """
     Reads the given tandem mass spectrometry data file to extract individual
     spectra.
@@ -43,29 +39,34 @@ def read_mgf_file(spec_file: str) -> Dict[str, mass_spectrum.Spectrum]:
         A dictionary of spectrum ID to numpy array of peaks.
 
     """
-    spectra: Dict[str, mass_spectrum.Spectrum] = {}
-    spec_id = None
+    spectra: Dict[str, Spectrum] = {}
     with open(spec_file) as fh:
-        peaks, mz = [], None
-        charge: Optional[int] = None
-        for line in fh:
-            if line[:END_IONS_LEN] == "END IONS":
-                if spec_id is None:
-                    raise ParserException(
-                        f"No spectrum ID found in MGF block in {spec_file}")
-                spectra[spec_id] = mass_spectrum.Spectrum(peaks, float(mz),
-                                                          charge)
-                peaks, spec_id, mz, charge = [], None, None, None
-            elif line[:TITLE_LEN] == "TITLE":
-                match = MGF_TITLE_REGEX.match(line)
-                if match is not None:
-                    spec_id = match.group(1)
-            elif line[:PEPMASS_LEN] == "PEPMASS":
-                mz = line.rstrip().split("=")[1]
-            elif line[:CHARGE_LEN] == "CHARGE":
-                charge = int(line.rstrip().split("=")[1].split("+")[0])
-            elif "=" not in line and line[:BEGIN_IONS_LEN] != "BEGIN IONS":
-                peaks.append([float(n) for n in line.split()[:2]])
+        for key, group in itertools.groupby(fh, lambda ln: ln == "END IONS\n"):
+            if next(group) == "END IONS\n":
+                continue
+
+            items = list(group)
+
+            fields = {}
+            peak_start_idx = 0
+            for ii, line in enumerate(items):
+                if "=" not in line:
+                    peak_start_idx = ii
+                    break
+                split_line = line.strip().split("=")
+                fields[split_line[0]] = split_line[1]
+
+            match = MGF_TITLE_REGEX.match(fields["TITLE"])
+            if match is None:
+                raise ParserException("No spectrum ID found in MGF file")
+            spec_id = match.group(1)
+
+            spectra[spec_id] = Spectrum(
+                np.array([float(n) for s in items[peak_start_idx:]
+                          for n in s.split(" ")[:2]]).reshape(-1, 2),
+                float(fields["PEPMASS"]),
+                int(fields["CHARGE"].split("+")[0]) if "CHARGE" in fields
+                else None)
 
     return spectra
 
@@ -88,7 +89,7 @@ def read_mzxml_file(spec_file: str):
     raise NotImplementedError()
 
 
-def read_spectra_file(spec_file: str) -> Dict[str, mass_spectrum.Spectrum]:
+def read_spectra_file(spec_file: str) -> Dict[str, Spectrum]:
     """
     Determines the format of the given tandem mass spectrum file and delegates
     to the appropriate reader.

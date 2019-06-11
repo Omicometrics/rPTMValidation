@@ -30,8 +30,8 @@ class Spectrum():
 
     __slots__ = ("_peaks", "prec_mz", "charge",)
 
-    def __init__(self, peak_list: List[List[float]], prec_mz: float,
-                 charge: int):
+    def __init__(self, peak_list: Union[np.ndarray, List[List[float]]],
+                 prec_mz: float, charge: Optional[int]):
         """
         Initializes the class.
 
@@ -41,7 +41,8 @@ class Spectrum():
             charge (int): The charge state of the spectrum precursor.
 
         """
-        self._peaks = np.array(peak_list)
+        self._peaks = (peak_list if isinstance(peak_list, np.ndarray)
+                       else np.array(peak_list))
         if self._peaks.shape[0] == 2:
             self._peaks = self._peaks.T
         self.prec_mz = prec_mz
@@ -86,7 +87,8 @@ class Spectrum():
             The official string representation of the Spectrum object.
 
         """
-        return f"<{self.__class__.__name__} {self.__dict__}>"
+        out = {s: getattr(self, s) for s in Spectrum.__slots__}
+        return f"<{self.__class__.__name__} {out}>"
 
     def __str__(self) -> str:
         """
@@ -102,6 +104,16 @@ class Spectrum():
             "charge": self.charge
         }
         return f"<{self.__class__.__name__} {out}>"
+
+    def __eq__(self, other: object) -> bool:
+        """
+        Implements the __eq__ method for the Spectrum class.
+
+        """
+        if not isinstance(other, Spectrum):
+            raise NotImplementedError()
+        return (np.array_equal(self._peaks, other._peaks) and
+                (self.prec_mz, self.charge) == (other.prec_mz, other.charge))
 
     def __nonzero__(self) -> bool:
         """

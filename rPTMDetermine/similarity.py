@@ -9,12 +9,14 @@ from typing import Any, Dict, Iterable, List, Sequence, Set, Tuple
 import numpy as np
 import tqdm
 
-from .peptide_spectrum_match import PSM, UnmodPSM
+from .peptide_spectrum_match import PSM, SimilarityScore, UnmodPSM
+from .psm_container import PSMContainer
 from .mass_spectrum import Spectrum
 
 
-def calculate_similarity_scores(mod_psms: List[PSM],
-                                unmod_psms: List[UnmodPSM]) -> List[PSM]:
+def calculate_similarity_scores(mod_psms: PSMContainer[PSM],
+                                unmod_psms: PSMContainer[UnmodPSM]) \
+        -> PSMContainer[PSM]:
     """
     Calculates the similarity between the mass spectra of modified and
     unmodified peptides.
@@ -27,13 +29,14 @@ def calculate_similarity_scores(mod_psms: List[PSM],
         The modified PSMs, with their similarity scores now set.
 
     """
+    index: Dict[Tuple[str, ...], List[int]] = \
+        unmod_psms.get_index(("mod_psm_uid",))
+
     for psm in tqdm.tqdm(mod_psms):
-        uid = psm.uid
-        for upsm in unmod_psms:
-            if upsm.mod_psm_uid == uid:
-                psm.similarity_scores.append(
-                    (upsm.data_id, upsm.spec_id,
-                     calculate_spectral_similarity(psm, upsm)))
+        psm.similarity_scores.extend(
+            [SimilarityScore(upsm.data_id, upsm.spec_id,
+                             calculate_spectral_similarity(psm, upsm))
+             for upsm in [unmod_psms[ii] for ii in index[(psm.uid,)]]])
         psm.peptide.fragment_ions = None
     return mod_psms
 
