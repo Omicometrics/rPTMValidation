@@ -1,11 +1,11 @@
 #! /usr/bin/env python3
 """
-This module provides a class for parsing Comet pepXML files.
+This module provides a class for parsing TPP pepXML files.
 
 """
 import dataclasses
 import operator
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import lxml.etree as etree
 from pepfrag import ModSite
@@ -17,14 +17,16 @@ from .search_result import PeptideType, SearchResult
 
 
 @dataclasses.dataclass
-class CometSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
+class TPPSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
 
-    __slots__ = ()
+    __slots__ = ("scores",)
+
+    scores: Dict[str, float]
 
 
-class CometReader(Reader):  # pylint: disable=too-few-public-methods
+class TPPReader(Reader):  # pylint: disable=too-few-public-methods
     """
-    Class to read a Comet pepXML file.
+    Class to read a TPP pepXML file.
 
     """
     _mass_mod_names = {
@@ -33,20 +35,17 @@ class CometReader(Reader):  # pylint: disable=too-few-public-methods
         44: "Carbamyl"
     }
 
-    def __init__(self, ptmdb: PTMDB,
-                 namespace: Optional[str] = None):
+    def __init__(self, ptmdb: PTMDB):
         """
         Initialize the reader.
 
         Args:
             ptmdb (PTMDB): The UniMod PTM database.
-            namespace (str, optional): The pepXML namespace.
 
         """
         super().__init__(ptmdb)
 
-        self.namespace = ("http://regis-web.systemsbiology.net/pepXML"
-                          if namespace is None else namespace)
+        self.namespace = "http://regis-web.systemsbiology.net/pepXML"
         self.ns_map = {'x': self.namespace}
 
     def read(self, filename: str,
@@ -66,7 +65,7 @@ class CometReader(Reader):  # pylint: disable=too-few-public-methods
             ParserException
 
         """
-        res = []
+        res: List[TPPSearchResult] = []
         for event, element in etree.iterparse(filename, events=['end']):
             if (event == "end" and
                     element.tag == f"{{{self.namespace}}}spectrum_query"):
@@ -84,17 +83,22 @@ class CometReader(Reader):  # pylint: disable=too-few-public-methods
                     {s.get("name"): float(s.get("value"))
                      for s in hit.xpath("x:search_score",
                                         namespaces=self.ns_map)},
-                    "decoy" if hit.get("protein").startswith("DECOY_")
-                    else "normal"
-                    )
-                        for hit in element.xpath(
-                            "x:search_result/x:search_hit",
-                            namespaces=self.ns_map)]
+                    PeptideType.decoy
+                    if hit.get("protein").startswith("DECOY_")
+                    else PeptideType.normal
+                )
+                    for hit in element.xpath(
+                        "x:search_result/x:search_hit",
+                        namespaces=self.ns_map)]
 
-                if hits:
-                    res.append((raw_file, scan_no, spec_id, hits))
+                # _build_search_result has been split out as a separate method
+                # such that it may be overridden for specific TPPReader
+                # subclasses, e.g. Comet or X! Tandem, in future
+                res.extend([
+                    self._build_search_result(raw_file, scan_no, spec_id, hit)
+                    for hit in hits])
 
-        return self._build_search_results(res)
+        return res if not predicate else [r for r in res if predicate(r)]
 
     def _process_mods(self, mod_info) -> List[ModSite]:
         """
@@ -114,7 +118,7 @@ class CometReader(Reader):  # pylint: disable=too-few-public-methods
         nterm_mod: Optional[ModSite] = None
         if mod_nterm_mass is not None:
             mod_nterm_mass = float(mod_nterm_mass)
-            name = CometReader._mass_mod_names.get(int(mod_nterm_mass), None)
+            name = TPPReader._mass_mod_names.get(int(mod_nterm_mass), None)
 
             if name is None:
                 raise ParserException(
@@ -142,25 +146,29 @@ class CometReader(Reader):  # pylint: disable=too-few-public-methods
 
         return mods
 
-    def _build_search_results(self, res) -> List[CometSearchResult]:
+    def _build_search_result(
+            self,
+            raw_file: str,
+            scan_no: int,
+            comb_id: str,
+            hit: Tuple[int, str, Tuple[ModSite, ...], int, Dict[str, float],
+                       PeptideType]) -> TPPSearchResult:
         """
-        Converts the search results to the standard SearchResult class.
+        Converts a search result to a standard SearchResult.
 
         Returns:
-            List of CometSearchResults.
+            TPPSearchResult.
 
         """
-        results = []
-        for id_set in res:
-            data_id, spec_id = id_set[2].split(":")
-            results.extend([
-                CometSearchResult(
-                    seq=hit[1],
-                    mods=list(hit[2]),
-                    charge=hit[3],
-                    spectrum=spec_id,
-                    dataset=data_id,
-                    rank=hit[0],
-                    pep_type=PeptideType[hit[5]],
-                    theor_mz=None) for hit in id_set[3]])
-        return results
+        data_id, spec_id = comb_id.split(":")
+        return TPPSearchResult(
+            seq=hit[1],
+            mods=list(hit[2]),
+            charge=hit[3],
+            spectrum=spec_id,
+            dataset=data_id,
+            rank=hit[0],
+            pep_type=hit[5],
+            theor_mz=None,
+            scores=hit[4]
+        )
