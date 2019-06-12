@@ -98,7 +98,7 @@ class TPPReader(Reader):  # pylint: disable=too-few-public-methods
                     self._build_search_result(raw_file, scan_no, spec_id, hit)
                     for hit in hits])
 
-        return res
+        return res if not predicate else [r for r in res if predicate(r)]
 
     def _process_mods(self, mod_info) -> List[ModSite]:
         """
