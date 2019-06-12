@@ -6,8 +6,14 @@ rPTMDetermine.
 """
 import enum
 import os
-import sys
 from typing import Any, Dict, List, Optional
+
+
+class MissingConfigOptionException(Exception):
+    """
+    An exception to be thrown when a required configuration option is missing.
+
+    """
 
 
 class SearchEngine(enum.Enum):
@@ -21,6 +27,7 @@ class SearchEngine(enum.Enum):
     Comet = enum.auto()
     XTandem = enum.auto()
     TPP = enum.auto()
+    MSGFPlus = enum.auto()
 
 
 class BaseConfig():
@@ -202,5 +209,5 @@ class BaseConfig():
             try:
                 getattr(self, attr)
             except KeyError:
-                print(f"Missing required config option: {attr}")
-                sys.exit(1)
+                raise MissingConfigOptionException(
+                    f"Missing required config option: {attr}")
