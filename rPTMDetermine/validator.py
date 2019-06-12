@@ -283,9 +283,9 @@ class Validator(validator_base.ValidateBase):
         print(f"Total {len(self.psms)} identifications")
 
         print("Generating decoy PSMs...")
-        self.psms = PSMContainer(itertools.chain(
+        self.psms = PSMContainer(list(itertools.chain(
             *[self._generate_decoy_matches(res, self.psms)
-              for res in self.target_residues]))
+              for res in self.target_residues])))
 
         # Convert the PSMs to a pandas DataFrame, including a "target" column
         # to distinguish target and decoy peptides
@@ -363,7 +363,7 @@ class Validator(validator_base.ValidateBase):
             pickle.dump(self.unmod_psms, fh)
 
         # Filter the unmodified analogues according to their probabilities
-        self.unmod_psms = [p for p in self.unmod_psms if p.lda_prob >= 0.99]
+        self.unmod_psms = self.unmod_psms.filter_lda_prob()
 
         # --- Similarity Scores --- #
         print("Calculating similarity scores...")
