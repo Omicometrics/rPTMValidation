@@ -8,7 +8,7 @@ import argparse
 import json
 import pickle
 
-from rPTMDetermine.retriever import Retriever
+from rPTMDetermine import Retriever
 
 
 def parse_args():
