@@ -7,6 +7,7 @@ from .base_reader import Reader
 from .mascot_reader import MascotReader, MascotSearchResult
 from .modifications import (parse_mods, preparse_mod_string,
                             UnknownModificationException)
+from .msgfplus_reader import MSGFPlusReader, MSGFPlusSearchResult
 from .protein_pilot_reader import ProteinPilotReader, ProteinPilotSearchResult
 from .ptmdb import PTMDB
 from .readers import get_reader, read_fasta_sequences
@@ -21,6 +22,8 @@ __all__ = [
     "parse_mods",
     "preparse_mod_string",
     "UnknownModificationException",
+    "MSGFPlusReader",
+    "MSGFPlusSearchResult",
     "ProteinPilotReader",
     "ProteinPilotSearchResult",
     "PTMDB",

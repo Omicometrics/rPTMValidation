@@ -7,7 +7,7 @@ from typing import Iterable, List, TextIO, Tuple
 
 from rPTMDetermine.base_config import SearchEngine
 
-from . import mascot_reader, protein_pilot_reader, tpp_reader
+from . import mascot_reader, msgfplus_reader, protein_pilot_reader, tpp_reader
 from .ptmdb import PTMDB
 
 
@@ -37,6 +37,8 @@ def get_reader(search_engine: SearchEngine, ptmdb: PTMDB):
         return protein_pilot_reader.ProteinPilotReader(ptmdb)
     if search_engine is SearchEngine.Mascot:
         return mascot_reader.MascotReader(ptmdb)
+    if search_engine is SearchEngine.MSGFPlus:
+        return msgfplus_reader.MSGFPlusReader(ptmdb)
     if search_engine in _TPP_ENGINES:
         return tpp_reader.TPPReader(ptmdb)
     raise NotImplementedError(
