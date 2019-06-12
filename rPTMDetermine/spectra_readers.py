@@ -4,10 +4,11 @@ A series of functions used to read different spectra file types.
 
 """
 import base64
+import enum
 import itertools
 import re
 import struct
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 import zlib
 
 import numpy as np
@@ -110,81 +111,127 @@ def read_spectra_file(spec_file: str) -> Dict[str, Spectrum]:
         f"Unsupported spectrum file type for {spec_file}")
 
 
-def decodebinary(string: str, default_array_length: int, precision: int = 64,
-                 bzlib: str = 'z') -> Tuple[Any, ...]:
+class CompressionMode(enum.Enum):
+    zlib = enum.auto()
+
+
+class MZMLReader:
     """
-    Decode binary string to float points.
-    If provided, should take endian order into consideration.
-    """
-    decoded = base64.b64decode(string)
-    decoded = zlib.decompress(decoded) if bzlib == 'z' else decoded
-    unpack_format = "<%dd" % default_array_length if precision == 64 else \
-        "<%dL" % default_array_length
-    return struct.unpack(unpack_format, decoded)
-
-
-def mzml_extract_ms1(mzml_file: str,
-                     namespace: str = "http://psi.hupo.org/ms/mzml")\
-                     -> Dict[str, Dict[str, Any]]:
-    """
-    Extracts the MS1 spectra from the input mzML file.
-
-    Args:
-        msml_file (str): The path to the mzML file.
-        namespace (str, optional): The XML namespace used in the mzML file.
-
-    Returns:
-        A list of the MS1 spectra encoded in dictionaries.
+    A reader class for mzML files.
 
     """
-    spectra = {}
-    ns_map = {'x': namespace}
-    # read from xml data
-    for event, element in etree.iterparse(mzml_file, events=['end']):
-        if event == 'end' and element.tag == f"{{{namespace}}}spectrum":
-            # This contains the cycle and experiment information
-            spectrum_info = dict(element.items())
-            default_array_length = int(
-                spectrum_info.get('default_array_length',
-                                  spectrum_info["defaultArrayLength"]))
+    def __init__(self, namespace: str = "http://psi.hupo.org/ms/mzml"):
+        """
+        Initializes the MZMLReader.
 
-            # MS level
-            if element.find(f"{{{namespace}}}precursorList"):
-                # Ignore MS level >= 2
-                continue
+        Args:
+            namespace (str, optional): The XML namespace used in the mzML file.
 
-            # MS spectrum
-            mz_binary = element.xpath(
-                "x:binaryDataArrayList/x:binaryDataArray"
-                "[x:cvParam[@name='m/z array']]/x:binary",
-                namespaces=ns_map)[0]
-            int_binary = element.xpath(
-                "x:binaryDataArrayList/x:binaryDataArray"
-                "[x:cvParam[@name='intensity array']]/x:binary",
-                namespaces=ns_map)[0]
-            mz = decodebinary(mz_binary.text, default_array_length)
-            intensity = decodebinary(int_binary.text, default_array_length)
+        """
+        self.namespace = namespace
+        self.ns_map = {'x': self.namespace}
 
-            # Retention time
-            start_time = float(element.xpath(
-                "x:scanList/x:scan/x:cvParam[@name='scan start time']",
-                namespaces=ns_map)[0].get("value"))
+    def extract_ms1(self, mzml_file: str) -> Dict[str, Dict[str, Any]]:
+        """
+        Extracts the MS1 spectra from the input mzML file.
 
-            element.clear()
+        Args:
+            msml_file (str): The path to the mzML file.
 
-            # Remove spectral peaks with intensity 0
-            mz_intensity = [(mz[ii], intensity[ii])
-                            for ii in range(default_array_length)
-                            if intensity[ii] > 0]
-            mz, intensity = zip(*mz_intensity)
+        Returns:
+            A list of the MS1 spectra encoded in dictionaries.
 
-            spec_id = ".".join(re.findall(r"\w+=(\d+)", spectrum_info["id"]))
+        """
+        spectra = {}
+        # read from xml data
+        for event, element in etree.iterparse(mzml_file, events=['end']):
+            if (event == 'end' and
+                    element.tag == f"{{{self.namespace}}}spectrum"):
+                # This contains the cycle and experiment information
+                spectrum_info = dict(element.items())
+                default_array_length = int(
+                    spectrum_info.get('default_array_length',
+                                      spectrum_info["defaultArrayLength"]))
 
-            spectra[spec_id] = {
-                'mz': mz,
-                'intensity': intensity,
-                'rt': start_time,
-                'info': spectrum_info
-            }
+                # MS level
+                if element.find(f"{{{self.namespace}}}precursorList"):
+                    # Ignore MS level >= 2
+                    continue
 
-    return spectra
+                # MS spectrum
+                def _get_array(s):
+                    return element.xpath(
+                        "x:binaryDataArrayList/x:binaryDataArray"
+                        f"[x:cvParam[@name='{s} array']]",
+                        namespaces=self.ns_map)[0]
+
+                mz = self._process_binary_data_array(
+                    _get_array("m/z"), default_array_length)
+                intensity = self._process_binary_data_array(
+                    _get_array("intensity"), default_array_length)
+
+                # Retention time
+                start_time = float(element.xpath(
+                    "x:scanList/x:scan/x:cvParam[@name='scan start time']",
+                    namespaces=self.ns_map)[0].get("value"))
+
+                element.clear()
+
+                # Remove spectral peaks with intensity 0
+                mz_intensity = [(mz[ii], intensity[ii])
+                                for ii in range(default_array_length)
+                                if intensity[ii] > 0]
+                mz, intensity = zip(*mz_intensity)
+
+                spec_id = ".".join(
+                    re.findall(r"\w+=(\d+)", spectrum_info["id"]))
+
+                spectra[spec_id] = {
+                    'mz': mz,
+                    'intensity': intensity,
+                    'rt': start_time,
+                    'info': spectrum_info
+                }
+
+        return spectra
+
+    def decode_binary(self, string: str, default_array_length: int,
+                      precision: int = 64,
+                      comp_mode: Optional[CompressionMode] = None) \
+            -> Tuple[Any, ...]:
+        """
+        Decodes binary string to floats.
+
+        Args:
+            string (str): The binary content as a string.
+            default_array_length (int): The default array length, read from
+                                        the mzML file.
+            precision (int, optional): The precision of the binary data.
+            comp_mode (CompressionMode, optional): The compression mode.
+
+        Returns:
+            The decoded and decompressed binary content as a tuple.
+
+        """
+        decoded = base64.b64decode(string)
+        if comp_mode is CompressionMode.zlib:
+            decoded = zlib.decompress(decoded)
+        unpack_format = "<%dd" % default_array_length if precision == 64 else \
+            "<%dL" % default_array_length
+        return struct.unpack(unpack_format, decoded)
+
+    def _process_binary_data_array(self, data_array,
+                                   default_array_length: int) \
+            -> Tuple[Any, ...]:
+        """
+        Processes the binary data array to extract the binary content.
+
+        """
+        params = {e.get("name")
+                  for e in data_array.findall(f"{{{self.namespace}}}cvParam")}
+        return self.decode_binary(
+            data_array.find(f"{{{self.namespace}}}binary").text,
+            default_array_length,
+            precision=64 if "64-bit float" in params else 32,
+            comp_mode=CompressionMode.zlib if "zlib compression" in params
+            else None)
