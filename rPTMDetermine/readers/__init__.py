@@ -8,6 +8,7 @@ from .mascot_reader import MascotReader, MascotSearchResult
 from .modifications import (parse_mods, preparse_mod_string,
                             UnknownModificationException)
 from .msgfplus_reader import MSGFPlusReader, MSGFPlusSearchResult
+from .mzidentml_reader import MZIdentMLReader, MZIdentMLSearchResult
 from .protein_pilot_reader import ProteinPilotReader, ProteinPilotSearchResult
 from .ptmdb import PTMDB
 from .readers import get_reader, read_fasta_sequences
@@ -24,6 +25,8 @@ __all__ = [
     "UnknownModificationException",
     "MSGFPlusReader",
     "MSGFPlusSearchResult",
+    "MZIdentMLReader",
+    "MZIdentMLSearchResult",
     "ProteinPilotReader",
     "ProteinPilotSearchResult",
     "PTMDB",
