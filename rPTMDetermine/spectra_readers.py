@@ -5,10 +5,11 @@ A series of functions used to read different spectra file types.
 """
 import base64
 import enum
+import functools
 import itertools
 import re
 import struct
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import zlib
 
 import numpy as np
@@ -142,58 +143,116 @@ class MZMLReader:
             A list of the MS1 spectra encoded in dictionaries.
 
         """
+        return self.extract_msn(mzml_file, 1)
+
+    def extract_ms2(self, mzml_file: str) -> Dict[str, Dict[str, Any]]:
+        """
+        Extracts the MS2 spectra from the input mzML file.
+
+        Args:
+            msml_file (str): The path to the mzML file.
+
+        Returns:
+            A list of the MS2 spectra encoded in dictionaries.
+
+        """
+        return self.extract_msn(mzml_file, 2)
+
+    def extract_msn(self, mzml_file: str, n: int) \
+            -> Dict[str, Dict[str, Any]]:
+        """
+        Extracts the MSn spectra from the input mzML file.
+
+        Args:
+            msml_file (str): The path to the mzML file.
+            n (int): The MS level for which to return spectral information.
+
+        Returns:
+            A list of the MSn spectra encoded in dictionaries.
+
+        """
         spectra = {}
         # read from xml data
-        for event, element in etree.iterparse(mzml_file, events=['end']):
-            if (event == 'end' and
-                    element.tag == f"{{{self.namespace}}}spectrum"):
-                # This contains the cycle and experiment information
-                spectrum_info = dict(element.items())
-                default_array_length = int(
-                    spectrum_info.get('default_array_length',
-                                      spectrum_info["defaultArrayLength"]))
+        context = etree.iterparse(mzml_file, events=("end",),
+                                  tag=self._fix_tag("spectrum"))
+        for event, element in context:
+            # This contains the cycle and experiment information
+            spectrum_info = dict(element.items())
+            default_array_length = int(spectrum_info.get(
+                'default_array_length', spectrum_info["defaultArrayLength"]))
 
-                # MS level
-                if element.find(f"{{{self.namespace}}}precursorList"):
-                    # Ignore MS level >= 2
-                    continue
+            # MS level
+            ms_level = int(
+                element.xpath("x:cvParam[@name='ms level']",
+                              namespaces=self.ns_map)[0].get("value"))
+            if ms_level != n:
+                continue
 
-                # MS spectrum
-                def _get_array(s):
-                    return element.xpath(
-                        "x:binaryDataArrayList/x:binaryDataArray"
-                        f"[x:cvParam[@name='{s} array']]",
-                        namespaces=self.ns_map)[0]
+            # MS spectrum
+            def _get_array(s):
+                return element.xpath(
+                    "x:binaryDataArrayList/x:binaryDataArray"
+                    f"[x:cvParam[@name='{s} array']]",
+                    namespaces=self.ns_map)[0]
 
-                mz = self._process_binary_data_array(
-                    _get_array("m/z"), default_array_length)
-                intensity = self._process_binary_data_array(
-                    _get_array("intensity"), default_array_length)
+            mz = self._process_binary_data_array(
+                _get_array("m/z"), default_array_length)
+            intensity = self._process_binary_data_array(
+                _get_array("intensity"), default_array_length)
 
-                # Retention time
-                start_time = float(element.xpath(
-                    "x:scanList/x:scan/x:cvParam[@name='scan start time']",
-                    namespaces=self.ns_map)[0].get("value"))
+            # Retention time
+            start_time = float(element.xpath(
+                "x:scanList/x:scan/x:cvParam[@name='scan start time']",
+                namespaces=self.ns_map)[0].get("value"))
 
-                element.clear()
+            # Remove spectral peaks with intensity 0
+            mz_intensity: List[Tuple[float, float]] = [
+                (mz[ii], intensity[ii])
+                for ii in range(default_array_length) if intensity[ii] > 0]
 
-                # Remove spectral peaks with intensity 0
-                mz_intensity = [(mz[ii], intensity[ii])
-                                for ii in range(default_array_length)
-                                if intensity[ii] > 0]
+            mz, intensity = (), ()
+            if mz_intensity:
                 mz, intensity = zip(*mz_intensity)
 
-                spec_id = ".".join(
-                    re.findall(r"\w+=(\d+)", spectrum_info["id"]))
+            spec_id = self._parse_id(spectrum_info["id"])
 
-                spectra[spec_id] = {
-                    'mz': mz,
-                    'intensity': intensity,
-                    'rt': start_time,
-                    'info': spectrum_info
-                }
+            precursors = self._extract_precursors(element)
+
+            element.clear()
+
+            spectra[spec_id] = {
+                "mz": mz,
+                "intensity": intensity,
+                "rt": start_time,
+                "info": spectrum_info,
+                "mslevel": ms_level,
+                "precursors": precursors,
+            }
 
         return spectra
+
+    def _extract_precursors(self, spectrum) -> Dict[str, List[float]]:
+        """
+        """
+        prec_ids: Dict[str, List[float]] = {}
+        precs = spectrum.xpath("x:precursorList/x:precursor",
+                               namespaces=self.ns_map)
+        for precursor in precs:
+            prec_id = self._parse_id(precursor.get("spectrumRef"))
+            ions = [float(e.get("value"))
+                    for e in precursor.xpath(
+                        "x:selectedIonList/x:selectedIon/"
+                        "x:cvParam[@name='selected ion m/z']",
+                        namespaces=self.ns_map)]
+            prec_ids[prec_id] = ions
+        return prec_ids
+
+    def _parse_id(self, id_str: str) -> str:
+        """
+        Parses the ID string to extract the numeric elements.
+
+        """
+        return ".".join(re.findall(r"\w+=(\d+)", id_str))
 
     def decode_binary(self, string: str, default_array_length: int,
                       precision: int = 64,
@@ -213,6 +272,8 @@ class MZMLReader:
             The decoded and decompressed binary content as a tuple.
 
         """
+        if string is None:
+            return ()
         decoded = base64.b64decode(string)
         if comp_mode is CompressionMode.zlib:
             decoded = zlib.decompress(decoded)
@@ -228,10 +289,18 @@ class MZMLReader:
 
         """
         params = {e.get("name")
-                  for e in data_array.findall(f"{{{self.namespace}}}cvParam")}
+                  for e in data_array.findall(self._fix_tag("cvParam"))}
         return self.decode_binary(
-            data_array.find(f"{{{self.namespace}}}binary").text,
+            data_array.find(self._fix_tag("binary")).text,
             default_array_length,
             precision=64 if "64-bit float" in params else 32,
             comp_mode=CompressionMode.zlib if "zlib compression" in params
             else None)
+
+    @functools.lru_cache(maxsize=128)
+    def _fix_tag(self, tag):
+        """
+        Prepends the namespace to the tag.
+
+        """
+        return f"{{{self.namespace}}}{tag}"
