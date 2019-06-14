@@ -90,11 +90,19 @@ class MSGFPlusReader(MZIdentMLReader):  # pylint: disable=too-few-public-methods
         Extracts the peptide identifications for all spectra.
 
         """
-        idents: Dict[Tuple[str, Optional[str]], List[Ident]] = {}
-        for spec in spec_results:
-            params = self._get_cv_params(spec)
-            dataset, spec_id = \
-                params["spectrum title"].split(" ")[0].split(":")
-            idents[(spec_id, dataset)] = self._extract_spec_peptides(
-                spec.findall(self._fix_tag("SpectrumIdentificationItem")))
-        return idents
+        if not spec_results:
+            return {}
+
+        use_title = "spectrum title" in self._get_cv_params(spec_results[0])
+
+        if use_title:
+            idents: Dict[Tuple[str, Optional[str]], List[Ident]] = {}
+            for spec in spec_results:
+                params = self._get_cv_params(spec)
+                dataset, spec_id = \
+                    params["spectrum title"].split(" ")[0].split(":")
+                idents[(spec_id, dataset)] = self._extract_spec_peptides(
+                    spec.findall(self._fix_tag("SpectrumIdentificationItem")))
+            return idents
+
+        return super()._extract_spec_idents(spec_results)

@@ -6,6 +6,7 @@ This module provides a class for reading MS-GF+ mzIdentML files.
 import collections
 import dataclasses
 import html
+import re
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import lxml.etree as etree
@@ -49,7 +50,7 @@ class MZIdentMLReader(Reader):  # pylint: disable=too-few-public-methods
 
         self.namespace = namespace
         self.ns_map = {'x': self.namespace}
-        
+
         self._seq_collection_tag = self._fix_tag("SequenceCollection")
         self._spec_ident_list_tag = self._fix_tag("SpectrumIdentificationList")
 
@@ -192,7 +193,7 @@ class MZIdentMLReader(Reader):  # pylint: disable=too-few-public-methods
         """
         idents: Dict[Tuple[str, Optional[str]], List[Ident]] = {}
         for spec in spec_results:
-            idents[(spec.get("spectrumID"), None)] = \
+            idents[(self._parse_id(spec.get("spectrumID")), None)] = \
                 self._extract_spec_peptides(
                     spec.findall(self._fix_tag("SpectrumIdentificationItem")))
         return idents
@@ -213,6 +214,13 @@ class MZIdentMLReader(Reader):  # pylint: disable=too-few-public-methods
                   e.get("passThreshold") == "true",
                   {k: float(v) for k, v in self._get_cv_params(e).items()})
             for e in ident_items]
+
+    def _parse_id(self, id_str: str) -> str:
+        """
+        Parses the ID string to extract the numeric elements.
+
+        """
+        return ".".join(re.findall(r"\w+=(\d+)", id_str))
 
     def _get_cv_params(self, element) -> Dict[str, str]:
         """
