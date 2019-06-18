@@ -2,6 +2,7 @@ cython
 lxml.etree
 matplotlib
 numpy
+overrides
 pandas
 scipy
 seaborn

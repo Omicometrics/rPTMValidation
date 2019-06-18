@@ -180,6 +180,9 @@ class Retriever(validator_base.ValidateBase):
         rec_psms = rec_psms.filter_site_prob(
             self.config.site_localization_threshold)
 
+        self.write_results(psms,
+                           self.file_prefix + "all_recovered_results.csv")
+
         self.write_results(rec_psms,
                            self.file_prefix + "recovered_results.csv",
                            pickle_file=self.file_prefix + "rec_psms")

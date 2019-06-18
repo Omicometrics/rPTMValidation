@@ -8,7 +8,8 @@ import argparse
 import json
 import pickle
 
-from rPTMDetermine.validator import Validator, write_results
+from rPTMDetermine import Validator
+from rPTMDetermine.validator import write_results
 
 
 def parse_args():
