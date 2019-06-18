@@ -9,6 +9,7 @@ from .modifications import (parse_mods, preparse_mod_string,
                             UnknownModificationException)
 from .msgfplus_reader import MSGFPlusReader, MSGFPlusSearchResult
 from .mzidentml_reader import MZIdentMLReader, MZIdentMLSearchResult
+from .percolator_reader import PercolatorReader, PercolatorSearchResult
 from .protein_pilot_reader import ProteinPilotReader, ProteinPilotSearchResult
 from .ptmdb import PTMDB
 from .readers import get_reader, read_fasta_sequences
@@ -27,6 +28,8 @@ __all__ = [
     "MSGFPlusSearchResult",
     "MZIdentMLReader",
     "MZIdentMLSearchResult",
+    "PercolatorReader",
+    "PercolatorSearchResult",
     "ProteinPilotReader",
     "ProteinPilotSearchResult",
     "PTMDB",

@@ -7,7 +7,11 @@ from typing import Iterable, List, TextIO, Tuple
 
 from rPTMDetermine.base_config import SearchEngine
 
-from . import mascot_reader, msgfplus_reader, protein_pilot_reader, tpp_reader
+from .mascot_reader import MascotReader
+from .msgfplus_reader import MSGFPlusReader
+from .percolator_reader import PercolatorReader
+from .protein_pilot_reader import ProteinPilotReader
+from .tpp_reader import TPPReader
 from .ptmdb import PTMDB
 
 
@@ -34,13 +38,15 @@ def get_reader(search_engine: SearchEngine, ptmdb: PTMDB):
 
     """
     if search_engine is SearchEngine.ProteinPilot:
-        return protein_pilot_reader.ProteinPilotReader(ptmdb)
+        return ProteinPilotReader(ptmdb)
     if search_engine is SearchEngine.Mascot:
-        return mascot_reader.MascotReader(ptmdb)
+        return MascotReader(ptmdb)
     if search_engine is SearchEngine.MSGFPlus:
-        return msgfplus_reader.MSGFPlusReader(ptmdb)
+        return MSGFPlusReader(ptmdb)
+    if search_engine is SearchEngine.Percolator:
+        return PercolatorReader(ptmdb)
     if search_engine in _TPP_ENGINES:
-        return tpp_reader.TPPReader(ptmdb)
+        return TPPReader(ptmdb)
     raise NotImplementedError(
         f"Cannot read search results for engine: {search_engine}")
 

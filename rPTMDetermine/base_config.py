@@ -28,6 +28,7 @@ class SearchEngine(enum.Enum):
     XTandem = enum.auto()
     TPP = enum.auto()
     MSGFPlus = enum.auto()
+    Percolator = enum.auto()
 
 
 class BaseConfig():
