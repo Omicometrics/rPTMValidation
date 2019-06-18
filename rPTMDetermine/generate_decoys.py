@@ -14,6 +14,37 @@ from . import proteolysis
 from . import readers
 
 
+def generate_decoy_fasta(target_db_path: str,
+                         decoy_prefix: str = "_DECOY") -> str:
+    """
+    Generates a decoy protein sequence FASTA file from the target protein
+    sequence database.
+
+    Args:
+        target_db_path (str): The path to the target protein sequence
+                              database FASTA file.
+        decoy_prefix (str, optional): The string with which to prepend target
+                                      protein IDs.
+
+    """
+    split_path = target_db_path.rsplit(".", maxsplit=1)
+    decoy_path = f"{split_path[0]}_reversed.fasta"
+
+    if os.path.exists(decoy_path):
+        print(f"Using existing decoy proteins at {decoy_path}")
+        return decoy_path
+
+    print("Generating reversed protein sequences")
+    with open(decoy_path, "w") as dfh:
+        with open(target_db_path) as tfh:
+            for title, protein in readers.read_fasta_sequences(tfh):
+                prot_id = title.split()[0][1:]
+                dfh.write(f">{decoy_prefix}_{prot_id}\n")
+                dfh.write(f"{protein[::-1]}\n")
+
+    return decoy_path
+
+
 def generate_decoy_file(target_db_path: str,
                         proteolyzer: proteolysis.Proteolyzer,
                         decoy_prefix: str = '_DECOY') -> str:
@@ -33,7 +64,7 @@ def generate_decoy_file(target_db_path: str,
     """
     split_path = target_db_path.rsplit('.', maxsplit=1)
     decoy_path = f"{split_path[0]}_reversed_{proteolyzer.enzyme}" \
-                 f"_digested.{split_path[1]}"
+                 f"_digested.csv"
 
     if os.path.exists(decoy_path):
         print(f"Using existing decoy peptides at {decoy_path}")
