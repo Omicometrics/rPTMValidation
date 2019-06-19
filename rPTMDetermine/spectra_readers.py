@@ -278,7 +278,7 @@ class MZMLReader:
         if comp_mode is CompressionMode.zlib:
             decoded = zlib.decompress(decoded)
         unpack_format = "<%dd" % default_array_length if precision == 64 else \
-            "<%dL" % default_array_length
+            "<%df" % default_array_length
         return struct.unpack(unpack_format, decoded)
 
     def _process_binary_data_array(self, data_array,
