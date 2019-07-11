@@ -188,7 +188,7 @@ class PSM():
             Official string representation.
 
         """
-        out = {s: getattr(self, s) for s in __class__.__slots__}
+        out = {s: getattr(self, s) for s in self.__class__.__slots__}
         return f"<{self.__class__.__name__} {out}>"
 
     def __hash__(self):
