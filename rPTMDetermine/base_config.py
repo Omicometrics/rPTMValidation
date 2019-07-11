@@ -128,7 +128,7 @@ class BaseConfig():
         """
         path = self.json_config.get(
             "unimod_ptm_file",
-            os.path.join(os.path.dirname(__file__), "unimod.xml"))
+            os.path.join(os.path.dirname(__file__), "readers", "unimod.xml"))
         if not os.path.exists(path):
             raise FileNotFoundError(f"UniMod PTM file not found at {path}")
         return path
