@@ -8,7 +8,7 @@ from typing import List, Union
 
 from pepfrag import MassType, ModSite
 
-from .ptmdb import PTMDB
+from .ptmdb import ModificationNotFoundException, PTMDB
 
 
 class UnknownModificationException(Exception):
@@ -59,15 +59,15 @@ def _parse_mod_string(mod_str: str, ptmdb: PTMDB, mass_type: MassType)\
 
     # Get the name of the modification
     name = mod_list[0]
-    if '(' in name:
+    if '(' in name and mod_list[1] != "N-term":
         # For cases such as Delta:H(4)C(2)(H), extract up to the final bracket
         # pair as the modification name
         name = name[:name.rfind('(')]
 
     # Get the mass change associated with the modification
-    mass = ptmdb.get_mass(name, mass_type)
-
-    if mass is None:
+    try:
+        mass = ptmdb.get_mass(name, mass_type)
+    except ModificationNotFoundException:
         raise UnknownModificationException(
             f"Failed to detect mass for modification {name}")
 
