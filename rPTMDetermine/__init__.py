@@ -9,6 +9,8 @@ from .peptide_spectrum_match import PSM, UnmodPSM
 from .psm_container import PSMContainer
 from .retriever import Retriever
 from .validator import Validator
+from .retriever import RetrieverConfig
+from .validator import ValidatorConfig
 
 __all__ = [
     "MissingConfigOptionException",
@@ -17,6 +19,7 @@ __all__ = [
     "UnmodPSM",
     "PSMContainer",
     "Retriever",
-    "Validator"
+    "Validator",
+    "RetrieverConfig",
+    "ValidatorConfig"
 ]
-

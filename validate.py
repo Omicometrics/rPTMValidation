@@ -8,7 +8,7 @@ import argparse
 import json
 import pickle
 
-from rPTMDetermine import Validator
+from rPTMDetermine import Validator, ValidatorConfig
 from rPTMDetermine.validator import write_results
 
 
@@ -35,7 +35,7 @@ def main():
     """
     args = parse_args()
     with open(args.config) as handle:
-        conf = json.load(handle)
+        conf = ValidatorConfig(json.load(handle))
 
     validator = Validator(conf)
     validator.validate()
