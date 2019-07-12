@@ -68,7 +68,9 @@ def read_mgf_file(spec_file: str) -> Dict[str, Spectrum]:
                           for n in s.split(" ")[:2]]).reshape(-1, 2),
                 float(fields["PEPMASS"]),
                 int(fields["CHARGE"].split("+")[0]) if "CHARGE" in fields
-                else None)
+                else None,
+                retention_time=float(fields["RTINSECONDS"])
+                if "RTINSECONDS" in fields else None)
 
     return spectra
 
@@ -238,7 +240,10 @@ class MZMLReader:
         precs = spectrum.xpath("x:precursorList/x:precursor",
                                namespaces=self.ns_map)
         for precursor in precs:
-            prec_id = self._parse_id(precursor.get("spectrumRef"))
+            prec_ref = precursor.get("spectrumRef")
+            if prec_ref is None:
+                continue
+            prec_id = self._parse_id(prec_ref)
             ions = [float(e.get("value"))
                     for e in precursor.xpath(
                         "x:selectedIonList/x:selectedIon/"

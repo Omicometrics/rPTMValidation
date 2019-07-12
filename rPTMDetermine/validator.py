@@ -177,8 +177,8 @@ def write_results(output_file: str, psms: Sequence[PSM],
         # Write the header row
         header = ["Rawset", "SpectrumID", "Sequence", "Modifications",
                   "Charge", "DecoySequence", "DecoyModifications",
-                  "DecoyCharge", "rPTMDetermineScore", "rPTMDetermineProb",
-                  "SimilarityScore", "SiteProbability"]
+                  "DecoyCharge", "RetentionTime", "rPTMDetermineScore",
+                  "rPTMDetermineProb", "SimilarityScore", "SiteProbability"]
         if include_features:
             header.extend([f"Feature_{f}" for f in feature_names])
             header.extend([f"DecoyFeature_{f}" for f in feature_names])
@@ -196,7 +196,8 @@ def write_results(output_file: str, psms: Sequence[PSM],
 
             row = [psm.data_id, psm.spec_id, psm.seq, mod_str, psm.charge,
                    psm.decoy_id.seq, dmod_str, psm.decoy_id.charge,
-                   psm.lda_score, psm.lda_prob, psm.max_similarity,
+                   psm.spectrum.retention_time, psm.lda_score, psm.lda_prob,
+                   psm.max_similarity,
                    psm.site_prob if psm.site_prob is not None else ""]
 
             if include_features:

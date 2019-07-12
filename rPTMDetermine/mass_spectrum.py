@@ -28,10 +28,11 @@ class Spectrum():
 
     """
 
-    __slots__ = ("_peaks", "prec_mz", "charge",)
+    __slots__ = ("_peaks", "prec_mz", "charge", "retention_time",)
 
     def __init__(self, peak_list: Union[np.ndarray, List[List[float]]],
-                 prec_mz: float, charge: Optional[int]):
+                 prec_mz: float, charge: Optional[int],
+                 retention_time: Optional[float] = None):
         """
         Initializes the class.
 
@@ -39,6 +40,7 @@ class Spectrum():
             peak_list (list): A list of lists containing m/z, intensity pairs.
             prec_mz (float): The mass/charge ratio of the spectrum precursor.
             charge (int): The charge state of the spectrum precursor.
+            ret_time (float): The retention time for the spectrum.
 
         """
         self._peaks = (peak_list if isinstance(peak_list, np.ndarray)
@@ -47,6 +49,7 @@ class Spectrum():
             self._peaks = self._peaks.T
         self.prec_mz = prec_mz
         self.charge = charge
+        self.retention_time = retention_time
 
         # Sort the spectrum by the m/z ratios
         self._mz_sort()
