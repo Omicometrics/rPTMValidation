@@ -5,6 +5,7 @@ Generate decoy peptides from the target protein sequence database.
 """
 import argparse
 import csv
+import logging
 import os
 from typing import List, Tuple
 
@@ -31,10 +32,10 @@ def generate_decoy_fasta(target_db_path: str,
     decoy_path = f"{split_path[0]}_reversed.fasta"
 
     if os.path.exists(decoy_path):
-        print(f"Using existing decoy proteins at {decoy_path}")
+        logging.info(f"Using existing decoy proteins at {decoy_path}.")
         return decoy_path
 
-    print("Generating reversed protein sequences")
+    logging.info("Generating reversed protein sequences.")
     with open(decoy_path, "w") as dfh:
         with open(target_db_path) as tfh:
             for title, protein in readers.read_fasta_sequences(tfh):
@@ -67,10 +68,10 @@ def generate_decoy_file(target_db_path: str,
                  f"_digested.csv"
 
     if os.path.exists(decoy_path):
-        print(f"Using existing decoy peptides at {decoy_path}")
+        logging.info(f"Using existing decoy peptides at {decoy_path}.")
         return decoy_path
 
-    print("Generating decoy peptides")
+    logging.info("Generating decoy peptides.")
     with open(decoy_path, 'w', newline='') as dfh:
         writer = csv.writer(dfh, delimiter='\t')
         writer.writerow(("Protein_Name", "Sequence", "Monoisotopic_Mass"))

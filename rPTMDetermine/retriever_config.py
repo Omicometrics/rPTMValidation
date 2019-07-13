@@ -16,6 +16,16 @@ class RetrieverConfig(BaseConfig):
     retrieval.
 
     """
+
+    fields = [
+        "retrieval_tolerance",
+        "validated_ids_file",
+        "model_file",
+        "unmod_model_file",
+        "db_ionscores_file",
+        "sim_threshold",
+    ]
+
     def __init__(self, json_config: Dict[str, Any]):
         """
         Initialize the RetrieverConfig class using the JSON configuration.
@@ -28,6 +38,16 @@ class RetrieverConfig(BaseConfig):
             "unmod_model_file",
             "sim_threshold"
         ])
+
+    def __str__(self) -> str:
+        """
+        Implements the string conversion for the class.
+
+        """
+        string = super().__str__()
+        for option in ValidatorConfig.fields:
+            string += f"\t{option} = {getattr(self, option)}\n"
+        return string
 
     @property
     def retrieval_tolerance(self) -> float:

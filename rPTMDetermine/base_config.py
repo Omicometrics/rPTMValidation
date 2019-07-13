@@ -5,6 +5,7 @@ rPTMDetermine.
 
 """
 import enum
+import json
 import os
 from typing import Any, Dict, List, Optional
 
@@ -38,6 +39,26 @@ class BaseConfig():
     default values, if any.
 
     """
+    
+    fields = [
+        "search_engine",
+        "data_sets",
+        "enzyme",
+        "fixed_residues",
+        "target_db_path",
+        "target_mod",
+        "target_residues",
+        "unimod_ptm_file",
+        "correct_deamidation",
+        "benchmark_file",
+        "sim_threshold",
+        "alternative_localization_residues",
+        "site_localization_threshold",
+        "output_dir",
+        "exclude_features",
+        "fdr",
+    ]
+
     def __init__(self, json_config: Dict[str, Any],
                  extra_required: Optional[List[str]] = None):
         """
@@ -53,6 +74,22 @@ class BaseConfig():
             self._required.extend(extra_required)
 
         self._check_required()
+
+    def __str__(self) -> str:
+        """
+        Implements the string conversion for the class.
+
+        """
+        string = ""
+        for option in BaseConfig.fields:
+            if option == "search_engine":
+                val = self.search_engine.name
+            elif option == "data_sets":
+                val = json.dumps(self.data_sets, indent="\t")
+            else:
+                val = getattr(self, option)
+            string += f"\t{option} = {val}\n"
+        return string
 
     @property
     def search_engine(self) -> SearchEngine:
@@ -193,12 +230,12 @@ class BaseConfig():
         return self.json_config.get("exclude_features", [])
 
     @property
-    def fdr(self) -> Optional[float]:
+    def fdr(self) -> float:
         """
         The false discovery rate to be applied.
 
         """
-        return self.json_config.get("fdr", None)
+        return self.json_config.get("fdr", 0.01)
 
     def _check_required(self):
         """

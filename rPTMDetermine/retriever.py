@@ -7,6 +7,7 @@ results.
 import collections
 import csv
 import itertools
+import logging
 import os
 import pickle
 from typing import Dict, List, Sequence, Set, Tuple
@@ -85,20 +86,20 @@ class Retriever(validator_base.ValidateBase):
     to guide the search for appropriate modified peptides.
 
     """
-    def __init__(self, json_config):
+    def __init__(self, config: RetrieverConfig):
         """
         Initialize the Retriever object.
 
         Args:
-            json_config (json.JSON): The JSON configuration read from a file.
+            config (RetrieverConfig): The configuration options for retrieval.
 
         """
-        super().__init__(RetrieverConfig(json_config))
+        super().__init__(config, "retrieve.log")
 
-        print("Reading database ion scores...")
+        logging.info("Reading database ion scores.")
         self.db_ionscores = self._get_ionscores()
 
-        print("Reading database search results...")
+        logging.info("Reading database search results.")
         self.db_res = self._get_search_results()
 
     def retrieve(self):
@@ -107,11 +108,11 @@ class Retriever(validator_base.ValidateBase):
         results.
 
         """
-        print("Extracting peptide candidates...")
+        logging.info("Extracting peptide candidates.")
         peptides = self._get_peptides()
         all_spectra = self.read_mass_spectra()
 
-        print("Building LDA validation models...")
+        logging.info("Building LDA validation models.")
         model, score_stats, _, features = self.build_model()
         unmod_model, unmod_score_stats, _, unmod_features = \
             self.build_unmod_model()
@@ -123,41 +124,42 @@ class Retriever(validator_base.ValidateBase):
                 prec_mzs.append(spec.prec_mz)
         prec_mzs = np.array(prec_mzs)
 
-        print("Finding better modified PSMs...")
+        logging.info("Finding better modified PSMs.")
         psms = self._get_better_matches(peptides, all_spectra, spec_ids,
                                         prec_mzs,
                                         tol=self.config.retrieval_tolerance)
 
-        print("Calculating rPTMDetermine probabilities...")
+        logging.info("Calculating rPTMDetermine probabilities.")
         calculate_lda_probs(psms, model, score_stats, features)
 
         # Keep only the best match (in terms of LDA score) for each spectrum
-        print("Retaining best PSM for each spectrum...")
+        logging.info("Retaining best PSM for each spectrum.")
         psms = psms.get_best_psms()
 
         # Attempt to correct for misassigned deamidation
-        print("Attempting to correct misassigned deamidation...")
+        logging.info("Attempting to correct misassigned deamidation.")
         psms = lda.apply_deamidation_correction(
             model, score_stats, psms, features, self.target_mod,
             self.proteolyzer)
 
-        print("Deamidation removed from {} PSMs".format(
+        logging.info("Deamidation removed from {} PSMs".format(
             sum(p.corrected for p in psms)))
 
-        print("Finding unmodified analogue PSMs...")
+        logging.info("Finding unmodified analogue PSMs.")
         unmod_psms = self._find_unmod_analogues(psms)
 
-        print("Calculating unmodified PSM features...")
+        logging.info("Calculating unmodified PSM features.")
         for psm in tqdm.tqdm(unmod_psms):
             psm.extract_features(None, self.proteolyzer)
 
-        print("Calculating rPTMDetermine scores for unmodified analogues...")
+        logging.info(
+            "Calculating rPTMDetermine scores for unmodified analogues.")
         calculate_lda_probs(unmod_psms, unmod_model, unmod_score_stats,
                             unmod_features)
 
         unmod_psms = unmod_psms.filter_lda_prob()
 
-        print("Calculating similarity scores...")
+        logging.info("Calculating similarity scores.")
         psms = similarity.calculate_similarity_scores(psms, unmod_psms)
 
         if self.config.benchmark_file is not None:
@@ -171,7 +173,7 @@ class Retriever(validator_base.ValidateBase):
         rec_psms = rec_psms.filter_lda_similarity(0.99,
                                                   self.config.sim_threshold)
 
-        print("Localizing modification site(s)...")
+        logging.info("Localizing modification site(s).")
         self._localize(rec_psms, model, features, 0.99,
                        self.config.sim_threshold)
 

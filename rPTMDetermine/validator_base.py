@@ -9,9 +9,11 @@ import collections
 import copy
 import functools
 import itertools
+import logging
 import math
 import multiprocessing as mp
 import os
+import sys
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import tqdm
@@ -68,22 +70,41 @@ class ValidateBase():
     retrieval pathways for the program.
 
     """
-    def __init__(self, config):
+    def __init__(self, config, log_file: str):
         """
         Initialize the object.
 
         Args:
             config (subclass of BaseConfig)
+            log_file (str): The name of the log file.
 
         """
         # Config does not have a type hint to allow duck typing of
         # ValidatorConfig and RetrieverConfig
         self.config = config
 
+        output_dir = self.config.output_dir
+        if output_dir is None:
+            output_dir = path_str
+
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+
+        # Configure logging to go to a file and STDERR
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(levelname)s]  %(message)s",
+            handlers=[
+                logging.FileHandler(os.path.join(output_dir, log_file)),
+                logging.StreamHandler(sys.stdout)
+            ])
+            
+        logging.info(f"Using configuration: {str(self.config)}")
+
         self.proteolyzer = proteolysis.Proteolyzer(self.config.enzyme)
 
         # The UniMod PTM DB
-        print("Reading UniMod PTM DB")
+        logging.info("Reading UniMod PTM DB.")
         self.unimod = readers.PTMDB(self.config.unimod_ptm_file)
 
         # The database search reader
@@ -101,13 +122,6 @@ class ValidateBase():
 
         path_str = (f"{self.target_mod.replace('->', '2')}_"
                     f"{''.join(self.config.target_residues)}")
-
-        output_dir = self.config.output_dir
-        if output_dir is None:
-            output_dir = path_str
-
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir, exist_ok=True)
 
         self.file_prefix = f"{output_dir}/{path_str}_"
 
@@ -163,7 +177,7 @@ class ValidateBase():
         """
         unmod_psms: List[UnmodPSM] = []
 
-        print("Caching PSM sequences...")
+        logging.info("Caching PSM sequences.")
         psm_info: Dict[Tuple[str, int], List[Tuple[PSM, List[ModSite]]]] = \
             collections.defaultdict(list)
         for psm in mod_psms:
@@ -186,7 +200,7 @@ class ValidateBase():
         all_spectra = self.read_mass_spectra()
 
         for data_id, data in self.db_res.items():
-            print(f"Processing data set {data_id}...")
+            logging.info(f"Processing data set {data_id}.")
             unmods: Dict[str, List[Tuple[PSM, List[ModSite]]]] = {}
             for spec_id, matches in data.items():
                 res: List[Tuple[PSM, List[ModSite]]] = []
@@ -201,7 +215,7 @@ class ValidateBase():
             if not unmods:
                 continue
 
-            print(f"Processing {len(unmods)} spectra...")
+            logging.info(f"Processing {len(unmods)} spectra.")
 
             for spec_id, _psms in unmods.items():
                 spec = all_spectra[data_id][spec_id]
