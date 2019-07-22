@@ -83,6 +83,11 @@ class ValidateBase():
         # ValidatorConfig and RetrieverConfig
         self.config = config
 
+        self.target_mod = self.config.target_mod
+
+        path_str = (f"{self.target_mod.replace('->', '2')}_"
+                    f"{''.join(self.config.target_residues)}")
+
         output_dir = self.config.output_dir
         if output_dir is None:
             output_dir = path_str
@@ -115,13 +120,8 @@ class ValidateBase():
         self.db_res: Dict[str, Dict[str, List[readers.SearchResult]]] = \
             collections.defaultdict(lambda: collections.defaultdict(list))
 
-        self.target_mod = self.config.target_mod
-
         # Get the mass change associated with the target modification
         self.mod_mass = self.unimod.get_mass(self.config.target_mod)
-
-        path_str = (f"{self.target_mod.replace('->', '2')}_"
-                    f"{''.join(self.config.target_residues)}")
 
         self.file_prefix = f"{output_dir}/{path_str}_"
 
