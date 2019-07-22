@@ -45,7 +45,7 @@ class RetrieverConfig(BaseConfig):
 
         """
         string = super().__str__()
-        for option in ValidatorConfig.fields:
+        for option in RetrieverConfig.fields:
             string += f"\t{option} = {getattr(self, option)}\n"
         return string
 
