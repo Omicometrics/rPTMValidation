@@ -137,7 +137,7 @@ def plot_score_similarity(psms: Sequence[PSM], lda_threshold: float,
     if use_benchmarks:
         plt.scatter(sims, ldas, marker="^",
                     facecolors="grey", linewidths=1,
-                    label="Other Identifications")
+                    label="Other")
     else:
         plt.scatter(sims, ldas, marker="o", facecolors="none",
                     edgecolors=TARGET_COLOR, linewidths=1)
@@ -145,7 +145,7 @@ def plot_score_similarity(psms: Sequence[PSM], lda_threshold: float,
     if use_benchmarks:
         plt.scatter(bench_sims, bench_ldas, marker="o",
                     facecolors=TARGET_COLOR,
-                    label="Benchmark Identifications")
+                    label="Benchmark")
 
     plt.xlabel("Similarity Score", fontproperties=FONT)
     plt.ylabel("rPTMDetermine Score", fontproperties=FONT)
@@ -158,8 +158,12 @@ def plot_score_similarity(psms: Sequence[PSM], lda_threshold: float,
                linewidth=2)
 
     if use_benchmarks:
-        ax.legend(prop=FONT, frameon=False, loc=0,
-                  bbox_to_anchor=(0.14, 0.5, 0.5, 0.5), handletextpad=0.0001)
+        handles, labels = ax.get_legend_handles_labels()
+        order = [1, 0]
+        ax.legend([handles[idx] for idx in order],
+                  [labels[idx] for idx in order],
+                  prop=FONT, frameon=False, loc=2,
+                  bbox_to_anchor=(0.1, 0.5, 0.5, 0.5), handletextpad=0.0001)
 
     max_lda = max(bench_ldas + ldas)
     plt.annotate(f"$s_{{PD}}$={lda_threshold:.2f}",
