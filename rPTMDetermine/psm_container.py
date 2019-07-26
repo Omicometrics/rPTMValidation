@@ -57,7 +57,7 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
 
         """
         for psm in self.data:
-            psm.clean_fragment_ions()
+            psm.peptide.clean_fragment_ions()
 
     def get_by_seq(self, seq: str) -> PSMContainer[PSMType]:
         """
