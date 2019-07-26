@@ -9,6 +9,7 @@ import sys
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from matplotlib import font_manager
+import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 import numpy as np
@@ -131,8 +132,12 @@ def plot_score_similarity(psms: Sequence[PSM], lda_threshold: float,
         else:
             sims.append(psm.max_similarity)
             ldas.append(psm.lda_score)
-
-    sim_score = min(bench_sims) if use_benchmarks else sim_threshold
+            
+    if use_benchmarks:
+        sim_score = min([sim for sim, lda in zip(bench_sims, bench_ldas)
+                         if lda >= lda_threshold])
+    else:
+        sim_score = sim_threshold
 
     if use_benchmarks:
         plt.scatter(sims, ldas, marker="^",
@@ -422,6 +427,86 @@ def plot_fisher_scores(scores: Dict[str, float],
         plt.savefig(save_path)
 
     plt.show()
+
+
+def _add_sequence(ions, anns, height, mzs, intensities, max_int, max_mz, peptide, b_type):
+    """
+    """
+    color = "blue" if b_type else "red"
+    for ii, ion in enumerate(ions):
+        ann1 = anns[ion]
+        x1 = mzs[ann1.peak_num]
+
+        # Arrow down to annotated peaks
+        plt.arrow(x1, height, 0,
+                  intensities[ann1.peak_num] - height,
+                  alpha=0.4, ls="dashed", color=color)
+
+        if ii + 1 >= len(ions):
+            continue
+
+        next_ion = ions[ii + 1]
+        ann2 = anns[next_ion]
+        if ann2.ion_pos == ann1.ion_pos + 1:
+            x2 = mzs[ann2.peak_num]
+
+            # Arrow to consecutive ion annotation
+            plt.arrow(x2, height, (x1 - x2) + 0.005 * max_mz, 0,
+                      length_includes_head=True,
+                      head_width=0.01 * max_int, head_length=0.01 * max_mz,
+                      fc=color, ec=color, clip_on=False)
+
+            res_idx = (ann1.ion_pos if b_type
+                       else len(peptide.seq) - ann2.ion_pos)
+            res = peptide.seq[res_idx]
+            if any(ms.site == res_idx + 1 for ms in peptide.mods):
+                res += "*"
+
+            plt.text(0.5 * (x2 + x1), 1.01 * height, res, color=color,
+                     fontsize=14)
+
+
+def plot_psm(psm: PSM):
+    """
+    """
+    mzs = psm.spectrum[:, 0]
+    intensities = psm.spectrum[:, 1]
+    plt.stem(mzs, intensities, "black", basefmt=' ', markerfmt=' ',
+             label=None)
+    ax = plt.gca()
+    ax.set_ylim(bottom=0)
+    for spine in ["top", "right"]:
+        ax.spines[spine].set_visible(False)
+    ax.set_ylabel("Intensity")
+    ax.set_xlabel("$\\it{m/z}$")
+
+    max_int = max(intensities)
+    max_mz = max(mzs)
+    
+    anns = psm.annotate_spectrum()
+    psm.peptide.clean_fragment_ions()
+    
+    def add_sequence(ions, height, b_type):
+        _add_sequence(ions, anns, height, mzs, intensities, max_int, max_mz,
+                      psm.peptide, b_type)
+
+    # Annotate b-ions
+    add_sequence([a for a in anns.keys() if a[0] == "b" and "[+]" in a],
+                 1.01 * max_int, True)
+
+    # Annotate y-ions
+    add_sequence([a for a in anns.keys() if a[0] == "y" and "[+]" in a],
+                 1.07 * max_int, False)
+
+    b_line = mlines.Line2D([], [], color="blue", marker="",
+                           label="$\\it{b}$-ions")
+    y_line = mlines.Line2D([], [], color="red", marker="",
+                           label="$\\it{y}$-ions")
+
+    plt.legend(handles=[b_line, y_line], frameon=False, loc="upper center",
+               bbox_to_anchor=(0.5, -0.07), ncol=2)
+    
+    return anns
 
 
 def plot_fisher_scores_file(scores_file: str, threshold: float,
