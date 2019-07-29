@@ -10,7 +10,7 @@ import itertools
 import logging
 import os
 import pickle
-from typing import Dict, List, Sequence, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -28,6 +28,9 @@ from . import readers
 from .retriever_config import RetrieverConfig
 from . import similarity
 from . import validator_base
+
+
+PeptideTuple = Tuple[str, Tuple[ModSite, ...], int, readers.PeptideType]
 
 
 CHARGE_LABELS = [['[+]' if cj == 0 else f'[{cj + 1}+]'
@@ -108,11 +111,12 @@ class Retriever(validator_base.ValidateBase):
         results.
 
         """
-        logging.info("Extracting peptide candidates.")
-        peptides = self._get_peptides()
-        logging.info(f"{len(peptides)} candidate peptides extracted.")
-
+        logging.info("Reading mass spectra files.")
         all_spectra = self.read_mass_spectra()
+
+        logging.info("Extracting peptide candidates.")
+        peptides, ret_times = self._get_peptides(all_spectra)
+        logging.info(f"{len(peptides)} candidate peptides extracted.")
 
         logging.info("Building LDA validation models.")
         model, score_stats, _, features = self.build_model()
@@ -128,6 +132,7 @@ class Retriever(validator_base.ValidateBase):
 
         logging.info("Finding better modified PSMs.")
         psms = self._get_matches(peptides, all_spectra, spec_ids, prec_mzs,
+                                 ret_times,
                                  tol=self.config.retrieval_tolerance)
         logging.info(f"{len(psms)} candidate PSMs identified.")
 
@@ -218,28 +223,51 @@ class Retriever(validator_base.ValidateBase):
 
         return db_res
 
-    def _get_peptides(self) \
-            -> List[Tuple[str, Tuple[ModSite, ...], int, readers.PeptideType]]:
+    def _get_peptides(
+        self,
+        all_spectra: Dict[str, Dict[str, mass_spectrum.Spectrum]]) \
+            -> Tuple[List[PeptideTuple],
+                     Dict[PeptideTuple, Dict[str, Optional[float]]]]:
         """
         Retrieves the candidate peptides from the database search results.
 
         """
         allpeps: List[Tuple[str, str, str, Tuple[ModSite, ...], int,
-                            readers.PeptideType]] = \
+                            readers.PeptideType, Optional[float]]] = \
             [(set_id, spec_id, m.seq, tuple(m.mods), m.charge,
-              m.pep_type)
+              m.pep_type, all_spectra[set_id][spec_id].retention_time)
              for set_id, spectra in self.db_res.items()
              for spec_id, matches in spectra.items()
              for m in matches]
 
-        peps: Set[Tuple[str, Tuple[ModSite, ...], int,
-                        readers.PeptideType]] = \
-            {(x[2], tuple(self._filter_mods(x[3], x[2])), x[4], x[5])
-             for x in allpeps if len(x[2]) >= 7 and
-             set(RESIDUES).issuperset(x[2]) and
-             any(r in x[2] for r in self.config.target_residues)}
+        residue_set = set(RESIDUES)
 
-        return list(peps)
+        # Deduplicate peptides based on sequence, charge, modifications and
+        # type, whilst also retaining the retention time for later use
+        peps = []
+        seen: Set[PeptideTuple] = set()
+        seen_add = seen.add
+        retention_times: Dict[PeptideTuple, Dict[str, List[float]]] = \
+            collections.defaultdict(lambda: collections.defaultdict(list))
+        for (set_id, _, seq, mods, charge, pep_type, rt) in allpeps:
+            if len(seq) >= 7 and residue_set.issuperset(seq) and \
+                    any(r in seq for r in self.config.target_residues):
+                filt_mods = tuple(self._filter_mods(mods, seq))
+                key = (seq, filt_mods, charge, pep_type)
+                if key not in seen:
+                    seen_add(key)
+                    peps.append((seq, filt_mods, charge, pep_type))
+                if rt is not None:
+                    retention_times[key][set_id].append(rt)
+
+        # Average the retention times for each peptide, within the same data
+        # set
+        avg_rts = {pep: {set_id: sum(rts) / len(rts)
+                         if not any(rt is None for rt in rts) else None
+                         for set_id, rts in retention_times[pep].items()}
+                   for pep in retention_times.keys()}
+
+        return peps, avg_rts
 
     def _get_ionscores(self) \
             -> Dict[str, Dict[str, float]]:
@@ -268,11 +296,11 @@ class Retriever(validator_base.ValidateBase):
 
     def _get_matches(
             self,
-            peptides: List[Tuple[str, Tuple[ModSite, ...], int,
-                                 readers.PeptideType]],
+            peptides: List[PeptideTuple],
             spectra: Dict[str, Dict[str, mass_spectrum.Spectrum]],
             spec_ids: List[Tuple[str, str]],
             prec_mzs: np.array,
+            ret_times: Dict[PeptideTuple, Dict[str, Optional[float]]],
             tol: float) -> PSMContainer[PSM]:
         """
         Finds candidate PSMs.
@@ -283,6 +311,7 @@ class Retriever(validator_base.ValidateBase):
                             the spectrum ID. Values are the mass spectra.
             spec_ids (list): A list of (Data ID, Spectrum ID) tuples.
             prec_mzs (numpy.array): The precursor mass/charge ratios.
+            ret_times (dict): The (average) unmodified peptide retention times.
             tol (float): The mass/charge ratio tolerance.
 
         Returns:
@@ -294,7 +323,8 @@ class Retriever(validator_base.ValidateBase):
             raise RuntimeError("mod_mass is not set - exiting.")
 
         cands: PSMContainer[PSM] = PSMContainer()
-        for (seq, mods, charge, pep_type) in tqdm.tqdm(peptides):
+        for unmod_peptide in tqdm.tqdm(peptides):
+            (seq, mods, charge, pep_type) = unmod_peptide
             pmass = Peptide(seq, charge, mods).mass
             # Check for free (non-modified target residue)
             if mods is None:
@@ -330,9 +360,26 @@ class Retriever(validator_base.ValidateBase):
                     by_mzs_u = by_mzs + 0.2
                     by_mzs_l = by_mzs - 0.2
                     for kk in bix:
-                        spec = spectra[spec_ids[kk][0]][spec_ids[kk][1]]
+                        set_id = spec_ids[kk][0]
+                        spec = spectra[set_id][spec_ids[kk][1]]
 
+                        # Remove spectra with a small number of peaks
                         if len(spec) < 5:
+                            continue
+
+                        # Compare modified and unmodified identification
+                        # retention times, persisting with the PSM only if the
+                        # modified retention time is within an expected range
+                        # of the unmodified peptide retention time
+                        unmod_rt = ret_times[unmod_peptide][set_id]
+                        mod_rt = spec.retention_time
+                        if (self.config.max_rt_below is not None and
+                                mod_rt < unmod_rt +
+                                (self.config.max_rt_below * 60)):
+                            continue
+                        if (self.config.max_rt_above is not None and
+                                mod_rt > unmod_rt +
+                                (self.config.max_rt_above * 60)):
                             continue
 
                         mzk = spec[:, 0]

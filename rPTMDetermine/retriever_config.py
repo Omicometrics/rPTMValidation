@@ -24,6 +24,8 @@ class RetrieverConfig(BaseConfig):
         "unmod_model_file",
         "db_ionscores_file",
         "sim_threshold",
+        "max_rt_below",
+        "max_rt_above",
     ]
 
     def __init__(self, json_config: Dict[str, Any]):
@@ -101,3 +103,23 @@ class RetrieverConfig(BaseConfig):
 
         """
         return self.json_config["sim_threshold"]
+        
+    @property
+    def max_rt_below(self) -> Optional[float]:
+        """
+        The maximum reduction in retention time allowed, comparing the
+        modified peptide retention time to the unmodified peptide retention
+        time, in minutes.
+        
+        """
+        return self.json_config.get("max_rt_below", None)
+        
+    @property
+    def max_rt_above(self) -> Optional[float]:
+        """
+        The maximum increase in retention time allowed, comparing the
+        modified peptide retention time to the unmodified peptide retention
+        time, in minutes.
+        
+        """
+        return self.json_config.get("max_rt_above", None)
