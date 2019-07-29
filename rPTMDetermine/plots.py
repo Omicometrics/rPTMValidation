@@ -466,11 +466,11 @@ def _add_sequence(ions, anns, height, mzs, intensities, max_int, max_mz, peptide
                      fontsize=14)
 
 
-def plot_psm(psm: PSM, denoise: bool = False):
+def plot_psm(psm: PSM, denoise: bool = False, denoise_tol: float = 0.2):
     """
     """
     if denoise:
-        _, denoised_spec = psm.denoise_spectrum()
+        _, denoised_spec = psm.denoise_spectrum(tol=denoise_tol)
         mzs = denoised_spec[:, 0]
         intensities = denoised_spec[:, 1]
         if psm.peptide.fragment_ions is None:
