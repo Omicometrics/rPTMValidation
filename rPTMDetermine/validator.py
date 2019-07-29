@@ -301,13 +301,13 @@ class Validator(validator_base.ValidateBase):
                              if f not in self.config.exclude_features]
 
         # Train full LDA model
-        self.model, score_stats, full_lda_threshold =\
+        self.model, _, full_lda_threshold =\
             lda.lda_model(mod_df, self.mod_features)
 
         logging.info(f"LDA validation threshold: {full_lda_threshold}")
 
-        results = lda.lda_validate(mod_df, self.mod_features,
-                                   full_lda_threshold)
+        results, models = lda.lda_validate(mod_df, self.mod_features,
+                                           full_lda_threshold)
 
         # Merge the LDA results to the PSM objects
         self.psms = lda.merge_lda_results(self.psms, results)
@@ -317,8 +317,8 @@ class Validator(validator_base.ValidateBase):
         if self.config.correct_deamidation:
             logging.info("Applying deamidation correction.")
             self.psms = lda.apply_deamidation_correction(
-                self.model, score_stats, self.psms, self.mod_features,
-                self.target_mod, self.proteolyzer)
+                models, self.psms, self.mod_features, self.target_mod,
+                self.proteolyzer)
 
         # Write the model input to a file for re-use in retrieval
         mod_df.to_csv(self.file_prefix + "model.csv")
@@ -350,13 +350,13 @@ class Validator(validator_base.ValidateBase):
         unmod_features = [f for f in list(self.unmod_psms[0].features.keys())
                           if f not in self.config.exclude_features]
 
-        unmod_model, unmod_score_stats, unmod_lda_threshold =\
+        _, _, unmod_lda_threshold =\
             lda.lda_model(unmod_df, unmod_features)
 
         logging.info("LDA unmodified validation threshold: "
                      f"{unmod_lda_threshold}")
 
-        unmod_results =\
+        unmod_results, unmod_models =\
             lda.lda_validate(unmod_df, unmod_features, unmod_lda_threshold)
 
         self.unmod_psms =\
@@ -366,8 +366,8 @@ class Validator(validator_base.ValidateBase):
             logging.info(
                 "Applying deamidation correction for unmodified analogues.")
             self.unmod_psms = lda.apply_deamidation_correction(
-                unmod_model, unmod_score_stats, self.unmod_psms,
-                unmod_features, None, self.proteolyzer)
+                unmod_models, self.unmod_psms, unmod_features, None,
+                self.proteolyzer)
 
         unmod_df.to_csv(self.file_prefix + "unmod_model.csv")
         logging.info("LDA unmodified model features written to "

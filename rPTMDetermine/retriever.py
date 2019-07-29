@@ -110,6 +110,8 @@ class Retriever(validator_base.ValidateBase):
         """
         logging.info("Extracting peptide candidates.")
         peptides = self._get_peptides()
+        logging.info(f"{len(peptides)} candidate peptides extracted.")
+
         all_spectra = self.read_mass_spectra()
 
         logging.info("Building LDA validation models.")
@@ -125,9 +127,9 @@ class Retriever(validator_base.ValidateBase):
         prec_mzs = np.array(prec_mzs)
 
         logging.info("Finding better modified PSMs.")
-        psms = self._get_better_matches(peptides, all_spectra, spec_ids,
-                                        prec_mzs,
-                                        tol=self.config.retrieval_tolerance)
+        psms = self._get_matches(peptides, all_spectra, spec_ids, prec_mzs,
+                                 tol=self.config.retrieval_tolerance)
+        logging.info(f"{len(psms)} candidate PSMs identified.")
 
         logging.info("Calculating rPTMDetermine probabilities.")
         calculate_lda_probs(psms, model, score_stats, features)
@@ -135,10 +137,11 @@ class Retriever(validator_base.ValidateBase):
         # Keep only the best match (in terms of LDA score) for each spectrum
         logging.info("Retaining best PSM for each spectrum.")
         psms = psms.get_best_psms()
+        logging.info(f"{len(psms)} unique spectra have candidate PSMs.")
 
         # Attempt to correct for misassigned deamidation
         logging.info("Attempting to correct misassigned deamidation.")
-        psms = lda.apply_deamidation_correction(
+        psms = lda.apply_deamidation_correction_full(
             model, score_stats, psms, features, self.target_mod,
             self.proteolyzer)
 
@@ -151,6 +154,7 @@ class Retriever(validator_base.ValidateBase):
         logging.info("Calculating unmodified PSM features.")
         for psm in tqdm.tqdm(unmod_psms):
             psm.extract_features(None, self.proteolyzer)
+            psm.peptide.clean_fragment_ions()
 
         logging.info(
             "Calculating rPTMDetermine scores for unmodified analogues.")
@@ -182,12 +186,17 @@ class Retriever(validator_base.ValidateBase):
         rec_psms = rec_psms.filter_site_prob(
             self.config.site_localization_threshold)
 
+        logging.info("Writing retrieval results to files.")
+
         self.write_results(psms,
-                           self.file_prefix + "all_recovered_results.csv")
+                           self.file_prefix + "all_recovered_results.csv",
+                           pickle_file=self.file_prefix + "all_rec_psms")
 
         self.write_results(rec_psms,
                            self.file_prefix + "recovered_results.csv",
                            pickle_file=self.file_prefix + "rec_psms")
+
+        logging.info("Finished retrieving identifications.")
 
     def _get_search_results(self) \
             -> Dict[str, Dict[str, List[readers.SearchResult]]]:
@@ -257,7 +266,7 @@ class Retriever(validator_base.ValidateBase):
 
         return ionscores
 
-    def _get_better_matches(
+    def _get_matches(
             self,
             peptides: List[Tuple[str, Tuple[ModSite, ...], int,
                                  readers.PeptideType]],
@@ -266,8 +275,7 @@ class Retriever(validator_base.ValidateBase):
             prec_mzs: np.array,
             tol: float) -> PSMContainer[PSM]:
         """
-        Finds the PSMs which are better than those found for other database
-        search engines.
+        Finds candidate PSMs.
 
         Args:
             peptides (list): The peptide candidates.
@@ -278,11 +286,14 @@ class Retriever(validator_base.ValidateBase):
             tol (float): The mass/charge ratio tolerance.
 
         Returns:
-            A list of PSM objects representing those matches better than other
-            matches from database search engines.
+            A list of PSM objects.
 
         """
-        better: PSMContainer[PSM] = PSMContainer()
+        if self.mod_mass is None:
+            logging.error("mod_mass has not been set - exiting.")
+            raise RuntimeError("mod_mass is not set - exiting.")
+
+        cands: PSMContainer[PSM] = PSMContainer()
         for (seq, mods, charge, pep_type) in tqdm.tqdm(peptides):
             pmass = Peptide(seq, charge, mods).mass
             # Check for free (non-modified target residue)
@@ -316,16 +327,9 @@ class Retriever(validator_base.ValidateBase):
                         and "-" not in i[1]
                     ]
                     by_mzs = np.array([i[0] for i in by_ions])
-                    by_anns = np.array([i[1] for i in by_ions])
                     by_mzs_u = by_mzs + 0.2
                     by_mzs_l = by_mzs - 0.2
                     for kk in bix:
-                        try:
-                            dbscore = self.db_ionscores[
-                                spec_ids[kk][0]][spec_ids[kk][1]]
-                        except KeyError:
-                            continue
-
                         spec = spectra[spec_ids[kk][0]][spec_ids[kk][1]]
 
                         if len(spec) < 5:
@@ -343,15 +347,6 @@ class Retriever(validator_base.ValidateBase):
                         if jjm <= 5:
                             continue
 
-                        score = get_ion_score(seq, charge, list(by_anns[diff]),
-                                              spec[:jjm + 1, :], 0.2)
-
-                        # Filter to those PSMs whose ion scores, before
-                        # denoising, are at least close to the score from
-                        # other search engines
-                        if score < dbscore - 1:
-                            continue
-
                         psm = PSM(spec_ids[kk][0], spec_ids[kk][1],
                                   mod_peptide, spectrum=spec,
                                   target=(
@@ -361,9 +356,8 @@ class Retriever(validator_base.ValidateBase):
                                              self.proteolyzer)
                         psm.peptide.clean_fragment_ions()
 
-                        if round(psm.features["MatchScore"], 4) >= dbscore:
-                            better.append(psm)
-        return better
+                        cands.append(psm)
+        return cands
 
     def _remove_search_ids(self, psms: PSMContainer) -> PSMContainer:
         """
