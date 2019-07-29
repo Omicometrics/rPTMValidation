@@ -238,11 +238,13 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
         rows = []
         for psm in self.data:
             trow = {**{"data_id": psm.data_id, "spec_id": psm.spec_id,
-                       "seq": psm.seq, "target": True}, **psm.features}
+                       "seq": psm.seq, "target": True, "uid": psm.uid},
+                    **psm.features}
             rows.append(trow)
             if not target_only and psm.decoy_id is not None:
                 drow = {**{"data_id": "", "spec_id": "",
-                           "seq": psm.decoy_id.seq, "target": False},
+                           "seq": psm.decoy_id.seq, "target": False,
+                           "uid": psm.uid},
                         **psm.decoy_id.features}
                 rows.append(drow)
 
