@@ -175,18 +175,32 @@ class MZMLReader:
         """
         spectra = {}
         # read from xml data
-        context = etree.iterparse(mzml_file, events=("end",),
-                                  tag=self._fix_tag("spectrum"))
+        context = etree.iterparse(
+            mzml_file, events=("end",),
+            tag=[self._fix_tag("referenceableParamGroup"),
+                 self._fix_tag("spectrum")])
+        param_groups = {}
         for event, element in context:
+            if element.tag == self._fix_tag("referenceableParamGroup"):
+                params = {}
+                for param in element.findall(self._fix_tag("cvParam")):
+                    params[param.get("name")] = param.get("value", None)
+                param_groups[element.get("id")] = params
+                continue
+        
             # This contains the cycle and experiment information
             spectrum_info = dict(element.items())
             default_array_length = int(spectrum_info.get(
                 'default_array_length', spectrum_info["defaultArrayLength"]))
 
             # MS level
-            ms_level = int(
-                element.xpath("x:cvParam[@name='ms level']",
-                              namespaces=self.ns_map)[0].get("value"))
+            try:
+                ms_level = int(
+                    element.xpath("x:cvParam[@name='ms level']",
+                                  namespaces=self.ns_map)[0].get("value"))
+            except IndexError:
+                group = element.find(self._fix_tag("referenceableParamGroupRef")).get("ref")
+                ms_level = int(param_groups[group]["ms level"])
             if ms_level != n:
                 continue
 
