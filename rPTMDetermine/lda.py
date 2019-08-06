@@ -25,6 +25,9 @@ from .psm_container import PSMContainer, PSMType
 warnings.filterwarnings(action='ignore', category=DataConversionWarning)
 
 
+ScoreStatsDict = Dict[int, Tuple[float, float]]
+
+
 class CustomPipeline(Pipeline):
     """
     A simple subclass of sklearn's Pipeline to provide a convenience function
@@ -163,7 +166,7 @@ def _lda_pipeline(fisher_threshold: float = None):
     return CustomPipeline(steps)
 
 
-def _get_dist_stats(classes, preds, scores) -> Dict[int, Tuple[float, float]]:
+def _get_dist_stats(classes, preds, scores) -> ScoreStatsDict:
     """
     Calculates the distribution statistics (mean and std) for the
     score distribution of each class.
@@ -248,7 +251,7 @@ def calculate_score(prob: float, dist_scores) -> float:
 
 def lda_model(df: pd.DataFrame, features: List[str],
               prob_threshold: float = 0.99)\
-        -> Tuple[CustomPipeline, Dict[int, Tuple[float, float]], float]:
+        -> Tuple[CustomPipeline, ScoreStatsDict, float]:
     """
     Trains and uses an LDA validation model.
 
@@ -280,8 +283,7 @@ def _lda_validate(df: pd.DataFrame, features: List[str],
                   full_lda_threshold: float,
                   prob_threshold: float = 0.99, folds: int = 10)\
         -> Tuple[float, pd.DataFrame,
-                 Dict[int, Tuple[CustomPipeline, float,
-                                 Dict[int, Tuple[float, float]]]]]:
+                 Dict[int, Tuple[CustomPipeline, float, ScoreStatsDict]]]:
     """
     Trains and uses an LDA validation model using cross-validation.
 
@@ -299,8 +301,7 @@ def _lda_validate(df: pd.DataFrame, features: List[str],
 
     pipeline = _lda_pipeline()
 
-    cv_models: Dict[int, Tuple[CustomPipeline, float,
-                               Dict[int, Tuple[float, float]]]] = {}
+    cv_models: Dict[int, Tuple[CustomPipeline, float, ScoreStatsDict]] = {}
 
     results = np.zeros((len(X), 3))
     for train_idx, test_idx in StratifiedKFold(n_splits=folds).split(X, y):
@@ -331,7 +332,7 @@ def lda_validate(df: pd.DataFrame, features: List[str],
                  full_lda_threshold: float, **kwargs)\
                  -> Tuple[pd.DataFrame,
                           Dict[int, Tuple[CustomPipeline, float,
-                                          Dict[int, Tuple[float, float]]]]]:
+                                          ScoreStatsDict]]]:
     """
     Trains and uses an LDA validation model using cross-validation.
 
@@ -397,7 +398,7 @@ def _apply_deamidation_correction(
     proteolyzer: proteolysis.Proteolyzer,
     get_model_func: Callable[[PSMType],
                              Tuple[CustomPipeline, float,
-                                   Dict[int, Tuple[float, float]]]]) \
+                                   ScoreStatsDict]]) \
         -> PSMContainer[PSMType]:
     """
     Removes the deamidation modification from applicable peptide
@@ -454,8 +455,7 @@ def _apply_deamidation_correction(
 
 
 def apply_deamidation_correction(
-    models: Dict[int, Tuple[CustomPipeline, float,
-                            Dict[int, Tuple[float, float]]]],
+    models: Dict[int, Tuple[CustomPipeline, float, ScoreStatsDict]],
     psms: PSMContainer[PSMType],
     features: List[str],
     target_mod: Optional[str],
@@ -492,7 +492,7 @@ def apply_deamidation_correction(
 
 def apply_deamidation_correction_full(
     model: CustomPipeline,
-    score_stats: Dict[int, Tuple[float, float]],
+    score_stats: ScoreStatsDict,
     psms: PSMContainer[PSMType],
     features: List[str],
     target_mod: Optional[str],
