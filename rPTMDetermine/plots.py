@@ -515,7 +515,11 @@ def plot_psm(psm: PSM, denoise: bool = False, denoise_tol: float = 0.2):
     plt.legend(handles=[b_line, y_line], frameon=False, loc="upper center",
                bbox_to_anchor=(0.5, -0.07), ncol=2)
     
-    return anns
+    annotated_peaks = []
+    for label, ann in anns.items():
+        annotated_peaks.append((label, mzs[ann.peak_num], ann.mass_diff))
+
+    return sorted(annotated_peaks, key=lambda a: a[1])
 
 
 def plot_fisher_scores_file(scores_file: str, threshold: float,
