@@ -57,6 +57,8 @@ class BaseConfig():
         "output_dir",
         "exclude_features",
         "fdr",
+        "log_level",
+        "spectra_cache_file",
     ]
 
     def __init__(self, json_config: Dict[str, Any],
@@ -236,6 +238,22 @@ class BaseConfig():
 
         """
         return self.json_config.get("fdr", 0.01)
+
+    @property
+    def log_level(self) -> str:
+        """
+        The log level for the program output.
+
+        """
+        return self.json_config.get("log_level", "INFO").upper()
+
+    @property
+    def spectra_cache_file(self) -> Optional[str]:
+        """
+        The location at which to store the pickle spectra cache.
+
+        """
+        return self.json_config.get("spectra_cache_file", None)
 
     def _check_required(self):
         """
