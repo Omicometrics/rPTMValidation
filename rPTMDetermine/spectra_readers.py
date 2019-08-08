@@ -179,10 +179,10 @@ class MZMLReader:
             mzml_file, events=("end",),
             tag=[self._fix_tag("referenceableParamGroup"),
                  self._fix_tag("spectrum")])
-        param_groups = {}
+        param_groups: Dict[str, Dict[str, Any]] = {}
         for event, element in context:
             if element.tag == self._fix_tag("referenceableParamGroup"):
-                params = {}
+                params: Dict[str, Any] = {}
                 for param in element.findall(self._fix_tag("cvParam")):
                     params[param.get("name")] = param.get("value", None)
                 param_groups[element.get("id")] = params
