@@ -11,11 +11,12 @@ import csv
 import functools
 import itertools
 import logging
+import multiprocessing as mp
 import operator
 import os
 import pickle
 import sys
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 import tqdm
@@ -23,6 +24,7 @@ import tqdm
 from pepfrag import AA_MASSES, FIXED_MASSES, ModSite, Peptide
 
 from .constants import RESIDUES
+from .features import Features
 from . import generate_decoys
 from . import lda
 from . import mass_spectrum
@@ -172,7 +174,7 @@ def write_results(output_file: str, psms: Sequence[PSM],
         psms (list of peptide_spectrum_match.PSMs): The resulting PSMs.
 
     """
-    feature_names = list(psms[0].features.keys())
+    feature_names = psms[0].features.feature_names()
     with open(output_file, 'w', newline='') as handle:
         writer = csv.writer(handle, delimiter="\t")
         # Write the header row
@@ -202,8 +204,8 @@ def write_results(output_file: str, psms: Sequence[PSM],
                    psm.site_prob if psm.site_prob is not None else ""]
 
             if include_features:
-                row.extend([f"{psm.features[f]:.8f}" for f in feature_names])
-                row.extend([f"{psm.decoy_id.features[f]:.8f}"
+                row.extend([f"{psm.features.get(f):.8f}" for f in feature_names])
+                row.extend([f"{psm.decoy_id.features.get(f):.8f}"
                             for f in feature_names])
 
             writer.writerow(row)
@@ -211,7 +213,7 @@ def write_results(output_file: str, psms: Sequence[PSM],
 
 def decoy_features(decoy_peptide: Peptide, spec: mass_spectrum.Spectrum,
                    target_mod: str,
-                   proteolyzer: proteolysis.Proteolyzer) -> Dict[str, float]:
+                   proteolyzer: proteolysis.Proteolyzer) -> Features:
     """
     Calculates the PSM features for the decoy peptide and spectrum
     combination. This function is defined here in order to be picklable
@@ -260,6 +262,9 @@ class Validator(validator_base.ValidateBase):
         self.model = None
         self.mod_features = None
 
+        # Used for multiprocessing throughout the class methods
+        self.pool = mp.Pool()
+
     def validate(self):
         """
         Validates the identifications in the input data files.
@@ -297,7 +302,7 @@ class Validator(validator_base.ValidateBase):
 
         # Validate the PSMs using LDA
         logging.info("Validating PSMs.")
-        self.mod_features = [f for f in list(self.psms[0].features.keys())
+        self.mod_features = [f for f in self.psms[0].features.feature_names()
                              if f not in self.config.exclude_features]
 
         # Train full LDA model
@@ -347,7 +352,7 @@ class Validator(validator_base.ValidateBase):
         unmod_df = self.unmod_psms.to_df()
 
         logging.info("Validating unmodified analogues.")
-        unmod_features = [f for f in list(self.unmod_psms[0].features.keys())
+        unmod_features = [f for f in self.unmod_psms[0].features.feature_names()
                           if f not in self.config.exclude_features]
 
         _, _, unmod_lda_threshold =\
@@ -589,14 +594,14 @@ class Validator(validator_base.ValidateBase):
                     dpsm_vars = self.pool.map(_decoy_features, d_candidates)
 
                     # Find the decoy candidate with the highest MatchScore
-                    max_match = max(dpsm_vars, key=lambda k: k["MatchScore"])
+                    max_match = max(dpsm_vars, key=lambda k: k.MatchScore)
 
                     # If the decoy ID is better than the one already assigned
                     # to the PSM, then replace it
                     psm = psms[idx]
                     if (psm.decoy_id is None or
-                            psm.decoy_id.features["MatchScore"] <
-                            max_match["MatchScore"]):
+                            psm.decoy_id.features.MatchScore <
+                            max_match.MatchScore):
                         d_peptide = d_candidates[dpsm_vars.index(max_match)]
                         psm.decoy_id = \
                             DecoyID(d_peptide.seq, d_peptide.charge,

@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from pepfrag import FIXED_MASSES, IonType, ModSite, Peptide
 
 from .constants import DEFAULT_FRAGMENT_IONS
+from .features import Features
 from . import ionscore
 from . import mass_spectrum
 from . import proteolysis
@@ -68,7 +69,7 @@ class PSM():
         self.similarity_scores: List[SimilarityScore] = []
 
         # The PSM features
-        self.features: Dict[str, float] = {}
+        self.features: Features = Features()
 
         # The results of LDA validation
         self.lda_score: Optional[float] = None
@@ -269,7 +270,7 @@ class PSM():
 
     def extract_features(self, target_mod: Optional[str],
                          proteolyzer: proteolysis.Proteolyzer) \
-            -> Dict[str, float]:
+            -> Features:
         """
         Extracts possible machine learning features from the peptide spectrum
         match.
@@ -284,7 +285,7 @@ class PSM():
                                                    of missed cleavages.
 
         Returns:
-            dictionary of calculated features
+            Features.
 
         """
         self._check_spectrum_initialized()
@@ -295,7 +296,7 @@ class PSM():
         self._calculate_features(ions, denoised_spectrum, target_mod, 0.2)
 
         # Use the proteolyzer to determine the number of missed cleavages
-        self.features['n_missed_cleavages'] =\
+        self.features.MissedCleavages =\
             proteolyzer.count_missed_cleavages(self.seq)
 
         return self.features
@@ -303,7 +304,7 @@ class PSM():
     def _calculate_features(self, ions: dict,
                             denoised_spectrum: mass_spectrum.Spectrum,
                             target_mod: Optional[str], tol: float)\
-            -> Dict[str, float]:
+            -> Features:
         """
         Calculates potential machine learning features from the peptide
         spectrum match.
@@ -320,12 +321,12 @@ class PSM():
         """
         # The length of the peptide
         pep_len = len(self.seq)
-        self.features["PepLen"] = pep_len
+        self.features.PepLen = pep_len
 
-        self.features["PepMass"] = self.peptide.mass
-        self.features["Charge"] = self.charge
-        self.features["ErrPepMass"] = abs(
-            self.features["PepMass"] - denoised_spectrum.prec_mz * self.charge
+        self.features.PepMass = self.peptide.mass
+        self.features.Charge = self.charge
+        self.features.ErrPepMass = abs(
+            self.features.PepMass - denoised_spectrum.prec_mz * self.charge
             + self.charge * FIXED_MASSES["H"])
 
         # Intensities from the spectrum
@@ -342,7 +343,7 @@ class PSM():
                                       if ms.mod == target_mod)}
 
             # The sum of the modified ion intensities
-            self.features["TotalIntMod"] = \
+            self.features.TotalIntMod = \
                 sum(intensities[ions[l][0]] for l in ions.keys()
                     if (l[0] == 'y' and '-' not in l and
                         ions[l][1] >= mod_ion_start['y'])
@@ -356,9 +357,9 @@ class PSM():
         ann_peaks = {v[0] for v in ions.values()}
 
         # The number of annotated peaks divided by the total number of peaks
-        self.features["FracIon"] = len(ann_peaks) /\
+        self.features.FracIon = len(ann_peaks) /\
             float(len(denoised_spectrum))
-        self.features["FracIonInt"] =\
+        self.features.FracIonInt =\
             sum(intensities[idx] for idx in ann_peaks) / sum(intensities)
 
         # The intensity of the base peak
@@ -371,7 +372,7 @@ class PSM():
         # The fraction of peaks with intensities greater than 20% of the base
         # peak annotated by the theoretical ions
         ions_20 = {ions[l][0] for l in seq_ions if ions[l][0] in peaks_20}
-        self.features["FracIon20%"] = \
+        self.features.FracIon20pc = \
             (len(ions_20) / float(len(peaks_20)) if peaks_20 else 0)
 
         # Sequence coverage
@@ -379,9 +380,11 @@ class PSM():
                                                    mod_ion_start)
 
         # The fraction of b-ions annotated by theoretical ions
-        self.features["NumIonb2L"] = self.features["NumIonb"] / float(pep_len)
+        if self.features.NumIonb is not None:
+            self.features.NumIonb2l = self.features.NumIonb / float(pep_len)
         # The fraction of y-ions annotated by theoretical ions
-        self.features["NumIony2L"] = self.features["NumIony"] / float(pep_len)
+        if self.features.NumIony is not None:
+            self.features.NumIony2l = self.features.NumIony / float(pep_len)
 
         # Ion score
         self._calculate_ion_scores(denoised_spectrum, n_anns, target_mod, tol)
@@ -398,10 +401,10 @@ class PSM():
         """
         mzs = denoised_spectrum.mz
         mzrange = mzs[-1] - mzs[0]
-        self.features["MatchScore"] = ionscore.ionscore(
+        self.features.MatchScore = ionscore.ionscore(
             len(self.seq), len(mzs), n_anns["all"], mzrange, tol)
         if target_mod is not None:
-            self.features["MatchScoreMod"] = ionscore.ionscore(
+            self.features.MatchScoreMod = ionscore.ionscore(
                 len(self.seq), len(mzs), n_anns["mod"], mzrange, tol)
 
     def _calculate_sequence_coverage(self, target_mod: Optional[str],
@@ -459,11 +462,11 @@ class PSM():
             if target_mod is not None and n_ions["mod"] > n_anns["mod"]:
                 n_anns["mod"] = n_ions["mod"]
 
-        self.features["NumIonb"] = max_ion_counts['b']
-        self.features["NumIony"] = max_ion_counts['y']
+        self.features.NumIonb = max_ion_counts['b']
+        self.features.NumIony = max_ion_counts['y']
 
         # The longest sequence tag found divided by the peptide length
-        self.features["SeqTagm"] = max_ion_seq_len / float(len(self.seq))
+        self.features.SeqTagm = max_ion_seq_len / float(len(self.seq))
 
         return n_anns
 

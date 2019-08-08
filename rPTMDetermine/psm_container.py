@@ -225,6 +225,29 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
         """
         return self.get_unique_peptides(predicate=lambda psm: psm.benchmark)
 
+    def get_validated(
+        self,
+        lda_threshold: float,
+        sim_threshold: float,
+        site_prob: float) -> PSMContainer[PSMType]:
+        """
+        Extracts the validated identifications from the full set of PSMs.
+
+        Args:
+            lda_threshold (float): The LDA score threshold.
+            sim_threshold (float): The similarity score threshold.
+            site_prob (float): The minimum site probability for localization.
+
+        Returns:
+            A PSMContainer containing only validated PSMs.
+
+        """
+        return PSMContainer(
+            [psm for psm in self.data if
+             round(psm.lda_score, 2) >= lda_threshold and
+             round(psm.max_similarity, 2) >= sim_threshold and
+             (psm.site_prob is None or psm.site_prob >= site_prob)])
+
     def to_df(self, target_only: bool = False) -> pd.DataFrame:
         """
         Converts the psm features, including decoy, into a pandas dataframe,
@@ -237,15 +260,17 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
         """
         rows = []
         for psm in self.data:
-            trow = {**{"data_id": psm.data_id, "spec_id": psm.spec_id,
-                       "seq": psm.seq, "target": True, "uid": psm.uid},
-                    **psm.features}
+            trow = {"data_id": psm.data_id, "spec_id": psm.spec_id,
+                    "seq": psm.seq, "target": True, "uid": psm.uid}
+            for feature, value in psm.features:
+                trow[feature] = value
             rows.append(trow)
             if not target_only and psm.decoy_id is not None:
-                drow = {**{"data_id": "", "spec_id": "",
-                           "seq": psm.decoy_id.seq, "target": False,
-                           "uid": psm.uid},
-                        **psm.decoy_id.features}
+                drow = {"data_id": "", "spec_id": "",
+                        "seq": psm.decoy_id.seq, "target": False,
+                        "uid": psm.uid}
+                for feature, value in psm.decoy_id.features:
+                    drow[feature] = value
                 rows.append(drow)
 
         return pd.DataFrame(rows)
