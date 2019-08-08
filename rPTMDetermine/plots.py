@@ -82,7 +82,7 @@ def plot_scores(psms: List[PSM], lda_threshold: float,
                 label=f"Decoy {label_prefix}identifications")
 
     plt.xlabel("Spectrum No.", fontproperties=FONT)
-    plt.ylabel("rPTMDetermine Score", fontproperties=FONT)
+    plt.ylabel("LDA Score", fontproperties=FONT)
 
     # Calculate the x-position for the score annotation
     ann_x_pos = decoy_scores[0] + 0.05 * len(decoy_scores)
@@ -153,7 +153,7 @@ def plot_score_similarity(psms: Sequence[PSM], lda_threshold: float,
                     label="Benchmark")
 
     plt.xlabel("Similarity Score", fontproperties=FONT)
-    plt.ylabel("rPTMDetermine Score", fontproperties=FONT)
+    plt.ylabel("LDA Score", fontproperties=FONT)
 
     ax = plt.gca()
     ax.axhline(lda_threshold, color=THRESHOLD_COLOR, linestyle="--",
@@ -221,7 +221,7 @@ def plot_recovered_score_similarity(psms: Sequence[PSM],
                 label="Decoy Identifications")
 
     plt.xlabel("Similarity Score", fontproperties=FONT)
-    plt.ylabel("rPTMDetermine Score", fontproperties=FONT)
+    plt.ylabel("LDA Score", fontproperties=FONT)
 
     ax = plt.gca()
     ax.axhline(lda_threshold, color=THRESHOLD_COLOR, linestyle="--",
