@@ -18,7 +18,7 @@ from .ptmdb import PTMDB
 from .search_result import PeptideType, SearchResult
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(eq=True, frozen=True)
 class PercolatorSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
 
     __slots__ = ("prec_mz", "svm_score", "q_value", "pep", "p_value")
@@ -78,7 +78,7 @@ class PercolatorReader(Reader):  # pylint: disable=too-few-public-methods
             res.append(
                 PercolatorSearchResult(
                     seq=seq,
-                    mods=mods,
+                    mods=tuple(mods),
                     charge=charge,
                     spectrum=scan,
                     dataset=None,

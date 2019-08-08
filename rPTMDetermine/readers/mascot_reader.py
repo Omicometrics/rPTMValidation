@@ -24,7 +24,7 @@ from .search_result import PeptideType, SearchResult
 QUERY_NUM_REGEX = re.compile(r"[a-z]+(\d+)")
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(eq=True, frozen=True)
 class MascotSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
 
     __slots__ = ("ionscore", "deltamass", "proteins", "num_matches",)

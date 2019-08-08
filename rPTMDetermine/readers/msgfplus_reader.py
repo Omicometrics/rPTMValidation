@@ -15,7 +15,7 @@ from .ptmdb import PTMDB
 from .search_result import PeptideType
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(eq=True, frozen=True)
 class MSGFPlusSearchResult(MZIdentMLSearchResult):  # pylint: disable=too-few-public-methods
 
     __slots__ = ("raw_score", "denovo_score", "spec_evalue", "evalue",)
@@ -66,7 +66,7 @@ class MSGFPlusReader(MZIdentMLReader):  # pylint: disable=too-few-public-methods
                 res.append(
                     MSGFPlusSearchResult(
                         seq=peptide[0],
-                        mods=peptide[1],
+                        mods=tuple(peptide[1]),
                         charge=ident.charge,
                         spectrum=spec_id,
                         dataset=dataset,
