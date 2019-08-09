@@ -5,8 +5,7 @@ Module contains a class to define a Peptide Spectrum Match (PSM).
 """
 import bisect
 import collections
-import dataclasses
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -25,82 +24,6 @@ DecoyID = collections.namedtuple(
 
 SimilarityScore = collections.namedtuple(
     "SimilarityScore", ["data_id", "spectrum_id", "score"])
-
-
-@dataclasses.dataclass(init=False)
-class Features:
-    """
-    A data class to represent the available features.
-
-    """
-    __slots__ = ("NumPeaks", "TotInt", "PepLen", "PepMass", "Charge",
-                 "ErrPepMass", "IntModyb", "TotalIntMod", "FracIon",
-                 "FracIonInt", "NumSeriesbm", "NumSeriesym", "NumIona",
-                 "NumIonynl", "NumIonbnl", "FracIonIntb_c1", "FracIonIntb_c2",
-                 "FracIonIntb_c3", "FracIonInty_c1", "FracIonInty_c2",
-                 "FracIonInty_c3", "FracIon20pc", "NumIonb", "NumIony",
-                 "FracIonInty", "FracIonIntb", "FracIonMod", "MatchScore",
-                 "MatchScoreMod", "SeqTagm",)
-
-    NumPeaks: float
-    TotInt: float
-    PepLen: float
-    PepMass: float
-    Charge: float
-    ErrPepMass: float
-    IntModyb: float
-    TotalIntMod: float
-    FracIon: float
-    FracIonInt: float
-    NumSeriesbm: float
-    NumSeriesym: float
-    NumIona: float
-    NumIonynl: float
-    NumIonbnl: float
-    FracIonIntb_c1: float
-    FracIonIntb_c2: float
-    FracIonIntb_c3: float
-    FracIonInty_c1: float
-    FracIonInty_c2: float
-    FracIonInty_c3: float
-    FracIon20pc: float
-    NumIonb: float
-    NumIony: float
-    FracIonInty: float
-    FracIonIntb: float
-    FracIonMod: float
-    MatchScore: float
-    MatchScoreMod: float
-    SeqTagm: float
-
-    def __init__(self):
-        """
-        Initialize the data class by defaulting all features to 0.0.
-
-        """
-        for feature in Features.__slots__:
-            setattr(self, feature, 0.)
-
-    def feature_names(self) -> Tuple[str, ...]:
-        """
-        Extracts the available feature names.
-
-        Returns:
-            Tuple of feature names.
-
-        """
-        return Features.__slots__
-
-    def __iter__(self) -> Iterator[Tuple[str, float]]:
-        """
-        Iterates through the features to retrieve the corresponding values.
-
-        Returns:
-            Iterator of (feature, value) tuples.
-
-        """
-        for feature in self.feature_names():
-            yield feature, getattr(self, feature)
 
 
 class PSM():
@@ -537,8 +460,8 @@ class PSM():
             except KeyError:
                 continue
             bion_ix += ix
-            setattr(self.features, f"FracIonIntb_c{c}",
-                    intensities[ix].sum() / len_normalizer)
+            self.features.set(f"FracIonIntb_c{c}",
+                              intensities[ix].sum() / len_normalizer)
 
             # y series
             try:
@@ -546,8 +469,8 @@ class PSM():
             except KeyError:
                 continue
             yion_ix += ix
-            setattr(self.features, f"FracIonInty_c{c}",
-                    intensities[ix].sum() / len_normalizer)
+            self.features.set(f"FracIonInty_c{c}",
+                              intensities[ix].sum() / len_normalizer)
 
         # The fraction of peaks with intensities greater than 20% of the base
         # peak annotated by the theoretical ions

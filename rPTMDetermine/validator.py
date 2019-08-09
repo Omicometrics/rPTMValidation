@@ -29,7 +29,7 @@ from . import generate_decoys
 from . import lda
 from . import mass_spectrum
 from . import peptides
-from .peptide_spectrum_match import DecoyID, Features, PSM, UnmodPSM
+from .peptide_spectrum_match import DecoyID, PSM, UnmodPSM
 from . import proteolysis
 from .psm_container import PSMContainer, PSMType
 from . import readers

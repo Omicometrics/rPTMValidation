@@ -12,39 +12,68 @@ class Features:
     A data class to represent the available features.
 
     """
-    __slots__ = ("PepLen",
-                 "PepMass",
-                 "Charge",
-                 "ErrPepMass",
-                 "TotalIntMod",
-                 "FracIon",
-                 "FracIonInt",
-                 "FracIon20pc",
-                 "NumIonb",
-                 "NumIony",
-                 "NumIonb2l",
-                 "NumIony2l",
-                 "MatchScore",
-                 "MatchScoreMod",
-                 "SeqTagm",
-                 "MissedCleavages",)
+    __slots__ = (
+        "NumPeaks",
+        "TotInt",
+        "PepLen",
+        "PepMass",
+        "Charge",
+        "ErrPepMass",
+        "IntModyb",
+        "TotalIntMod",
+        "FracIon",
+        "FracIonInt",
+        "NumSeriesbm",
+        "NumSeriesym",
+        "NumIona",
+        "NumIonynl",
+        "NumIonbnl",
+        "FracIonIntb_c1",
+        "FracIonIntb_c2",
+        "FracIonIntb_c3",
+        "FracIonInty_c1",
+        "FracIonInty_c2",
+        "FracIonInty_c3",
+        "FracIon20pc",
+        "NumIonb",
+        "NumIony",
+        "FracIonInty",
+        "FracIonIntb",
+        "FracIonMod",
+        "MatchScore",
+        "MatchScoreMod",
+        "SeqTagm",)
 
+    NumPeaks: Optional[float]
+    TotInt: Optional[float]
     PepLen: Optional[float]
     PepMass: Optional[float]
     Charge: Optional[float]
     ErrPepMass: Optional[float]
+    IntModyb: Optional[float]
     TotalIntMod: Optional[float]
     FracIon: Optional[float]
     FracIonInt: Optional[float]
+    NumSeriesbm: Optional[float]
+    NumSeriesym: Optional[float]
+    NumIona: Optional[float]
+    NumIonynl: Optional[float]
+    NumIonbnl: Optional[float]
+    FracIonIntb_c1: Optional[float]
+    FracIonIntb_c2: Optional[float]
+    FracIonIntb_c3: Optional[float]
+    FracIonInty_c1: Optional[float]
+    FracIonInty_c2: Optional[float]
+    FracIonInty_c3: Optional[float]
     FracIon20pc: Optional[float]
     NumIonb: Optional[float]
     NumIony: Optional[float]
-    NumIonb2l: Optional[float]
-    NumIony2l: Optional[float]
+    FracIonInty: Optional[float]
+    FracIonIntb: Optional[float]
+    FracIonMod: Optional[float]
     MatchScore: Optional[float]
     MatchScoreMod: Optional[float]
     SeqTagm: Optional[float]
-    MissedCleavages: Optional[float]
 
     @staticmethod
     def all_feature_names() -> Tuple[str, ...]:
@@ -91,3 +120,10 @@ class Features:
 
         """
         return getattr(self, feature)
+
+    def set(self, feature: str, value: float):
+        """
+        Sets the value of the given feature.
+
+        """
+        setattr(self, feature, value)
