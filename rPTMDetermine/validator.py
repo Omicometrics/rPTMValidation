@@ -10,6 +10,8 @@ import copy
 import csv
 import functools
 import itertools
+import logging
+import multiprocessing as mp
 import operator
 import os
 import pickle
@@ -22,6 +24,7 @@ import tqdm
 from pepfrag import AA_MASSES, FIXED_MASSES, ModSite, Peptide
 
 from .constants import RESIDUES
+from .features import Features
 from . import generate_decoys
 from . import lda
 from . import mass_spectrum
@@ -177,8 +180,8 @@ def write_results(output_file: str, psms: Sequence[PSM],
         # Write the header row
         header = ["Rawset", "SpectrumID", "Sequence", "Modifications",
                   "Charge", "DecoySequence", "DecoyModifications",
-                  "DecoyCharge", "rPTMDetermineScore", "rPTMDetermineProb",
-                  "SimilarityScore", "SiteProbability"]
+                  "DecoyCharge", "RetentionTime", "rPTMDetermineScore",
+                  "rPTMDetermineProb", "SimilarityScore", "SiteProbability"]
         if include_features:
             header.extend([f"Feature_{f}" for f in feature_names])
             header.extend([f"DecoyFeature_{f}" for f in feature_names])
@@ -196,12 +199,14 @@ def write_results(output_file: str, psms: Sequence[PSM],
 
             row = [psm.data_id, psm.spec_id, psm.seq, mod_str, psm.charge,
                    psm.decoy_id.seq, dmod_str, psm.decoy_id.charge,
-                   psm.lda_score, psm.lda_prob, psm.max_similarity,
+                   psm.spectrum.retention_time, psm.lda_score, psm.lda_prob,
+                   psm.max_similarity,
                    psm.site_prob if psm.site_prob is not None else ""]
 
             if include_features:
-                row.extend([f"{val:.8f}" for _, val in psm.features])
-                row.extend([f"{val:.8f}" for _, val in psm.decoy_id.features])
+                row.extend([f"{psm.features.get(f):.8f}" for f in feature_names])
+                row.extend([f"{psm.decoy_id.features.get(f):.8f}"
+                            for f in feature_names])
 
             writer.writerow(row)
 
@@ -225,21 +230,23 @@ class Validator(validator_base.ValidateBase):
     encompasses the main functionality of the procedure.
 
     """
-    # TODO: implement proper logging
-    def __init__(self, json_config):
+    def __init__(self, config: ValidatorConfig):
         """
         Initialize the Validate object.
 
         Args:
-            json_config (json.JSON): The JSON configuration read from a file.
+            json_config (ValidatorConfig): The JSON configuration read from a
+                                           file.
 
         """
-        super().__init__(ValidatorConfig(json_config))
+        super().__init__(config, "validate.log")
 
         # The UniProt PTM DB
+        logging.info("Reading UniProt PTM file")
         self.uniprot = readers.read_uniprot_ptms(self.config.uniprot_ptm_file)
 
         # Generate the full decoy protein sequence database file
+        logging.info("Generating decoy database")
         self.decoy_db_path = generate_decoys.generate_decoy_file(
             self.config.target_db_path, self.proteolyzer)
 
@@ -255,33 +262,36 @@ class Validator(validator_base.ValidateBase):
         self.model = None
         self.mod_features = None
 
+        # Used for multiprocessing throughout the class methods
+        self.pool = mp.Pool()
+
     def validate(self):
         """
         Validates the identifications in the input data files.
 
         """
         # Process the input files to extract the modification identifications
-        print("Reading database search identifications...")
+        logging.info("Reading database search identifications.")
         self.psms = self._get_identifications()
 
         # Check whether any modified PSMs are identified
         if not self.psms:
-            print("No PSMs found matching the input. Exiting.")
+            logging.error("No PSMs found matching the input.")
             sys.exit()
 
         # Read the tandem mass spectra from the raw input files
         # After this call, all PSMs will have their associated mass spectrum
-        print("Reading mass spectra from files...")
+        logging.info("Reading mass spectra from files.")
         self.psms = self._process_mass_spectra()
 
         # Calculate the PSM quality features for each PSM
-        print("Calculating PSM features...")
+        logging.info("Calculating PSM features.")
         for psm in tqdm.tqdm(self.psms):
             psm.extract_features(self.target_mod, self.proteolyzer)
 
-        print(f"Total {len(self.psms)} identifications")
+        logging.info(f"Total {len(self.psms)} identifications found.")
 
-        print("Generating decoy PSMs...")
+        logging.info("Generating decoy PSMs.")
         self.psms = PSMContainer(list(itertools.chain(
             *[self._generate_decoy_matches(res, self.psms)
               for res in self.target_residues])))
@@ -291,16 +301,18 @@ class Validator(validator_base.ValidateBase):
         mod_df = self.psms.to_df()
 
         # Validate the PSMs using LDA
-        print("Validating PSMs...")
-        self.mod_features = [f for f in list(self.psms[0].features.keys())
+        logging.info("Validating PSMs.")
+        self.mod_features = [f for f in self.psms[0].features.feature_names()
                              if f not in self.config.exclude_features]
 
         # Train full LDA model
-        self.model, score_stats, full_lda_threshold =\
+        self.model, _, full_lda_threshold =\
             lda.lda_model(mod_df, self.mod_features)
 
-        results = lda.lda_validate(mod_df, self.mod_features,
-                                   full_lda_threshold)
+        logging.info(f"LDA validation threshold: {full_lda_threshold}")
+
+        results, models = lda.lda_validate(mod_df, self.mod_features,
+                                           full_lda_threshold)
 
         # Merge the LDA results to the PSM objects
         self.psms = lda.merge_lda_results(self.psms, results)
@@ -308,13 +320,15 @@ class Validator(validator_base.ValidateBase):
         # Apply a deamidation removal: test whether the non-deamidated
         # peptide has a higher score for the identification
         if self.config.correct_deamidation:
-            print("Applying deamidation correction...")
+            logging.info("Applying deamidation correction.")
             self.psms = lda.apply_deamidation_correction(
-                self.model, score_stats, self.psms, self.mod_features,
-                self.target_mod, self.proteolyzer)
+                models, self.psms, self.mod_features, self.target_mod,
+                self.proteolyzer)
 
         # Write the model input to a file for re-use in retrieval
         mod_df.to_csv(self.file_prefix + "model.csv")
+        logging.info(
+            f"LDA model features written to {self.file_prefix}model.csv")
 
         # Identify the PSMs whose peptides are benchmarks
         if self.config.benchmark_file is not None:
@@ -322,50 +336,58 @@ class Validator(validator_base.ValidateBase):
 
         # --- Unmodified analogues --- #
         # Get the unmodified peptide analogues
-        print("Finding unmodified analogues...")
+        logging.info("Finding unmodified analogues.")
         self.unmod_psms = self._find_unmod_analogues(self.psms)
 
         # Calculate features for the unmodified peptide analogues
-        print("Calculating unmodified PSM features...")
+        logging.info("Calculating unmodified PSM features.")
         for psm in tqdm.tqdm(self.unmod_psms):
             psm.extract_features(None, self.proteolyzer)
 
         # Add decoy identifications to the unmodified PSMs
-        print("Generating decoy matches for unmodified analogues...")
+        logging.info("Generating decoy matches for unmodified analogues.")
         self.unmod_psms = self._generate_decoy_matches(None, self.unmod_psms)
 
         # Validate the unmodified PSMs using LDA
         unmod_df = self.unmod_psms.to_df()
 
-        print("Validating unmodified analogues...")
-        unmod_features = [f for f in list(self.unmod_psms[0].features.keys())
+        logging.info("Validating unmodified analogues.")
+        unmod_features = [f for f in self.unmod_psms[0].features.feature_names()
                           if f not in self.config.exclude_features]
 
-        unmod_model, unmod_score_stats, unmod_lda_threshold =\
+        _, _, unmod_lda_threshold =\
             lda.lda_model(unmod_df, unmod_features)
 
-        unmod_results =\
+        logging.info("LDA unmodified validation threshold: "
+                     f"{unmod_lda_threshold}")
+
+        unmod_results, unmod_models =\
             lda.lda_validate(unmod_df, unmod_features, unmod_lda_threshold)
 
         self.unmod_psms =\
             lda.merge_lda_results(self.unmod_psms, unmod_results)
 
         if self.config.correct_deamidation:
-            print("Applying deamidation correction for unmodified analogues")
+            logging.info(
+                "Applying deamidation correction for unmodified analogues.")
             self.unmod_psms = lda.apply_deamidation_correction(
-                unmod_model, unmod_score_stats, self.unmod_psms,
-                unmod_features, None, self.proteolyzer)
+                unmod_models, self.unmod_psms, unmod_features, None,
+                self.proteolyzer)
 
         unmod_df.to_csv(self.file_prefix + "unmod_model.csv")
+        logging.info("LDA unmodified model features written to "
+                     f"{self.file_prefix}unmod_model.csv")
 
         with open(self.file_prefix + "unmod_psms", "wb") as fh:
             pickle.dump(self.unmod_psms, fh)
+        logging.debug("Unmodified PSMs written to pickle dump at "
+                      f"{self.file_prefix}unmod_psms")
 
         # Filter the unmodified analogues according to their probabilities
         self.unmod_psms = self.unmod_psms.filter_lda_prob()
 
         # --- Similarity Scores --- #
-        print("Calculating similarity scores...")
+        logging.info("Calculating similarity scores.")
         # Calculate the highest similarity score for each target peptide
         self.psms = similarity.calculate_similarity_scores(self.psms,
                                                            self.unmod_psms)
@@ -381,7 +403,7 @@ class Validator(validator_base.ValidateBase):
                                 if psm.benchmark)
         else:
             sim_threshold = self.config.sim_threshold
-        print("Localizing modification sites...")
+        logging.info("Localizing modification sites.")
         super()._localize(self.psms, self.model, self.mod_features,
                           0.99, sim_threshold)
         self.psms = self.filter_localizations(self.psms)
@@ -475,7 +497,7 @@ class Validator(validator_base.ValidateBase):
         msg = f"Generated {len(decoys.seqs)} random sequences"
         if target_res is not None:
             msg += f" for target residue {target_res}"
-        print(msg)
+        logging.info(msg)
 
         # Dictionary of AA residue to list of possible modification masses
         var_ptm_masses = {res: list({m[1] for m in mods if m[1] is not None
@@ -498,8 +520,9 @@ class Validator(validator_base.ValidateBase):
         pep_strs_set = set(pep_strs)
 
         for ii, peptide in enumerate(pep_strs_set):
-            print(f"Processing peptide {ii + 1} of {len(pep_strs_set)} "
-                  f"- {peptide}")
+            logging.info(
+                f"Processing peptide {ii + 1} of {len(pep_strs_set)} "
+                f"- {peptide}")
             # Find the indices of the peptide in peptides
             pep_idxs = [idx for idx, pep in enumerate(pep_strs)
                         if pep == peptide]
@@ -571,14 +594,14 @@ class Validator(validator_base.ValidateBase):
                     dpsm_vars = self.pool.map(_decoy_features, d_candidates)
 
                     # Find the decoy candidate with the highest MatchScore
-                    max_match = max(dpsm_vars, key=lambda k: k["MatchScore"])
+                    max_match = max(dpsm_vars, key=lambda k: k.MatchScore)
 
                     # If the decoy ID is better than the one already assigned
                     # to the PSM, then replace it
                     psm = psms[idx]
                     if (psm.decoy_id is None or
-                            psm.decoy_id.features["MatchScore"] <
-                            max_match["MatchScore"]):
+                            psm.decoy_id.features.MatchScore <
+                            max_match.MatchScore):
                         d_peptide = d_candidates[dpsm_vars.index(max_match)]
                         psm.decoy_id = \
                             DecoyID(d_peptide.seq, d_peptide.charge,

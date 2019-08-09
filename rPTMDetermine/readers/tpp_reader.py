@@ -16,7 +16,7 @@ from .ptmdb import PTMDB
 from .search_result import PeptideType, SearchResult
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(eq=True, frozen=True)
 class TPPSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
 
     __slots__ = ("scores",)
@@ -163,7 +163,7 @@ class TPPReader(Reader):  # pylint: disable=too-few-public-methods
         data_id, spec_id = comb_id.split(":")
         return TPPSearchResult(
             seq=hit[1],
-            mods=list(hit[2]),
+            mods=hit[2],
             charge=hit[3],
             spectrum=spec_id,
             dataset=data_id,

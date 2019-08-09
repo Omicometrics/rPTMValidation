@@ -5,7 +5,7 @@ of PSMS.
 
 """
 import copy
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 import warnings
 
 import numpy as np
@@ -23,6 +23,9 @@ from .psm_container import PSMContainer, PSMType
 
 # Silence this since it arises when converting ints to float in StandardScaler
 warnings.filterwarnings(action='ignore', category=DataConversionWarning)
+
+
+ScoreStatsDict = Dict[int, Tuple[float, float]]
 
 
 class CustomPipeline(Pipeline):
@@ -163,7 +166,7 @@ def _lda_pipeline(fisher_threshold: float = None):
     return CustomPipeline(steps)
 
 
-def _get_dist_stats(classes, preds, scores) -> Dict[int, Tuple[float, float]]:
+def _get_dist_stats(classes, preds, scores) -> ScoreStatsDict:
     """
     Calculates the distribution statistics (mean and std) for the
     score distribution of each class.
@@ -248,7 +251,7 @@ def calculate_score(prob: float, dist_scores) -> float:
 
 def lda_model(df: pd.DataFrame, features: List[str],
               prob_threshold: float = 0.99)\
-        -> Tuple[CustomPipeline, Dict[int, Tuple[float, float]], float]:
+        -> Tuple[CustomPipeline, ScoreStatsDict, float]:
     """
     Trains and uses an LDA validation model.
 
@@ -279,7 +282,8 @@ def lda_model(df: pd.DataFrame, features: List[str],
 def _lda_validate(df: pd.DataFrame, features: List[str],
                   full_lda_threshold: float,
                   prob_threshold: float = 0.99, folds: int = 10)\
-        -> Tuple[float, pd.DataFrame, CustomPipeline]:
+        -> Tuple[float, pd.DataFrame,
+                 Dict[int, Tuple[CustomPipeline, float, ScoreStatsDict]]]:
     """
     Trains and uses an LDA validation model using cross-validation.
 
@@ -297,6 +301,8 @@ def _lda_validate(df: pd.DataFrame, features: List[str],
 
     pipeline = _lda_pipeline()
 
+    cv_models: Dict[int, Tuple[CustomPipeline, float, ScoreStatsDict]] = {}
+
     results = np.zeros((len(X), 3))
     for train_idx, test_idx in StratifiedKFold(n_splits=folds).split(X, y):
         model = pipeline.fit(X.iloc[train_idx], y.iloc[train_idx])
@@ -305,22 +311,28 @@ def _lda_validate(df: pd.DataFrame, features: List[str],
         preds = model.predict(X_test)
 
         # Shift the prob_threshold score to match the full distribution
-        lda_threshold = calculate_score(
-            prob_threshold, _get_dist_stats(y.unique(), preds, scores))
+        dist_stats = _get_dist_stats(y.unique(), preds, scores)
+        lda_threshold = calculate_score(prob_threshold, dist_stats)
 
-        scores += full_lda_threshold - lda_threshold
+        correction = full_lda_threshold - lda_threshold
+        scores += correction
+        cv_model = (copy.deepcopy(model), correction, dist_stats)
+        for idx in test_idx:
+            cv_models[idx] = cv_model
 
         results[test_idx, 0], results[test_idx, 1] = scores, preds
         results[test_idx, 2] = calculate_probs(y.unique(), preds, scores)[0][1]
 
     df["score"], df["prob"] = results[:, 0], results[:, 2]
 
-    return sum(y != results[:, 1]) / len(y), df, pipeline
+    return sum(y != results[:, 1]) / len(y), df, cv_models
 
 
 def lda_validate(df: pd.DataFrame, features: List[str],
                  full_lda_threshold: float, **kwargs)\
-                 -> Tuple[pd.DataFrame]:
+                 -> Tuple[pd.DataFrame,
+                          Dict[int, Tuple[CustomPipeline, float,
+                                          ScoreStatsDict]]]:
     """
     Trains and uses an LDA validation model using cross-validation.
 
@@ -331,9 +343,9 @@ def lda_validate(df: pd.DataFrame, features: List[str],
     Returns:
 
     """
-    _, results, _ =\
+    _, results, models =\
         _lda_validate(df, features, full_lda_threshold, **kwargs)
-    return results
+    return results, models
 
 
 def merge_lda_results(psms: List[PSM], lda_results) -> List[PSM]:
@@ -379,11 +391,14 @@ def calculate_scores(model: CustomPipeline, psms: List[PSM],
         PSMContainer(psms).to_df(target_only)[features])[:, 0]
 
 
-def apply_deamidation_correction(pipeline: CustomPipeline, dist_stats,
-                                 psms: PSMContainer[PSMType],
-                                 features: List[str],
-                                 target_mod: Optional[str],
-                                 proteolyzer: proteolysis.Proteolyzer) \
+def _apply_deamidation_correction(
+    psms: PSMContainer[PSMType],
+    features: List[str],
+    target_mod: Optional[str],
+    proteolyzer: proteolysis.Proteolyzer,
+    get_model_func: Callable[[PSMType],
+                             Tuple[CustomPipeline, float,
+                                   ScoreStatsDict]]) \
         -> PSMContainer[PSMType]:
     """
     Removes the deamidation modification from applicable peptide
@@ -393,8 +408,10 @@ def apply_deamidation_correction(pipeline: CustomPipeline, dist_stats,
     that spectrum.
 
     Args:
-        pipeline (sklearn.Pipeline): The trained LDA pipeline.
+        models (dict): A dictionary mapping test index to the model trained
+                       and used to predict on that index.
         psms (PSMContainer): The validated PSMs.
+        features (list): The features to be included.
         target_mod (str): The modification under validation.
         proteolyzer (proteolysis.Proteolyzer)
 
@@ -412,16 +429,17 @@ def apply_deamidation_correction(pipeline: CustomPipeline, dist_stats,
         # Calculate new features
         nondeam_psm.extract_features(target_mod, proteolyzer)
 
-        # Compare probabilities based on the same distribution
-        # (from the model trained on the full set of data)
-        scores = calculate_scores(
-            pipeline, [nondeam_psm, psm], features, target_only=True)
-        nondeam_score, score = scores[0], scores[1]
+        # Compare probabilities using the same model used for the deamidated
+        # PSM
+        model, correction, dist_stats = get_model_func(psm)
+        nondeam_score = calculate_scores(model, [nondeam_psm], features,
+                                         target_only=True)[0]
+        nondeam_score += correction
         nondeam_prob = calculate_prob(1, nondeam_score, dist_stats)
-        prob = calculate_prob(1, score, dist_stats)
 
-        # Keep the PSM with the highest probability
-        if nondeam_prob > prob:
+        # Preferentially keep the non-deamidated identification, unless
+        # the deamidated version has a score more than one point higher
+        if nondeam_score >= psm.lda_score - 1.:
             nondeam_psm.corrected = True
 
             nondeam_psm.lda_score = nondeam_score
@@ -434,3 +452,70 @@ def apply_deamidation_correction(pipeline: CustomPipeline, dist_stats,
             psms[ii] = nondeam_psm
 
     return psms
+
+
+def apply_deamidation_correction(
+    models: Dict[int, Tuple[CustomPipeline, float, ScoreStatsDict]],
+    psms: PSMContainer[PSMType],
+    features: List[str],
+    target_mod: Optional[str],
+    proteolyzer: proteolysis.Proteolyzer) \
+        -> PSMContainer[PSMType]:
+    """
+    Removes the deamidation modification from applicable peptide
+    identifications and revalides using the trained LDA model. If the score
+    for the non-deamidated analogue is greater than that for the deamidated
+    peptide, the non-deamidated analogue is assigned as the peptide match for
+    that spectrum.
+
+    Args:
+        models (dict): A dictionary mapping test index to the model trained
+                       and used to predict on that index.
+        psms (PSMContainer): The validated PSMs.
+        features (list): The features to be included.
+        target_mod (str): The modification under validation.
+        proteolyzer (proteolysis.Proteolyzer)
+
+    Returns:
+        The input list of PSMs, with deamidated PSMs replaced by their
+        non-deamidated counterparts if their LDA scores are higher.
+
+    """
+    psm_uids = list(psms.to_df()["uid"])
+
+    def get_model(psm):
+        return models[psm_uids.index(psm.uid)]
+
+    return _apply_deamidation_correction(
+        psms, features, target_mod, proteolyzer, get_model)
+
+
+def apply_deamidation_correction_full(
+    model: CustomPipeline,
+    score_stats: ScoreStatsDict,
+    psms: PSMContainer[PSMType],
+    features: List[str],
+    target_mod: Optional[str],
+    proteolyzer: proteolysis.Proteolyzer) \
+        -> PSMContainer[PSMType]:
+    """
+    Removes the deamidation modification from applicable peptide
+    identifications and revalidates using the full LDA model.
+
+    Args:
+        model (CustomPipeline): The model trained on the full data set.
+        psms (PSMContainer): The validated PSMs.
+        features (list): The features to be included.
+        target_mod (str): The modification under validation.
+        proteolyzer (proteolysis.Proteolyzer)
+
+    Returns:
+        The input list of PSMs, with deamidated PSMs replaced by their
+        non-deamidated counterparts if their LDA scores are higher.
+
+    """
+    def get_model(psm):
+        return (model, 0., score_stats)
+
+    return _apply_deamidation_correction(
+        psms, features, target_mod, proteolyzer, get_model)

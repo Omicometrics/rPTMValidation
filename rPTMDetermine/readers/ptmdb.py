@@ -5,6 +5,7 @@ This module provides a class for reading the UniMod database.
 """
 import collections
 import functools
+import os
 import re
 import sqlite3
 from typing import Dict, List, Optional, Tuple
@@ -14,14 +15,21 @@ import lxml.etree as etree
 from pepfrag import MassType
 from rPTMDetermine.constants import ELEMENT_MASSES
 
-MOD_FORMULA_REGEX = re.compile(r"(\w+)\(([0-9]+)\)")
 
-UNIMOD_FORMULA_REGEX = re.compile(r"(\w+)\(?([0-9-]+)?\)?")
+MOD_FORMULA_REGEX = re.compile(r"(\w+)\(([0-9]+)\)")
 
 
 UnimodEntry = collections.namedtuple(
     "UnimodEntry",
     ["id", "name", "full_name", "mono_mass", "avg_mass", "composition"])
+    
+    
+class ModificationNotFoundException(Exception):
+    """
+    An exception to indicate failure to find a modification in the
+    Unimod database.
+
+    """
 
 
 class PTMDB:
@@ -29,7 +37,10 @@ class PTMDB:
     A class representing the UniMod PTM database.
 
     """
-    def __init__(self, ptm_file: str):
+
+    formula_regex = re.compile(r"(\w+)\(?([0-9-]+)?\)?")
+
+    def __init__(self, ptm_file: Optional[str] = None):
         """
         Initializes the class object with the database connection and cursor.
 
@@ -37,9 +48,13 @@ class PTMDB:
             ptm_file (str): The path to the Unimod XML file.
 
         """
-        self.ptm_file = ptm_file
+        self.ptm_file = (ptm_file if ptm_file is not None
+                         else os.path.join(
+                            os.path.dirname(os.path.realpath(__file__)),
+                            "unimod.xml"))
 
         self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
         self.cursor = self.conn.cursor()
 
         self._initialize()
@@ -76,7 +91,7 @@ class PTMDB:
                     UnimodEntry(
                         element.get("record_id"),
                         element.get("title"),
-                        element.get("full_name"),
+                        element.get("full_name").replace(" ", "").lower(),
                         float(delta.get("mono_mass")),
                         float(delta.get("avge_mass")),
                         delta.get("composition")))
@@ -85,6 +100,36 @@ class PTMDB:
                                 entries)
 
         self.conn.commit()
+
+    def _get_row_by_name(self, name: str):
+        """
+        Retrieves a row of the database using the name (title) of the entry,
+        falling back on a concatenated version of the full name field.
+
+        Args:
+            name (str): The name of the modification.
+
+        Returns:
+
+        Raises:
+            ModificationNotFoundException.
+
+        """
+        self.cursor.execute("SELECT * FROM mods WHERE name=?", (name,))
+        res = self.cursor.fetchone()
+
+        if res is not None:
+            return res
+
+        self.cursor.execute("SELECT * FROM mods WHERE full_name=?",
+                            (name.lower(),))
+        res = self.cursor.fetchone()
+
+        if res is not None:
+            return res
+
+        raise ModificationNotFoundException(
+            f"No modification {name} found in Unimod")
 
     @functools.lru_cache()
     def get_mass(self, name: str, mass_type: MassType = MassType.mono) \
@@ -99,12 +144,11 @@ class PTMDB:
         Returns:
             The mass as a float or None.
 
+        Raises:
+            ModificationNotFoundException.
+
         """
-        self.cursor.execute(
-            f"SELECT {self._get_mass_col(mass_type)} FROM mods WHERE name=?",
-            (name,))
-        res = self.cursor.fetchone()
-        return res[0] if res is not None else None
+        return self._get_row_by_name(name)[self._get_mass_col(mass_type)]
 
     @functools.lru_cache()
     def get_by_id(self, ptm_id: int, mass_type: MassType = MassType.mono) \
@@ -119,11 +163,21 @@ class PTMDB:
         Returns:
             A tuple of modification name and mass.
 
+        Raises:
+            ModificationNotFoundException.
+
         """
         self.cursor.execute(
             f"SELECT name, {self._get_mass_col(mass_type)} FROM mods "
             "WHERE id=?", (ptm_id,))
-        return self.cursor.fetchone()
+
+        res = self.cursor.fetchone()
+
+        if res is None:
+            raise ModificationNotFoundException(
+                f"No modification with ID {ptm_id} found in Unimod")
+
+        return res
 
     @functools.lru_cache()
     def get_formula(self, name: str) -> Optional[Dict[str, int]]:
@@ -137,16 +191,15 @@ class PTMDB:
         Returns:
             A dictionary of element (isotope) to the number of occurrences.
 
+        Raises:
+            ModificationNotFoundException.
+
         """
-        self.cursor.execute("SELECT composition FROM mods WHERE name=?",
-                            (name,))
-        res = self.cursor.fetchone()
-        if res is None:
-            return None
+        comp = self._get_row_by_name(name)["composition"]
 
         # Parse the composition string
         return {k: int(v) if v else 1
-                for k, v in re.findall(UNIMOD_FORMULA_REGEX, res[0])}
+                for k, v in self.formula_regex.findall(comp)}
 
     @functools.lru_cache()
     def get_name(self, mass: float, mass_type: MassType = MassType.mono,
@@ -162,13 +215,21 @@ class PTMDB:
         Returns:
             The name of the modification as a string, or None.
 
+        Raises:
+            ModificationNotFoundException.
+
         """
         col = self._get_mass_col(mass_type)
         self.cursor.execute(
             f"SELECT name, {col} FROM mods WHERE {col} BETWEEN ? AND ?",
             (mass - tol, mass + tol))
         res = self.cursor.fetchone()
-        return res[0] if res is not None else None
+
+        if res is None:
+            raise ModificationNotFoundException(
+                f"No modification found with mass within {tol} of {mass}")
+
+        return res[0]
 
     def _get_mass_col(self, mass_type: MassType) -> str:
         """

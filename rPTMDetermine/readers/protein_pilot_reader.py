@@ -7,7 +7,7 @@ This module provides functions for reading ProteinPilot results
 import csv
 import dataclasses
 import re
-from typing import Any, Callable, Dict, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from .base_reader import Reader
 from . import modifications
@@ -17,7 +17,7 @@ from .search_result import PeptideType, SearchResult
 MGF_TITLE_REGEX = re.compile(r"TITLE=Locus:([\d\.]+) ")
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(eq=True, frozen=True)
 class ProteinPilotSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
 
     __slots__ = ("time", "confidence", "prec_mz",)
@@ -82,7 +82,7 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
 
         return ProteinPilotSearchResult(
             seq=row["Sequence"],
-            mods=parsed_mods,
+            mods=tuple(parsed_mods),
             charge=int(row["Theor z"]),
             spectrum=row["Spectrum"],
             dataset=None,
@@ -108,7 +108,7 @@ def read_proteinpilot_xml(filename: str) -> Dict[str, Dict[str, dict]]:
     Returns:
 
     """
-    res: Dict[str, Dict[str, dict]] = {}
+    res: Dict[str, Dict[str, Any]] = {}
     with open(filename, 'r') as f:
         read_identification = False
         for line in f:
@@ -121,7 +121,7 @@ def read_proteinpilot_xml(filename: str) -> Dict[str, Dict[str, dict]]:
                 queryid = sx['xml:id']
                 pmz = float(sx['precursormass'])
                 rank: int = 0
-                hits: Dict[str, dict] = {}
+                hits: Dict[int, Dict[str, Any]] = {}
             elif read_identification:
                 sx = dict(re.findall(r' (.+?)\="([^"]*)"', rline))
                 if rline.startswith('<MATCH'):
@@ -131,7 +131,8 @@ def read_proteinpilot_xml(filename: str) -> Dict[str, Dict[str, dict]]:
                     seq = sx['seq']   # sequence
                     nk = 'decoy' if int(sx['type']) == 1 else 'normal'
                     sk = float(sx['score'])
-                    modj = []
+                    modj: List[Tuple[Optional[float],
+                                     Union[str, int], str]] = []
                 elif rline.startswith('<MOD_FEATURE'):
                     modj.append((None, int(sx['pos']), sx['mod']))
                 elif rline.startswith('<TERM_MOD_FEATURE'):
@@ -150,7 +151,7 @@ def read_proteinpilot_xml(filename: str) -> Dict[str, Dict[str, dict]]:
                         res[queryid] = {}
                         res[queryid]['hits'] = hits
                         res[queryid]['pmz'] = pmz
-                        hits: Dict[str, dict] = {}
+                        hits = {}
                     # close reading current spectrum identifications
                     read_identification = False
     return res

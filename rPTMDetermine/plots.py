@@ -9,6 +9,7 @@ import sys
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from matplotlib import font_manager
+import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 import numpy as np
@@ -74,14 +75,14 @@ def plot_scores(psms: List[PSM], lda_threshold: float,
     # Plot the target and decoy score distributions
     plt.scatter(range(len(target_scores)), target_scores, marker='o',
                 facecolors="none", edgecolors=TARGET_COLOR, linewidths=1,
-                label=f"Target {label_prefix}identifications")
+                label=f"Target {label_prefix}")
 
     plt.scatter(range(len(decoy_scores)), decoy_scores, marker='x',
                 facecolors=DECOY_COLOR, linewidths=1,
-                label=f"Decoy {label_prefix}identifications")
+                label=f"Decoy {label_prefix}")
 
     plt.xlabel("Spectrum No.", fontproperties=FONT)
-    plt.ylabel("rPTMDetermine Score", fontproperties=FONT)
+    plt.ylabel("LDA Score", fontproperties=FONT)
 
     # Calculate the x-position for the score annotation
     ann_x_pos = decoy_scores[0] + 0.05 * len(decoy_scores)
@@ -131,13 +132,17 @@ def plot_score_similarity(psms: Sequence[PSM], lda_threshold: float,
         else:
             sims.append(psm.max_similarity)
             ldas.append(psm.lda_score)
-
-    sim_score = min(bench_sims) if use_benchmarks else sim_threshold
+            
+    if use_benchmarks:
+        sim_score = min([sim for sim, lda in zip(bench_sims, bench_ldas)
+                         if lda >= lda_threshold])
+    else:
+        sim_score = sim_threshold
 
     if use_benchmarks:
         plt.scatter(sims, ldas, marker="^",
                     facecolors="grey", linewidths=1,
-                    label="Other Identifications")
+                    label="Other")
     else:
         plt.scatter(sims, ldas, marker="o", facecolors="none",
                     edgecolors=TARGET_COLOR, linewidths=1)
@@ -145,10 +150,10 @@ def plot_score_similarity(psms: Sequence[PSM], lda_threshold: float,
     if use_benchmarks:
         plt.scatter(bench_sims, bench_ldas, marker="o",
                     facecolors=TARGET_COLOR,
-                    label="Benchmark Identifications")
+                    label="Benchmark")
 
     plt.xlabel("Similarity Score", fontproperties=FONT)
-    plt.ylabel("rPTMDetermine Score", fontproperties=FONT)
+    plt.ylabel("LDA Score", fontproperties=FONT)
 
     ax = plt.gca()
     ax.axhline(lda_threshold, color=THRESHOLD_COLOR, linestyle="--",
@@ -158,8 +163,12 @@ def plot_score_similarity(psms: Sequence[PSM], lda_threshold: float,
                linewidth=2)
 
     if use_benchmarks:
-        ax.legend(prop=FONT, frameon=False, loc=0,
-                  bbox_to_anchor=(0.14, 0.5, 0.5, 0.5), handletextpad=0.0001)
+        handles, labels = ax.get_legend_handles_labels()
+        order = [1, 0]
+        ax.legend([handles[idx] for idx in order],
+                  [labels[idx] for idx in order],
+                  prop=FONT, frameon=False, loc=2,
+                  bbox_to_anchor=(0.1, 0.5, 0.5, 0.5), handletextpad=0.0001)
 
     max_lda = max(bench_ldas + ldas)
     plt.annotate(f"$s_{{PD}}$={lda_threshold:.2f}",
@@ -205,14 +214,14 @@ def plot_recovered_score_similarity(psms: Sequence[PSM],
 
     plt.scatter(target_sims, target_ldas, marker="o", facecolors="none",
                 edgecolors=TARGET_COLOR,
-                label="Target Identifications")
+                label="Target")
 
     plt.scatter(decoy_sims, decoy_ldas, marker="x",
                 facecolors=DECOY_COLOR,
-                label="Decoy Identifications")
+                label="Decoy")
 
     plt.xlabel("Similarity Score", fontproperties=FONT)
-    plt.ylabel("rPTMDetermine Score", fontproperties=FONT)
+    plt.ylabel("LDA Score", fontproperties=FONT)
 
     ax = plt.gca()
     ax.axhline(lda_threshold, color=THRESHOLD_COLOR, linestyle="--",
@@ -221,8 +230,7 @@ def plot_recovered_score_similarity(psms: Sequence[PSM],
     ax.axvline(sim_threshold, color=THRESHOLD_COLOR, linestyle="--",
                linewidth=2)
 
-    ax.legend(prop=FONT, frameon=False, loc=1,
-              bbox_to_anchor=(0.14, 0.53, 0.5, 0.5), handletextpad=0.01)
+    ax.legend(prop=FONT, loc=4, handletextpad=0.01)
 
     box = ax.get_position()
     # Reduce the size of the plot to allow space for annotation on RHS
@@ -370,6 +378,10 @@ def plot_spectra(spectra: Sequence[np.array]):
                 markerfmt=' ', label=None)
         ax.set_ylabel("Intensity", fontproperties=FONT)
 
+        ax.set_ylim(bottom=0)
+        for spine in ["top", "right"]:
+            ax.spines[spine].set_visible(False)
+
     plt.xlabel("$\\it{m/z}$", fontproperties=FONT)
 
     plt.show()
@@ -418,6 +430,100 @@ def plot_fisher_scores(scores: Dict[str, float],
         plt.savefig(save_path)
 
     plt.show()
+
+
+def _add_sequence(ions, anns, height, mzs, intensities, max_int, max_mz, peptide, b_type):
+    """
+    """
+    color = "blue" if b_type else "red"
+    for ii, ion in enumerate(ions):
+        ann1 = anns[ion]
+        x1 = mzs[ann1.peak_num]
+
+        # Arrow down to annotated peaks
+        plt.arrow(x1, height, 0,
+                  intensities[ann1.peak_num] - height,
+                  alpha=0.4, ls="dashed", color=color)
+
+        if ii + 1 >= len(ions):
+            continue
+
+        next_ion = ions[ii + 1]
+        ann2 = anns[next_ion]
+        if ann2.ion_pos == ann1.ion_pos + 1:
+            x2 = mzs[ann2.peak_num]
+
+            # Arrow to consecutive ion annotation
+            plt.arrow(x2, height, (x1 - x2) + 0.005 * max_mz, 0,
+                      length_includes_head=True,
+                      head_width=0.01 * max_int, head_length=0.01 * max_mz,
+                      fc=color, ec=color, clip_on=False)
+
+            res_idx = (ann1.ion_pos if b_type
+                       else len(peptide.seq) - ann2.ion_pos)
+            res = peptide.seq[res_idx]
+            if any(ms.site == res_idx + 1 for ms in peptide.mods):
+                res += "*"
+
+            plt.text(0.5 * (x2 + x1), 1.01 * height, res, color=color,
+                     fontsize=14)
+
+
+def plot_psm(psm: PSM, denoise: bool = False, denoise_tol: float = 0.2, add_seq: bool = True):
+    """
+    """
+    if denoise:
+        _, denoised_spec = psm.denoise_spectrum(tol=denoise_tol)
+        mzs = denoised_spec[:, 0]
+        intensities = denoised_spec[:, 1]
+        if psm.peptide.fragment_ions is None:
+            raise RuntimeError("No fragment ions available for annotation")
+        anns = denoised_spec.annotate(psm.peptide.fragment_ions)
+    else:
+        mzs = psm.spectrum[:, 0]
+        intensities = psm.spectrum[:, 1]
+        anns = psm.annotate_spectrum()
+        
+    psm.peptide.clean_fragment_ions()
+
+    plt.stem(mzs, intensities, "black", basefmt=' ', markerfmt=' ',
+             label=None)
+    ax = plt.gca()
+    ax.set_ylim(bottom=0)
+    for spine in ["top", "right"]:
+        ax.spines[spine].set_visible(False)
+    ax.set_ylabel("Intensity")
+    ax.set_xlabel("$\\it{m/z}$")
+
+    max_int = max(intensities)
+    max_mz = max(mzs)
+    
+    if add_seq:
+        def add_sequence(ions, height, b_type):
+            _add_sequence(ions, anns, height, mzs, intensities, max_int,
+                          max_mz, psm.peptide, b_type)
+
+        # Annotate b-ions
+        add_sequence([a for a in anns.keys() if a[0] == "b" and "[+]" in a],
+                     1.01 * max_int, True)
+
+        # Annotate y-ions
+        add_sequence([a for a in anns.keys() if a[0] == "y" and "[+]" in a],
+                     1.07 * max_int, False)
+
+        b_line = mlines.Line2D([], [], color="blue", marker="",
+                               label="$\\it{b}$-ions")
+        y_line = mlines.Line2D([], [], color="red", marker="",
+                               label="$\\it{y}$-ions")
+
+        plt.legend(handles=[b_line, y_line], frameon=False, loc="upper center",
+                   bbox_to_anchor=(0.5, -0.07), ncol=2)
+    
+    annotated_peaks = []
+    for label, ann in anns.items():
+        annotated_peaks.append((label, mzs[ann.peak_num], ann.mass_diff))
+
+    return sorted(annotated_peaks, key=lambda a: a[1])
 
 
 def plot_fisher_scores_file(scores_file: str, threshold: float,

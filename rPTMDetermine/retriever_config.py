@@ -16,6 +16,20 @@ class RetrieverConfig(BaseConfig):
     retrieval.
 
     """
+
+    fields = [
+        "retrieval_tolerance",
+        "validated_ids_file",
+        "model_file",
+        "unmod_model_file",
+        "db_ionscores_file",
+        "sim_threshold",
+        "max_rt_below",
+        "max_rt_above",
+        "force_earlier_analogues",
+        "force_later_analogues",
+    ]
+
     def __init__(self, json_config: Dict[str, Any]):
         """
         Initialize the RetrieverConfig class using the JSON configuration.
@@ -28,6 +42,16 @@ class RetrieverConfig(BaseConfig):
             "unmod_model_file",
             "sim_threshold"
         ])
+
+    def __str__(self) -> str:
+        """
+        Implements the string conversion for the class.
+
+        """
+        string = super().__str__()
+        for option in RetrieverConfig.fields:
+            string += f"\t{option} = {getattr(self, option)}\n"
+        return string
 
     @property
     def retrieval_tolerance(self) -> float:
@@ -81,3 +105,49 @@ class RetrieverConfig(BaseConfig):
 
         """
         return self.json_config["sim_threshold"]
+        
+    @property
+    def max_rt_below(self) -> Optional[float]:
+        """
+        The maximum reduction in retention time allowed, comparing the
+        modified peptide retention time to the unmodified peptide retention
+        time, in minutes.
+        
+        """
+        return self.json_config.get("max_rt_below", None)
+        
+    @property
+    def max_rt_above(self) -> Optional[float]:
+        """
+        The maximum increase in retention time allowed, comparing the
+        modified peptide retention time to the unmodified peptide retention
+        time, in minutes.
+        
+        """
+        return self.json_config.get("max_rt_above", None)
+
+    @property
+    def force_earlier_analogues(self) -> bool:
+        """
+        Filters the initial retrieved identifications to only those whose
+        unmodified analogues occur in an earlier experiment.
+
+        """
+        return self.json_config.get("force_earlier_analogues", False)
+
+    @property
+    def force_later_analogues(self) -> bool:
+        """
+        Filters the initial retrieved identifications to only those whose
+        unmodified analogues occur in a later experiment.
+
+        """
+        return self.json_config.get("force_later_analogues", False)
+
+    def filter_retention_times(self) -> bool:
+        """
+        Evaluates whether a retention time filter should be applied to
+        retrieval candidates.
+
+        """
+        return self.max_rt_below is not None or self.max_rt_above is not None

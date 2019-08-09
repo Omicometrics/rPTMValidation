@@ -6,7 +6,7 @@ search identification.
 """
 import dataclasses
 import enum
-from typing import List, Optional
+from typing import Optional, Tuple
 
 from pepfrag import ModSite
 
@@ -20,7 +20,7 @@ class PeptideType(enum.Enum):
     decoy = enum.auto()
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(eq=True, frozen=True)
 class SearchResult():  # pylint: disable=too-few-public-methods
     """
     A data class to store information about an identification from a database
@@ -33,7 +33,7 @@ class SearchResult():  # pylint: disable=too-few-public-methods
                  "pep_type", "theor_mz",)
 
     seq: str
-    mods: List[ModSite]
+    mods: Tuple[ModSite, ...]
     charge: int
     spectrum: str
     dataset: Optional[str]

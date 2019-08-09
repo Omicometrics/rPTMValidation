@@ -68,7 +68,9 @@ def read_mgf_file(spec_file: str) -> Dict[str, Spectrum]:
                           for n in s.split(" ")[:2]]).reshape(-1, 2),
                 float(fields["PEPMASS"]),
                 int(fields["CHARGE"].split("+")[0]) if "CHARGE" in fields
-                else None)
+                else None,
+                retention_time=float(fields["RTINSECONDS"])
+                if "RTINSECONDS" in fields else None)
 
     return spectra
 
@@ -173,18 +175,32 @@ class MZMLReader:
         """
         spectra = {}
         # read from xml data
-        context = etree.iterparse(mzml_file, events=("end",),
-                                  tag=self._fix_tag("spectrum"))
+        context = etree.iterparse(
+            mzml_file, events=("end",),
+            tag=[self._fix_tag("referenceableParamGroup"),
+                 self._fix_tag("spectrum")])
+        param_groups: Dict[str, Dict[str, Any]] = {}
         for event, element in context:
+            if element.tag == self._fix_tag("referenceableParamGroup"):
+                params: Dict[str, Any] = {}
+                for param in element.findall(self._fix_tag("cvParam")):
+                    params[param.get("name")] = param.get("value", None)
+                param_groups[element.get("id")] = params
+                continue
+        
             # This contains the cycle and experiment information
             spectrum_info = dict(element.items())
             default_array_length = int(spectrum_info.get(
                 'default_array_length', spectrum_info["defaultArrayLength"]))
 
             # MS level
-            ms_level = int(
-                element.xpath("x:cvParam[@name='ms level']",
-                              namespaces=self.ns_map)[0].get("value"))
+            try:
+                ms_level = int(
+                    element.xpath("x:cvParam[@name='ms level']",
+                                  namespaces=self.ns_map)[0].get("value"))
+            except IndexError:
+                group = element.find(self._fix_tag("referenceableParamGroupRef")).get("ref")
+                ms_level = int(param_groups[group]["ms level"])
             if ms_level != n:
                 continue
 
@@ -238,7 +254,10 @@ class MZMLReader:
         precs = spectrum.xpath("x:precursorList/x:precursor",
                                namespaces=self.ns_map)
         for precursor in precs:
-            prec_id = self._parse_id(precursor.get("spectrumRef"))
+            prec_ref = precursor.get("spectrumRef")
+            if prec_ref is None:
+                continue
+            prec_id = self._parse_id(prec_ref)
             ions = [float(e.get("value"))
                     for e in precursor.xpath(
                         "x:selectedIonList/x:selectedIon/"
@@ -278,7 +297,7 @@ class MZMLReader:
         if comp_mode is CompressionMode.zlib:
             decoded = zlib.decompress(decoded)
         unpack_format = "<%dd" % default_array_length if precision == 64 else \
-            "<%dL" % default_array_length
+            "<%df" % default_array_length
         return struct.unpack(unpack_format, decoded)
 
     def _process_binary_data_array(self, data_array,

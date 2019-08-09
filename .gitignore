@@ -10,6 +10,13 @@ __pycache__
 *.pyd
 
 *.csv
+*.tsv
 *.png
 *.svg
 *.txt
+
+# Data files
+*.mzml
+*.raw
+*.mgf
+*.mzid

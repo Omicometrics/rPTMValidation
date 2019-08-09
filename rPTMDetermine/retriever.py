@@ -7,9 +7,10 @@ results.
 import collections
 import csv
 import itertools
+import logging
 import os
 import pickle
-from typing import Dict, List, Sequence, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -22,11 +23,15 @@ from . import ionscore
 from . import lda
 from . import mass_spectrum
 from .peptide_spectrum_match import PSM
+from .peptides import merge_seq_mods
 from .psm_container import PSMContainer
 from . import readers
 from .retriever_config import RetrieverConfig
 from . import similarity
 from . import validator_base
+
+
+PeptideTuple = Tuple[str, Tuple[ModSite, ...], int, readers.PeptideType]
 
 
 CHARGE_LABELS = [['[+]' if cj == 0 else f'[{cj + 1}+]'
@@ -53,7 +58,11 @@ def get_ion_score(seq, charge, ions, spectrum, tol):
                              spectrum[-1][0] - spectrum[0][0], tol)
 
 
-def calculate_lda_probs(psms, lda_model, score_stats, features):
+def calculate_lda_probs(
+        psms: PSMContainer[PSM],
+        lda_model: lda.CustomPipeline,
+        score_stats: lda.ScoreStatsDict,
+        features: List[str]):
     """
     Calculates the LDA probs for the PSMs, using the specified pre-trained
     LDA model and features. The probabilities are set on the PSM object
@@ -85,20 +94,17 @@ class Retriever(validator_base.ValidateBase):
     to guide the search for appropriate modified peptides.
 
     """
-    def __init__(self, json_config):
+    def __init__(self, config: RetrieverConfig):
         """
         Initialize the Retriever object.
 
         Args:
-            json_config (json.JSON): The JSON configuration read from a file.
+            config (RetrieverConfig): The configuration options for retrieval.
 
         """
-        super().__init__(RetrieverConfig(json_config))
+        super().__init__(config, "retrieve.log")
 
-        print("Reading database ion scores...")
-        self.db_ionscores = self._get_ionscores()
-
-        print("Reading database search results...")
+        logging.info("Reading database search results.")
         self.db_res = self._get_search_results()
 
     def retrieve(self):
@@ -107,11 +113,14 @@ class Retriever(validator_base.ValidateBase):
         results.
 
         """
-        print("Extracting peptide candidates...")
-        peptides = self._get_peptides()
+        logging.info("Reading mass spectra files.")
         all_spectra = self.read_mass_spectra()
 
-        print("Building LDA validation models...")
+        logging.info("Extracting peptide candidates.")
+        peptides, ret_times = self._get_peptides(all_spectra)
+        logging.info(f"{len(peptides)} candidate peptides extracted.")
+
+        logging.info("Building LDA validation models.")
         model, score_stats, _, features = self.build_model()
         unmod_model, unmod_score_stats, _, unmod_features = \
             self.build_unmod_model()
@@ -123,55 +132,59 @@ class Retriever(validator_base.ValidateBase):
                 prec_mzs.append(spec.prec_mz)
         prec_mzs = np.array(prec_mzs)
 
-        print("Finding better modified PSMs...")
-        psms = self._get_better_matches(peptides, all_spectra, spec_ids,
-                                        prec_mzs,
-                                        tol=self.config.retrieval_tolerance)
+        logging.info("Finding modified PSMs.")
+        psms = self._get_matches(peptides, all_spectra, spec_ids, prec_mzs,
+                                 ret_times,
+                                 tol=self.config.retrieval_tolerance)
+        logging.info(f"{len(psms)} candidate PSMs identified.")
 
-        print("Calculating rPTMDetermine probabilities...")
+        logging.info("Calculating rPTMDetermine probabilities.")
         calculate_lda_probs(psms, model, score_stats, features)
 
         # Keep only the best match (in terms of LDA score) for each spectrum
-        print("Retaining best PSM for each spectrum...")
+        logging.info("Retaining best PSM for each spectrum.")
         psms = psms.get_best_psms()
+        logging.info(f"{len(psms)} unique spectra have candidate PSMs.")
 
         # Attempt to correct for misassigned deamidation
-        print("Attempting to correct misassigned deamidation...")
-        psms = lda.apply_deamidation_correction(
+        logging.info("Attempting to correct misassigned deamidation.")
+        psms = lda.apply_deamidation_correction_full(
             model, score_stats, psms, features, self.target_mod,
             self.proteolyzer)
 
-        print("Deamidation removed from {} PSMs".format(
+        logging.info("Deamidation removed from {} PSMs".format(
             sum(p.corrected for p in psms)))
 
-        print("Finding unmodified analogue PSMs...")
+        logging.info("Finding unmodified analogue PSMs.")
         unmod_psms = self._find_unmod_analogues(psms)
 
-        print("Calculating unmodified PSM features...")
+        logging.info("Calculating unmodified PSM features.")
         for psm in tqdm.tqdm(unmod_psms):
             psm.extract_features(None, self.proteolyzer)
+            psm.peptide.clean_fragment_ions()
 
-        print("Calculating rPTMDetermine scores for unmodified analogues...")
+        logging.info(
+            "Calculating rPTMDetermine scores for unmodified analogues.")
         calculate_lda_probs(unmod_psms, unmod_model, unmod_score_stats,
                             unmod_features)
 
         unmod_psms = unmod_psms.filter_lda_prob()
 
-        print("Calculating similarity scores...")
+        logging.info("Calculating similarity scores.")
         psms = similarity.calculate_similarity_scores(psms, unmod_psms)
 
         if self.config.benchmark_file is not None:
             self.identify_benchmarks(psms)
 
         # Remove the identifications found by database search and validated by
-        # Validate
+        # Validator
         psms = self._remove_search_ids(psms)
         rec_psms = PSMContainer([p for p in psms if p.target])
 
         rec_psms = rec_psms.filter_lda_similarity(0.99,
                                                   self.config.sim_threshold)
 
-        print("Localizing modification site(s)...")
+        logging.info("Localizing modification site(s).")
         self._localize(rec_psms, model, features, 0.99,
                        self.config.sim_threshold)
 
@@ -180,12 +193,17 @@ class Retriever(validator_base.ValidateBase):
         rec_psms = rec_psms.filter_site_prob(
             self.config.site_localization_threshold)
 
+        logging.info("Writing retrieval results to files.")
+
         self.write_results(psms,
-                           self.file_prefix + "all_recovered_results.csv")
+                           self.file_prefix + "all_recovered_results.csv",
+                           pickle_file=self.file_prefix + "all_rec_psms.pkl")
 
         self.write_results(rec_psms,
                            self.file_prefix + "recovered_results.csv",
-                           pickle_file=self.file_prefix + "rec_psms")
+                           pickle_file=self.file_prefix + "rec_psms.pkl")
+
+        logging.info("Finished retrieving identifications.")
 
     def _get_search_results(self) \
             -> Dict[str, Dict[str, List[readers.SearchResult]]]:
@@ -207,65 +225,68 @@ class Retriever(validator_base.ValidateBase):
 
         return db_res
 
-    def _get_peptides(self) \
-            -> List[Tuple[str, Tuple[ModSite, ...], int, readers.PeptideType]]:
+    def _get_peptides(
+        self,
+        all_spectra: Dict[str, Dict[str, mass_spectrum.Spectrum]]) \
+            -> Tuple[List[PeptideTuple],
+                     Dict[PeptideTuple, Dict[str, Dict[str, float]]]]:
         """
         Retrieves the candidate peptides from the database search results.
 
         """
         allpeps: List[Tuple[str, str, str, Tuple[ModSite, ...], int,
-                            readers.PeptideType]] = \
+                            readers.PeptideType, Optional[float]]] = \
             [(set_id, spec_id, m.seq, tuple(m.mods), m.charge,
-              m.pep_type)
+              m.pep_type, all_spectra[set_id][spec_id].retention_time)
              for set_id, spectra in self.db_res.items()
              for spec_id, matches in spectra.items()
              for m in matches]
 
-        peps: Set[Tuple[str, Tuple[ModSite, ...], int,
-                        readers.PeptideType]] = \
-            {(x[2], tuple(self._filter_mods(x[3], x[2])), x[4], x[5])
-             for x in allpeps if len(x[2]) >= 7 and
-             set(RESIDUES).issuperset(x[2]) and
-             any(r in x[2] for r in self.config.target_residues)}
+        residue_set = set(RESIDUES)
 
-        return list(peps)
+        # Deduplicate peptides based on sequence, charge, modifications and
+        # type, whilst also retaining the retention time for later use
+        peps = []
+        seen: Set[PeptideTuple] = set()
+        seen_add = seen.add
+        retention_times: Dict[PeptideTuple,
+                              Dict[str, Dict[str, List[float]]]] = \
+            collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(list)))
+        for (set_id, spec_id, seq, mods, charge, pep_type, rt) in allpeps:
+            if len(seq) >= 7 and residue_set.issuperset(seq) and \
+                    any(r in seq for r in self.config.target_residues):
+                filt_mods = tuple(self._filter_mods(mods, seq))
+                key = (seq, filt_mods, charge, pep_type)
+                if key not in seen:
+                    seen_add(key)
+                    peps.append((seq, filt_mods, charge, pep_type))
+                if rt is not None:
+                    experiment = spec_id.split(".")[0]
+                    retention_times[key][set_id][experiment].append(rt)
 
-    def _get_ionscores(self) \
-            -> Dict[str, Dict[str, float]]:
-        """
-        Reads the ion scores from all databases from the configured file.
+        # Find the minimum retention time for each peptide, within the same
+        # data set and experiment
+        min_rts: Dict[PeptideTuple, Dict[str, Dict[str, float]]] = \
+            collections.defaultdict(lambda: collections.defaultdict(dict))
+        for peptide, datasets in retention_times.items():
+            for set_id, experiments in datasets.items():
+                for exp_id, rts in experiments.items():
+                    rts = [r for r in rts if r is not None]
+                    if rts:
+                        min_rts[peptide][set_id][exp_id] = min(rts)
 
-        """
-        ionscores: Dict[str, Dict[str, float]] = collections.defaultdict(dict)
-        with open(self.config.db_ionscores_file, 'r') as fh:
-            for line in fh:
-                content = line.rstrip().split()
-                data_id, spec_id = content[0], content[1]
-                for field in content[2:]:
-                    try:
-                        score = max(
-                            float(s) for s in field.split(":")[1].split(",")
-                            if any(field.startswith(p + ":")
-                                   for p in ["ms", "pp", "ct"]))
-                    except ValueError:
-                        continue
-                    if (spec_id not in ionscores[data_id] or
-                            score > ionscores[data_id][spec_id]):
-                        ionscores[data_id][spec_id] = score
+        return peps, min_rts
 
-        return ionscores
-
-    def _get_better_matches(
+    def _get_matches(
             self,
-            peptides: List[Tuple[str, Tuple[ModSite, ...], int,
-                                 readers.PeptideType]],
+            peptides: List[PeptideTuple],
             spectra: Dict[str, Dict[str, mass_spectrum.Spectrum]],
             spec_ids: List[Tuple[str, str]],
             prec_mzs: np.array,
+            ret_times: Dict[PeptideTuple, Dict[str, Dict[str, float]]],
             tol: float) -> PSMContainer[PSM]:
         """
-        Finds the PSMs which are better than those found for other database
-        search engines.
+        Finds candidate PSMs.
 
         Args:
             peptides (list): The peptide candidates.
@@ -273,15 +294,20 @@ class Retriever(validator_base.ValidateBase):
                             the spectrum ID. Values are the mass spectra.
             spec_ids (list): A list of (Data ID, Spectrum ID) tuples.
             prec_mzs (numpy.array): The precursor mass/charge ratios.
+            ret_times (dict): The (average) unmodified peptide retention times.
             tol (float): The mass/charge ratio tolerance.
 
         Returns:
-            A list of PSM objects representing those matches better than other
-            matches from database search engines.
+            A list of PSM objects.
 
         """
-        better: PSMContainer[PSM] = PSMContainer()
-        for (seq, mods, charge, pep_type) in tqdm.tqdm(peptides):
+        if self.mod_mass is None:
+            logging.error("mod_mass has not been set - exiting.")
+            raise RuntimeError("mod_mass is not set - exiting.")
+
+        cands: PSMContainer[PSM] = PSMContainer()
+        for unmod_peptide in tqdm.tqdm(peptides):
+            (seq, mods, charge, pep_type) = unmod_peptide
             pmass = Peptide(seq, charge, mods).mass
             # Check for free (non-modified target residue)
             if mods is None:
@@ -303,7 +329,7 @@ class Retriever(validator_base.ValidateBase):
                     continue
 
                 for lx in itertools.combinations(mix, nk + 1):
-                    modk = modj + \
+                    modk: List[ModSite] = modj + \
                         [ModSite(self.mod_mass, j + 1, self.config.target_mod)
                          for j in lx]
                     mod_peptide = Peptide(seq, charge, modk)
@@ -314,19 +340,25 @@ class Retriever(validator_base.ValidateBase):
                         and "-" not in i[1]
                     ]
                     by_mzs = np.array([i[0] for i in by_ions])
-                    by_anns = np.array([i[1] for i in by_ions])
                     by_mzs_u = by_mzs + 0.2
                     by_mzs_l = by_mzs - 0.2
                     for kk in bix:
-                        try:
-                            dbscore = self.db_ionscores[
-                                spec_ids[kk][0]][spec_ids[kk][1]]
-                        except KeyError:
+                        set_id = spec_ids[kk][0]
+                        spec_id = spec_ids[kk][1]
+                        spec = spectra[set_id][spec_id]
+
+                        # Remove spectra with a small number of peaks
+                        if len(spec) < 5:
                             continue
 
-                        spec = spectra[spec_ids[kk][0]][spec_ids[kk][1]]
-
-                        if len(spec) < 5:
+                        # Compare modified and unmodified identification
+                        # retention times, persisting with the PSM only if the
+                        # modified retention time is within an expected range
+                        # of the unmodified peptide retention time
+                        if (self.config.filter_retention_times() and
+                                not self.eval_retention_time(
+                                    unmod_peptide, modk, spec, set_id,
+                                    spec_id, ret_times)):
                             continue
 
                         mzk = spec[:, 0]
@@ -341,15 +373,6 @@ class Retriever(validator_base.ValidateBase):
                         if jjm <= 5:
                             continue
 
-                        score = get_ion_score(seq, charge, list(by_anns[diff]),
-                                              spec[:jjm + 1, :], 0.2)
-
-                        # Filter to those PSMs whose ion scores, before
-                        # denoising, are at least close to the score from
-                        # other search engines
-                        if score < dbscore - 1:
-                            continue
-
                         psm = PSM(spec_ids[kk][0], spec_ids[kk][1],
                                   mod_peptide, spectrum=spec,
                                   target=(
@@ -359,9 +382,76 @@ class Retriever(validator_base.ValidateBase):
                                              self.proteolyzer)
                         psm.peptide.clean_fragment_ions()
 
-                        if round(psm.features.MatchScore, 4) >= dbscore:
-                            better.append(psm)
-        return better
+                        cands.append(psm)
+        return cands
+
+    def eval_retention_time(
+            self,
+            peptide: PeptideTuple,
+            new_mods: List[ModSite],
+            spectrum: mass_spectrum.Spectrum,
+            data_id: str,
+            spec_id: str,
+            ret_times: Dict[PeptideTuple, Dict[str, Dict[str, float]]]) -> bool:
+        """
+        Evaluates whether a peptide identification passes the retention time
+        criteria established in the configuration.
+
+        Args:
+            peptide (PeptideTuple): The unmodified peptide sequence,
+                                    modifications, charge and type.
+            new_mods (tuple): The modified peptide modifications, i.e.
+                              including the target modification.
+            spectrum (Spectrum): The mass spectrum for the assignment.
+            data_id (str): The data ID of the mass spectrum.
+            spec_id (str): The spectrum ID of the mass spectrum.
+            ret_times
+
+        Returns:
+            Boolean flag indicating whether the identification passes all
+            criteria.
+
+        """
+        exp_id = spec_id.split(".")[0]
+        (seq, _, charge, _) = peptide
+        if spectrum.retention_time is None:
+            return True
+
+        msg = (
+            f"Rejecting {data_id}:{spec_id} {merge_seq_mods(seq, new_mods)}"
+            f"({charge}+):")
+
+        try:
+            unmod_rt = ret_times[peptide][data_id][exp_id]
+        except KeyError:
+            unmod_exps = ret_times[peptide].get(data_id, {})
+            if self.config.force_earlier_analogues and \
+                    all(int(exp_id) < int(e) for e in unmod_exps):
+                logging.debug(
+                    f"{msg} experiment is earlier than "
+                    "all unmodified identifications")
+                return False
+            if self.config.force_later_analogues and \
+                    all(int(exp_id) > int(e) for e in unmod_exps):
+                logging.debug(
+                    f"{msg} experiment is later than "
+                    "all unmodified identifications")
+                return False
+        else:
+            unmod_rt /= 60.
+            mod_rt = spectrum.retention_time / 60.
+            if ((self.config.max_rt_below is not None and
+                    mod_rt < unmod_rt +
+                    self.config.max_rt_below) or
+                    (self.config.max_rt_above is not None and
+                     mod_rt > unmod_rt +
+                     self.config.max_rt_above)):
+                logging.debug(
+                    f"{msg} retention time is {mod_rt} "
+                    f"min versus unmodified {unmod_rt} min")
+                return False    
+
+        return True
 
     def _remove_search_ids(self, psms: PSMContainer) -> PSMContainer:
         """

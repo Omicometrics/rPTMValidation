@@ -5,6 +5,7 @@ rPTMDetermine.
 
 """
 import enum
+import json
 import os
 from typing import Any, Dict, List, Optional
 
@@ -38,6 +39,28 @@ class BaseConfig():
     default values, if any.
 
     """
+    
+    fields = [
+        "search_engine",
+        "data_sets",
+        "enzyme",
+        "fixed_residues",
+        "target_db_path",
+        "target_mod",
+        "target_residues",
+        "unimod_ptm_file",
+        "correct_deamidation",
+        "benchmark_file",
+        "sim_threshold",
+        "alternative_localization_residues",
+        "site_localization_threshold",
+        "output_dir",
+        "exclude_features",
+        "fdr",
+        "log_level",
+        "spectra_cache_file",
+    ]
+
     def __init__(self, json_config: Dict[str, Any],
                  extra_required: Optional[List[str]] = None):
         """
@@ -53,6 +76,22 @@ class BaseConfig():
             self._required.extend(extra_required)
 
         self._check_required()
+
+    def __str__(self) -> str:
+        """
+        Implements the string conversion for the class.
+
+        """
+        string = ""
+        for option in BaseConfig.fields:
+            if option == "search_engine":
+                val = self.search_engine.name
+            elif option == "data_sets":
+                val = json.dumps(self.data_sets, indent="\t")
+            else:
+                val = getattr(self, option)
+            string += f"\t{option} = {val}\n"
+        return string
 
     @property
     def search_engine(self) -> SearchEngine:
@@ -128,7 +167,7 @@ class BaseConfig():
         """
         path = self.json_config.get(
             "unimod_ptm_file",
-            os.path.join(os.path.dirname(__file__), "unimod.xml"))
+            os.path.join(os.path.dirname(__file__), "readers", "unimod.xml"))
         if not os.path.exists(path):
             raise FileNotFoundError(f"UniMod PTM file not found at {path}")
         return path
@@ -193,12 +232,28 @@ class BaseConfig():
         return self.json_config.get("exclude_features", [])
 
     @property
-    def fdr(self) -> Optional[float]:
+    def fdr(self) -> float:
         """
         The false discovery rate to be applied.
 
         """
-        return self.json_config.get("fdr", None)
+        return self.json_config.get("fdr", 0.01)
+
+    @property
+    def log_level(self) -> str:
+        """
+        The log level for the program output.
+
+        """
+        return self.json_config.get("log_level", "INFO").upper()
+
+    @property
+    def spectra_cache_file(self) -> Optional[str]:
+        """
+        The location at which to store the pickle spectra cache.
+
+        """
+        return self.json_config.get("spectra_cache_file", None)
 
     def _check_required(self):
         """

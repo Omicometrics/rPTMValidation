@@ -11,7 +11,11 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple
 import numpy as np
 
 from .constants import DEFAULT_FRAGMENT_IONS, FIXED_MASSES
-from . import ionscore, mass_spectrum, proteolysis, utilities
+from .features import Features
+from . import ionscore
+from . import mass_spectrum
+from . import proteolysis
+from . import utilities
 
 from pepfrag import IonType, ModSite, Peptide
 
@@ -143,7 +147,7 @@ class PSM():
         self.similarity_scores: List[SimilarityScore] = []
 
         # The PSM features
-        self.features = Features()
+        self.features: Features = Features()
 
         # The results of LDA validation
         self.lda_score: Optional[float] = None
@@ -263,7 +267,7 @@ class PSM():
             Official string representation.
 
         """
-        out = {s: getattr(self, s) for s in __class__.__slots__}
+        out = {s: getattr(self, s) for s in self.__class__.__slots__}
         return f"<{self.__class__.__name__} {out}>"
 
     def __hash__(self):
@@ -368,7 +372,7 @@ class PSM():
                                                    of missed cleavages.
 
         Returns:
-            dictionary of calculated features
+            Features.
 
         """
         self._check_spectrum_initialized()
@@ -382,10 +386,6 @@ class PSM():
                                          denoised_spectrum,
                                          target_mod,
                                          tol)
-
-        # Use the proteolyzer to determine the number of missed cleavages
-        # self.features['n_missed_cleavages'] =\
-            # proteolyzer.count_missed_cleavages(self.seq)
 
         return self.features
 

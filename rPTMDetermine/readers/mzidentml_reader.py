@@ -25,7 +25,7 @@ Ident = collections.namedtuple("Ident",
                                 "scores"])
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(eq=True, frozen=True)
 class MZIdentMLSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
 
     __slots__ = ("prec_mz", "passed_threshold", "scores",)
@@ -111,7 +111,7 @@ class MZIdentMLReader(Reader):  # pylint: disable=too-few-public-methods
                 res.append(
                     MZIdentMLSearchResult(
                         seq=peptide[0],
-                        mods=peptide[1],
+                        mods=tuple(peptide[1]),
                         charge=ident.charge,
                         spectrum=spec_id,
                         dataset=dataset,

@@ -6,9 +6,8 @@ results.
 """
 import argparse
 import json
-import pickle
 
-from rPTMDetermine import Retriever
+from rPTMDetermine import Retriever, RetrieverConfig
 
 
 def parse_args():
@@ -34,7 +33,7 @@ def main():
     """
     args = parse_args()
     with open(args.config) as handle:
-        conf = json.load(handle)
+        conf = RetrieverConfig(json.load(handle))
 
     retriever = Retriever(conf)
     retriever.retrieve()

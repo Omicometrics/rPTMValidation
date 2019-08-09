@@ -4,7 +4,6 @@ A simple module to provide access to the configuration options for
 rPTMDetermine.
 
 """
-
 import os
 import sys
 from typing import Any, Dict
@@ -18,12 +17,28 @@ class ValidatorConfig(BaseConfig):
     validation.
 
     """
+
+    fields = [
+        "uniprot_ptm_file",
+        "sim_threshold_from_benchmarks",
+    ]
+
     def __init__(self, json_config: Dict[str, Any]):
         """
         Initialize the ValidatorConfig class using the JSON configuration.
 
         """
         super().__init__(json_config)
+        
+    def __str__(self) -> str:
+        """
+        Implements the string conversion for the class.
+
+        """
+        string = super().__str__()
+        for option in ValidatorConfig.fields:
+            string += f"\t{option} = {getattr(self, option)}\n"
+        return string
 
     @property
     def uniprot_ptm_file(self) -> str:
