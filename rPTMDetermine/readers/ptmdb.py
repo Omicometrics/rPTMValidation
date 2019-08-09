@@ -27,8 +27,7 @@ class ModificationNotFoundException(Exception):
     """
 
 
-# TODO: make this a Singleton class
-class PTMDB2:
+class PTMDB:
     """
     A class representing the UniMod PTM database.
 
