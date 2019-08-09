@@ -19,11 +19,6 @@ from rPTMDetermine.constants import ELEMENT_MASSES
 MOD_FORMULA_REGEX = re.compile(r"(\w+)\(([0-9]+)\)")
 
 
-UnimodEntry = collections.namedtuple(
-    "UnimodEntry",
-    ["id", "name", "full_name", "mono_mass", "avg_mass", "composition"])
-    
-    
 class ModificationNotFoundException(Exception):
     """
     An exception to indicate failure to find a modification in the
@@ -32,12 +27,12 @@ class ModificationNotFoundException(Exception):
     """
 
 
-class PTMDB:
+# TODO: make this a Singleton class
+class PTMDB2:
     """
     A class representing the UniMod PTM database.
 
     """
-
     formula_regex = re.compile(r"(\w+)\(?([0-9-]+)?\)?")
 
     def __init__(self, ptm_file: Optional[str] = None):
@@ -73,31 +68,45 @@ class PTMDB:
         Constructs the Unimod database using the XML file.
 
         """
+        # Construct modification information table
         self.cursor.execute('''CREATE TABLE mods
-                               (id integer PRIMARY KEY, name text,
+                               (mod_id integer PRIMARY KEY, name text,
                                 full_name text, mono_mass real, avg_mass real,
                                 composition text)''')
         self.cursor.execute("CREATE INDEX name_index ON mods(name)")
         self.cursor.execute(
             "CREATE INDEX full_name_index ON mods(full_name)")
 
+        # Construct table mapping modifications to sites, with a classification
+        self.cursor.execute('''CREATE TABLE mod_sites
+                               (mod_id integer, site text,
+                                classification text)''')
+        self.cursor.execute("CREATE INDEX id_index ON mod_sites(mod_id)")
+
         namespace = "http://www.unimod.org/xmlns/schema/unimod_2"
-        ns_map = {"x": namespace}
-        entries: List[UnimodEntry] = []
         for event, element in etree.iterparse(self.ptm_file, events=["end"]):
             if event == "end" and element.tag == f"{{{namespace}}}mod":
-                delta = element.xpath("x:delta", namespaces=ns_map)[0]
-                entries.append(
-                    UnimodEntry(
-                        element.get("record_id"),
-                        element.get("title"),
-                        element.get("full_name").replace(" ", "").lower(),
-                        float(delta.get("mono_mass")),
-                        float(delta.get("avge_mass")),
-                        delta.get("composition")))
+                delta = element.find(f"{{{namespace}}}delta")
+                mod_id = element.get("record_id")
+                self.cursor.execute(
+                    '''INSERT INTO mods (mod_id, name, full_name, mono_mass,
+                                         avg_mass, composition)
+                       VALUES (?, ?, ?, ?, ?, ?)''',
+                    (mod_id,
+                     element.get("title"),
+                     element.get("full_name").replace(" ", "").lower(),
+                     float(delta.get("mono_mass")),
+                     float(delta.get("avge_mass")),
+                     delta.get("composition")))
 
-        self.cursor.executemany("INSERT INTO mods VALUES (?, ?, ?, ?, ?, ?)",
-                                entries)
+                for e in element.findall(f"{{{namespace}}}specificity"):
+                    site = e.get("site")
+                    classification = e.get("classification")
+                    self.cursor.execute(
+                        '''INSERT INTO mod_sites (mod_id, site,
+                                                  classification)
+                           VALUES (?, ?, ?)''',
+                        (mod_id, site, classification))
 
         self.conn.commit()
 
@@ -169,7 +178,7 @@ class PTMDB:
         """
         self.cursor.execute(
             f"SELECT name, {self._get_mass_col(mass_type)} FROM mods "
-            "WHERE id=?", (ptm_id,))
+            "WHERE mod_id=?", (ptm_id,))
 
         res = self.cursor.fetchone()
 
@@ -230,6 +239,55 @@ class PTMDB:
                 f"No modification found with mass within {tol} of {mass}")
 
         return res[0]
+
+    def get_mods(
+        self,
+        mass_type: MassType = MassType.mono,
+        filter_class: Optional[str] = None) \
+            -> Dict[Tuple[str, float], List[str]]:
+        """
+        Extracts the database entries for the modifications, optionally
+        filtering on the classification field.
+
+        Args:
+            mass_type (MassType, optional): The mass type.
+            filter_class (str, optional): Only extract the modifications which
+                                          are classified in this category.
+
+        Returns:
+            A dictionary mapping (modification name, modification mass) to
+            the peptide sites.
+
+        """
+        col = self._get_mass_col(mass_type)
+        query = f'''SELECT mods.mod_id, name, {col}, site FROM mods
+                    INNER JOIN mod_sites ON mods.mod_id = mod_sites.mod_id'''
+        if filter_class is not None:
+            query += f' WHERE classification = "{filter_class}"'
+        self.cursor.execute(query)
+
+        mods: Dict[Tuple[str, float], List[str]] = \
+            collections.defaultdict(list)
+        for row in self.cursor.fetchall():
+            mods[(row["name"], row[col])].append(row["site"])
+        return mods
+
+    def get_ptms(self, mass_type: MassType = MassType.mono) \
+            -> Dict[Tuple[str, float], List[str]]:
+        """
+        Extracts the database entries for those modifications which are
+        classified as "Post-translational".
+
+        Args:
+            mass_type (MassType, optional): The mass type.
+
+        Returns:
+            A dictionary mapping (modification name, modification mass) to
+            the peptide sites which can be post-translationally modified.
+
+        """
+        return self.get_mods(mass_type=mass_type,
+                             filter_class="Post-translational")
 
     def _get_mass_col(self, mass_type: MassType) -> str:
         """
