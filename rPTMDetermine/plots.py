@@ -75,11 +75,11 @@ def plot_scores(psms: List[PSM], lda_threshold: float,
     # Plot the target and decoy score distributions
     plt.scatter(range(len(target_scores)), target_scores, marker='o',
                 facecolors="none", edgecolors=TARGET_COLOR, linewidths=1,
-                label=f"Target {label_prefix}identifications")
+                label=f"Target {label_prefix}")
 
     plt.scatter(range(len(decoy_scores)), decoy_scores, marker='x',
                 facecolors=DECOY_COLOR, linewidths=1,
-                label=f"Decoy {label_prefix}identifications")
+                label=f"Decoy {label_prefix}")
 
     plt.xlabel("Spectrum No.", fontproperties=FONT)
     plt.ylabel("LDA Score", fontproperties=FONT)
@@ -214,11 +214,11 @@ def plot_recovered_score_similarity(psms: Sequence[PSM],
 
     plt.scatter(target_sims, target_ldas, marker="o", facecolors="none",
                 edgecolors=TARGET_COLOR,
-                label="Target Identifications")
+                label="Target")
 
     plt.scatter(decoy_sims, decoy_ldas, marker="x",
                 facecolors=DECOY_COLOR,
-                label="Decoy Identifications")
+                label="Decoy")
 
     plt.xlabel("Similarity Score", fontproperties=FONT)
     plt.ylabel("LDA Score", fontproperties=FONT)
@@ -230,8 +230,7 @@ def plot_recovered_score_similarity(psms: Sequence[PSM],
     ax.axvline(sim_threshold, color=THRESHOLD_COLOR, linestyle="--",
                linewidth=2)
 
-    ax.legend(prop=FONT, frameon=False, loc=1,
-              bbox_to_anchor=(0.14, 0.53, 0.5, 0.5), handletextpad=0.01)
+    ax.legend(prop=FONT, loc=4, handletextpad=0.01)
 
     box = ax.get_position()
     # Reduce the size of the plot to allow space for annotation on RHS
@@ -379,6 +378,10 @@ def plot_spectra(spectra: Sequence[np.array]):
                 markerfmt=' ', label=None)
         ax.set_ylabel("Intensity", fontproperties=FONT)
 
+        ax.set_ylim(bottom=0)
+        for spine in ["top", "right"]:
+            ax.spines[spine].set_visible(False)
+
     plt.xlabel("$\\it{m/z}$", fontproperties=FONT)
 
     plt.show()
@@ -466,7 +469,7 @@ def _add_sequence(ions, anns, height, mzs, intensities, max_int, max_mz, peptide
                      fontsize=14)
 
 
-def plot_psm(psm: PSM, denoise: bool = False, denoise_tol: float = 0.2):
+def plot_psm(psm: PSM, denoise: bool = False, denoise_tol: float = 0.2, add_seq: bool = True):
     """
     """
     if denoise:
@@ -494,26 +497,27 @@ def plot_psm(psm: PSM, denoise: bool = False, denoise_tol: float = 0.2):
 
     max_int = max(intensities)
     max_mz = max(mzs)
+    
+    if add_seq:
+        def add_sequence(ions, height, b_type):
+            _add_sequence(ions, anns, height, mzs, intensities, max_int,
+                          max_mz, psm.peptide, b_type)
 
-    def add_sequence(ions, height, b_type):
-        _add_sequence(ions, anns, height, mzs, intensities, max_int, max_mz,
-                      psm.peptide, b_type)
+        # Annotate b-ions
+        add_sequence([a for a in anns.keys() if a[0] == "b" and "[+]" in a],
+                     1.01 * max_int, True)
 
-    # Annotate b-ions
-    add_sequence([a for a in anns.keys() if a[0] == "b" and "[+]" in a],
-                 1.01 * max_int, True)
+        # Annotate y-ions
+        add_sequence([a for a in anns.keys() if a[0] == "y" and "[+]" in a],
+                     1.07 * max_int, False)
 
-    # Annotate y-ions
-    add_sequence([a for a in anns.keys() if a[0] == "y" and "[+]" in a],
-                 1.07 * max_int, False)
+        b_line = mlines.Line2D([], [], color="blue", marker="",
+                               label="$\\it{b}$-ions")
+        y_line = mlines.Line2D([], [], color="red", marker="",
+                               label="$\\it{y}$-ions")
 
-    b_line = mlines.Line2D([], [], color="blue", marker="",
-                           label="$\\it{b}$-ions")
-    y_line = mlines.Line2D([], [], color="red", marker="",
-                           label="$\\it{y}$-ions")
-
-    plt.legend(handles=[b_line, y_line], frameon=False, loc="upper center",
-               bbox_to_anchor=(0.5, -0.07), ncol=2)
+        plt.legend(handles=[b_line, y_line], frameon=False, loc="upper center",
+                   bbox_to_anchor=(0.5, -0.07), ncol=2)
     
     annotated_peaks = []
     for label, ann in anns.items():
