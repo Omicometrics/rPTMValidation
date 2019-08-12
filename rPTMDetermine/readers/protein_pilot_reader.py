@@ -20,11 +20,13 @@ MGF_TITLE_REGEX = re.compile(r"TITLE=Locus:([\d\.]+) ")
 @dataclasses.dataclass(eq=True, frozen=True)
 class ProteinPilotSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
 
-    __slots__ = ("time", "confidence", "prec_mz",)
+    __slots__ = ("time", "confidence", "prec_mz", "proteins", "accessions",)
 
     time: str
     confidence: float
     prec_mz: float
+    proteins: str
+    accessions: str
 
 
 class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
@@ -92,7 +94,9 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
             theor_mz=float(row["Theor m/z"]),
             time=row["Time"],
             confidence=float(row["Conf"]),
-            prec_mz=float(row["Prec m/z"]))
+            prec_mz=float(row["Prec m/z"]),
+            proteins=row["Names"],
+            accessions=row["Accessions"])
 
 
 # TODO: use XML parser
