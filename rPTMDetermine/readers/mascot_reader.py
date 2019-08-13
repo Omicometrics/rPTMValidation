@@ -166,14 +166,13 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
             List of MascotSearchResults.
 
         """
-        data_id, spec_id = spec_id.split(":")
         results = [
             MascotSearchResult(
                 seq=peptide["sequence"],
                 mods=peptide["modifications"],
                 charge=query["charge"],
                 spectrum=spec_id,
-                dataset=data_id,
+                dataset=None,
                 rank=int(rank),
                 pep_type=pep_type,
                 theor_mz=query["mz"],
