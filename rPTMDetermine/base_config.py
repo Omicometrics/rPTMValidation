@@ -59,6 +59,8 @@ class BaseConfig():
         "fdr",
         "log_level",
         "spectra_cache_file",
+        "activation_mode",
+        "activation_energy",
     ]
 
     def __init__(self, json_config: Dict[str, Any],
@@ -254,6 +256,22 @@ class BaseConfig():
 
         """
         return self.json_config.get("spectra_cache_file", None)
+
+    @property
+    def activation_mode(self) -> Optional[str]:
+        """
+        The activation mode with which to filter the spectra.
+
+        """
+        return self.json_config.get("activation_mode", None)
+
+    @property
+    def activation_energy(self) -> Optional[float]:
+        """
+        The activation energy with which to filter the spectra.
+
+        """
+        return self.json_config.get("activation_energy", None)
 
     def _check_required(self):
         """

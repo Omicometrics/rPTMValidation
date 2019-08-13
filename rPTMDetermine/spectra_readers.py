@@ -4,6 +4,7 @@ A series of functions used to read different spectra file types.
 
 """
 import base64
+import collections
 import enum
 import functools
 import itertools
@@ -20,6 +21,11 @@ from .mass_spectrum import Spectrum
 
 
 MGF_TITLE_REGEX = re.compile(r"Locus:([\d\.]+) ")
+
+
+MZMLPrecursor = collections.namedtuple(
+    "MZMLPrecursor",
+    ("prec_id", "selected_ions", "charges", "activation_params"))
 
 
 class ParserException(Exception):
@@ -75,15 +81,6 @@ def read_mgf_file(spec_file: str) -> Dict[str, Spectrum]:
     return spectra
 
 
-def read_mzml_file(spec_file: str):
-    """
-    Reads the given mzML file to extract spectra.
-
-    """
-    # TODO
-    raise NotImplementedError()
-
-
 def read_mzxml_file(spec_file: str):
     """
     Reads the given mzXML file to extract spectra.
@@ -93,7 +90,7 @@ def read_mzxml_file(spec_file: str):
     raise NotImplementedError()
 
 
-def read_spectra_file(spec_file: str) -> Dict[str, Spectrum]:
+def read_spectra_file(spec_file: str, **kwargs) -> Dict[str, Spectrum]:
     """
     Determines the format of the given tandem mass spectrum file and delegates
     to the appropriate reader.
@@ -107,7 +104,7 @@ def read_spectra_file(spec_file: str) -> Dict[str, Spectrum]:
     if spec_file.endswith('.mgf'):
         return read_mgf_file(spec_file)
     if spec_file.lower().endswith('.mzml'):
-        return read_mzml_file(spec_file)
+        return MZMLReader().extract_ms2(spec_file, **kwargs)
     if spec_file.lower().endswith('.mzxml'):
         return read_mzxml_file(spec_file)
     raise NotImplementedError(
@@ -134,7 +131,8 @@ class MZMLReader:
         self.namespace = namespace
         self.ns_map = {'x': self.namespace}
 
-    def extract_ms1(self, mzml_file: str) -> Dict[str, Dict[str, Any]]:
+    def extract_ms1(self, mzml_file: str, **kwargs) \
+            -> Dict[str, Spectrum]:
         """
         Extracts the MS1 spectra from the input mzML file.
 
@@ -145,9 +143,10 @@ class MZMLReader:
             A list of the MS1 spectra encoded in dictionaries.
 
         """
-        return self.extract_msn(mzml_file, 1)
+        return self.extract_msn(mzml_file, 1, **kwargs)
 
-    def extract_ms2(self, mzml_file: str) -> Dict[str, Dict[str, Any]]:
+    def extract_ms2(self, mzml_file: str, **kwargs) \
+            -> Dict[str, Spectrum]:
         """
         Extracts the MS2 spectra from the input mzML file.
 
@@ -158,10 +157,10 @@ class MZMLReader:
             A list of the MS2 spectra encoded in dictionaries.
 
         """
-        return self.extract_msn(mzml_file, 2)
+        return self.extract_msn(mzml_file, 2, **kwargs)
 
-    def extract_msn(self, mzml_file: str, n: int) \
-            -> Dict[str, Dict[str, Any]]:
+    def extract_msn(self, mzml_file: str, n: int, **kwargs) \
+            -> Dict[str, Spectrum]:
         """
         Extracts the MSn spectra from the input mzML file.
 
@@ -174,6 +173,11 @@ class MZMLReader:
 
         """
         spectra = {}
+
+        # Parse kwargs
+        act_method = kwargs.get("activation_method", None)
+        act_energy = float(kwargs.get("activation_energy", None))
+
         # read from xml data
         context = etree.iterparse(
             mzml_file, events=("end",),
@@ -187,7 +191,7 @@ class MZMLReader:
                     params[param.get("name")] = param.get("value", None)
                 param_groups[element.get("id")] = params
                 continue
-        
+
             # This contains the cycle and experiment information
             spectrum_info = dict(element.items())
             default_array_length = int(spectrum_info.get(
@@ -199,10 +203,30 @@ class MZMLReader:
                     element.xpath("x:cvParam[@name='ms level']",
                                   namespaces=self.ns_map)[0].get("value"))
             except IndexError:
-                group = element.find(self._fix_tag("referenceableParamGroupRef")).get("ref")
+                group = element.find(
+                    self._fix_tag("referenceableParamGroupRef")).get("ref")
                 ms_level = int(param_groups[group]["ms level"])
             if ms_level != n:
                 continue
+
+            # Extract only the last precursor since this should be the one
+            # preceding the current spectrum
+            try:
+                precursor: Optional[MZMLPrecursor] = \
+                    self._extract_precursors(element)[-1]
+            except IndexError:
+                precursor = None
+
+            # Apply filters based on the activation method/energy if specified
+            if (precursor is not None and ms_level >= 2 and
+                    (act_method is not None or act_energy is not None)):
+                act_params = precursor.activation_params
+                if act_method is not None and act_method not in act_params:
+                    continue
+                if (act_energy is not None and
+                        act_params.get("activation_energy", None)
+                        != act_energy):
+                    continue
 
             # MS spectrum
             def _get_array(s):
@@ -232,39 +256,42 @@ class MZMLReader:
 
             spec_id = self._parse_id(spectrum_info["id"])
 
-            precursors = self._extract_precursors(element)
-
             element.clear()
 
-            spectra[spec_id] = {
-                "mz": mz,
-                "intensity": intensity,
-                "rt": start_time,
-                "info": spectrum_info,
-                "mslevel": ms_level,
-                "precursors": precursors,
-            }
+            spectra[spec_id] = Spectrum(
+                np.array([mz, intensity]),
+                precursor.selected_ions[0] if precursor is not None else None,
+                precursor.charges[0] if precursor is not None else None,
+                start_time)
 
         return spectra
 
-    def _extract_precursors(self, spectrum) -> Dict[str, List[float]]:
+    def _extract_precursors(self, spectrum) -> List[MZMLPrecursor]:
         """
         """
-        prec_ids: Dict[str, List[float]] = {}
-        precs = spectrum.xpath("x:precursorList/x:precursor",
-                               namespaces=self.ns_map)
-        for precursor in precs:
+        precs: List[MZMLPrecursor] = []
+        for precursor in spectrum.xpath("x:precursorList/x:precursor",
+                                        namespaces=self.ns_map):
             prec_ref = precursor.get("spectrumRef")
             if prec_ref is None:
                 continue
             prec_id = self._parse_id(prec_ref)
-            ions = [float(e.get("value"))
-                    for e in precursor.xpath(
-                        "x:selectedIonList/x:selectedIon/"
-                        "x:cvParam[@name='selected ion m/z']",
-                        namespaces=self.ns_map)]
-            prec_ids[prec_id] = ions
-        return prec_ids
+            ions = []
+            charges = []
+            for element in precursor.xpath(
+                    "x:selectedIonList/x:selectedIon/x:cvParam",
+                    namespaces=self.ns_map):
+                if element.get("name") == "selected ion m/z":
+                    ions.append(float(element.get("value")))
+                elif element.get("name") == "charge state":
+                    charges.append(int(element.get("value")))
+            act_params = {e.get("name"): e.get("value")
+                          for e in precursor.xpath("x:activation/cvParam")}
+            if "collision energy" in act_params:
+                act_params["collision energy"] = \
+                    float(act_params["collision energy"])
+            precs.append(MZMLPrecursor(prec_id, ions, charges, act_params))
+        return precs
 
     def _parse_id(self, id_str: str) -> str:
         """

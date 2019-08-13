@@ -377,7 +377,10 @@ class ValidateBase():
                     raise FileNotFoundError(
                         f"Spectra file {spec_file_path} not found")
 
-                spectra = spectra_readers.read_spectra_file(spec_file_path)
+                spectra = spectra_readers.read_spectra_file(
+                    spec_file_path,
+                    activation_method=self.config.activation_mode,
+                    activation_energy=self.config.activation_energy)
 
                 for _, spec in spectra.items():
                     spec.centroid().remove_itraq()
