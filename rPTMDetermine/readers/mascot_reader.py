@@ -103,8 +103,7 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
         # Assign spectrum IDs to the querys
         for query_id in res.keys():
             query = payloads[f"query{query_id}"]
-            res[query_id]["spectrumid"] = \
-                self._get_query_title(query).split(" ")[0]
+            res[query_id]["spectrumid"] = self._get_spectrum_id(query)
 
         # Extract the identified peptides for each spectrum query
         self._parse_peptides(payloads["peptides"], res, var_mods, fixed_mods,
@@ -439,10 +438,9 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
             raise ParserException(f"Invalid modification: {mod_str}")
         return match.groups()
 
-    def _get_query_title(self, payload):
+    def _get_spectrum_id(self, payload: str) -> str:
         """
-        Parses a 'query*' payload to extract the title.
-
+        Parses a 'query*' payload to extract the spectrum ID.
         Args:
             payload (str): A 'query*' payload's content.
 
@@ -450,8 +448,14 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
             The title spectrum ID as a string.
 
         """
-        entries = self._payload_to_dict(payload)
-        return urllib.parse.unquote(entries["title"])
+        title = urllib.parse.unquote(self._payload_to_dict(payload)["title"])
+        if len(title.split(" ")) == 1 and ":" in title:
+            return title.split(":")[1]
+        elif "NativeID" in title:
+            for string in title.split(" "):
+                if string.startswith("NativeID"):
+                    return ".".join(re.findall(r"\w+=(\d+)", string))
+        raise ParserException(f"Unrecognized spectrum ID format: {title}")
 
     def _get_query_num_rank(self, string: str) -> Sequence[str]:
         """
