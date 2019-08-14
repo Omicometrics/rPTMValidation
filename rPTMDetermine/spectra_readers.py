@@ -176,7 +176,7 @@ class MZMLReader:
 
         # Parse kwargs
         act_method = kwargs.get("activation_method", None)
-        act_energy = float(kwargs.get("activation_energy", None))
+        act_energy = kwargs.get("activation_energy", None)
 
         # read from xml data
         context = etree.iterparse(
@@ -222,10 +222,12 @@ class MZMLReader:
                     (act_method is not None or act_energy is not None)):
                 act_params = precursor.activation_params
                 if act_method is not None and act_method not in act_params:
+                    #print(act_method, act_params)
                     continue
                 if (act_energy is not None and
-                        act_params.get("activation_energy", None)
+                        act_params.get("collision energy", None)
                         != act_energy):
+                    #print(act_energy, act_params)
                     continue
 
             # MS spectrum
@@ -286,7 +288,7 @@ class MZMLReader:
                 elif element.get("name") == "charge state":
                     charges.append(int(element.get("value")))
             act_params = {e.get("name"): e.get("value")
-                          for e in precursor.xpath("x:activation/cvParam")}
+                          for e in precursor.xpath("x:activation/x:cvParam", namespaces=self.ns_map)}
             if "collision energy" in act_params:
                 act_params["collision energy"] = \
                     float(act_params["collision energy"])
