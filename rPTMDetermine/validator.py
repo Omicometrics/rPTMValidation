@@ -597,7 +597,10 @@ class Validator(validator_base.ValidateBase):
                     dpsm_vars = self.pool.map(_decoy_features, d_candidates)
 
                     # Find the decoy candidate with the highest MatchScore
-                    max_match = max(dpsm_vars, key=lambda k: k.MatchScore)
+                    max_match = max(dpsm_vars,
+                                    key=lambda k: k.MatchScore
+                                                  if k.MatchScore is not None
+                                                  else -1)
 
                     # If the decoy ID is better than the one already assigned
                     # to the PSM, then replace it
