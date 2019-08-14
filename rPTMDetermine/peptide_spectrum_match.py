@@ -26,6 +26,10 @@ SimilarityScore = collections.namedtuple(
     "SimilarityScore", ["data_id", "spectrum_id", "score"])
 
 
+class SpectrumNotFoundError(Exception):
+    pass
+
+
 class PSM():
     """
     A class to represent a Peptide Spectrum Match, containing details of the
@@ -214,11 +218,12 @@ class PSM():
         Spectrum object.
 
         Raises:
-            RuntimeError if self.spectrum is not assigned.
+            SpectrumNotFoundError if self.spectrum is not assigned.
 
         """
         if self.spectrum is None:
-            raise RuntimeError("PSM has not been assigned a Spectrum")
+            raise SpectrumNotFoundError(
+                f"PSM ({self.uid}) has not been assigned a Spectrum")
 
     def annotate_spectrum(
         self, tol: float = 0.2,
