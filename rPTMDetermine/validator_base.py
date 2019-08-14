@@ -368,8 +368,8 @@ class ValidateBase():
         all_spectra = {}
         for data_conf_id, data_conf in tqdm.tqdm(
                 self.config.data_sets.items()):
-            for set_id, spec_file in tqdm.tqdm(
-                    data_conf["spectra_files"].items(),
+            for spec_file in tqdm.tqdm(
+                    data_conf["spectra_files"],
                     desc=f"Processing {data_conf_id}"):
                 spec_file_path = os.path.join(data_conf["data_dir"], spec_file)
 
@@ -385,7 +385,7 @@ class ValidateBase():
                 for _, spec in spectra.items():
                     spec.centroid().remove_itraq()
 
-                all_spectra[set_id] = spectra
+                all_spectra[data_conf_id] = spectra
 
         # Save the spectra to the cache file
         logging.info(f"Writing mass spectra to cache at {cache_file}")
