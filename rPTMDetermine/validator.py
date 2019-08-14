@@ -284,6 +284,9 @@ class Validator(validator_base.ValidateBase):
         logging.info("Reading mass spectra from files.")
         self.psms = self._process_mass_spectra()
 
+        # Filter to those PSMs with assigned mass spectra
+        self.psms = PSMContainer([p for p in self.psms if p.spectrum is not None])
+
         # Calculate the PSM quality features for each PSM
         logging.info("Calculating PSM features.")
         for psm in tqdm.tqdm(self.psms):
