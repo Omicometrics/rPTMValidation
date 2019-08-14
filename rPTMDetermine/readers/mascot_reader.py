@@ -450,10 +450,11 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
         title = urllib.parse.unquote(self._payload_to_dict(payload)["title"])
         if len(title.split(" ")) == 1 and ":" in title:
             return title.split(":")[1]
-        elif "NativeID" in title:
-            for string in title.split(" "):
-                if string.startswith("NativeID"):
-                    return ".".join(re.findall(r"\w+=(\d+)", string))
+
+        match = re.search(r"NativeID:\"([^\"]*)\"", title)
+        if match:
+            return ".".join(re.findall(r"\w+=(\d+)", match.group(1)))
+
         raise ParserException(f"Unrecognized spectrum ID format: {title}")
 
     def _get_query_num_rank(self, string: str) -> Sequence[str]:
