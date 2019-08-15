@@ -222,7 +222,13 @@ class ValidateBase():
             logging.info(f"Processing {len(unmods)} spectra.")
 
             for spec_id, _psms in unmods.items():
-                spec = all_spectra[data_id][spec_id]
+                try:
+                    spec = all_spectra[data_id][spec_id]
+                except KeyError:
+                    # The spectrum does not exist in the parsed spectra, likely
+                    # due to a filter (such as activation mode) applied when
+                    # reading the MS/MS spectra from file.
+                    continue
 
                 unmod_psms.extend([
                     UnmodPSM(psm.uid, data_id, spec_id,
