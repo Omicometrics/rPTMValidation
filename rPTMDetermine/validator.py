@@ -415,7 +415,6 @@ class Validator(validator_base.ValidateBase):
         print(len(self.psms))
         self.psms = PSMContainer([p for p in self.psms if p.spectrum is not None])
         print(len(self.psms))
-        sys.exit()
 
         # Calculate the PSM quality features for each PSM
         logging.info("Calculating PSM features.")
@@ -543,7 +542,7 @@ class Validator(validator_base.ValidateBase):
         if self.config.search_engine == SearchEngine.Mascot:
             score_getter = lambda r: r.ionscore
         elif self.config.search_engine == SearchEngine.Comet:
-            score_getter = lambda r: r.scores["XCorr"]
+            score_getter = lambda r: r.scores["xcorr"]
                     
         if score_getter is not None:
             score = get_fdr_threshold(
