@@ -4,6 +4,7 @@ A set of functions to be used for processing peptide sequences.
 
 """
 import collections
+import functools
 from typing import Sequence, Union
 
 from pepfrag import AA_MASSES, FIXED_MASSES, IonType, ModSite, Peptide
@@ -73,6 +74,7 @@ def merge_seq_mods(seq: str,
     return ''.join(seq_list)
 
 
+@functools.lru_cache(maxsize=10000)
 def get_by_ion_mzs(peptide: Peptide):
     """
     Get the b/y-type fragment ions for the peptide.
@@ -80,9 +82,6 @@ def get_by_ion_mzs(peptide: Peptide):
     """
     return [ion.mass for ion in peptide.fragment(
         ion_types={
-            IonType.precursor: {"neutral_losses": []},
-            IonType.imm: {},
             IonType.b: {"neutral_losses": []},
             IonType.y: {"neutral_losses": []},
-            IonType.a: {"neutral_losses": []}
         })]
