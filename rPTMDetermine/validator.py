@@ -170,10 +170,10 @@ def count_matched_ions(peptide: Peptide,
     """
     ion_mzs = peptides.get_by_ion_mzs(peptide)
     bisect_idxs = [bisect_left(ion_mzs, mz) for mz in spectrum.mz]
-    return sum(
-        [(idx > 0 and mz - ion_mzs[idx - 1] <= 0.2) or
-         (idx < len(ion_mzs) and ion_mzs[idx] - mz <= 0.2)
-         for idx, mz in zip(bisect_idxs, list(spectrum.mz))])
+    return len(
+        [idx for idx, mz in zip(bisect_idxs, list(spectrum.mz))
+         if (idx > 0 and mz - ion_mzs[idx - 1] <= 0.2) or
+         (idx < len(ion_mzs) and ion_mzs[idx] - mz <= 0.2)])
 
 
 def write_results(output_file: str, psms: Sequence[PSM],
@@ -677,7 +677,7 @@ class Validator(validator_base.ValidateBase):
                 # Find the number of matched ions in the spectrum per decoy
                 # peptide candidate
                 _count_matched_ions = functools.partial(count_matched_ions,
-                                                       spectrum=max_spec)
+                                                        spectrum=max_spec)
                 cand_num_ions =\
                    self.pool.map(_count_matched_ions, d_candidates)
                 #cand_num_ions = [count_matched_ions(dc, max_spec) for dc in d_candidates]
