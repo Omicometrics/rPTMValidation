@@ -22,23 +22,27 @@ def calculate_similarity_scores(mod_psms: PSMContainer[PSM],
     unmodified peptides.
 
     Args:
-        mod_psms (list of PSMs): The modified PSMs.
-        unmod_psms (list of UnmodPSMs): The unmodified PSMs.
+        mod_psms (PSMContainer of PSMs): The modified PSMs.
+        unmod_psms (PSMContainer of UnmodPSMs): The unmodified PSMs.
 
     Returns:
         The modified PSMs, with their similarity scores now set.
 
     """
+    # Note that the index dictionary requires a tuple to be passed as the key
     index: Dict[Tuple[str, ...], List[int]] = \
-        unmod_psms.get_index(("mod_psm_uid",))
+        mod_psms.get_index(("uid",))
 
-    for psm in tqdm.tqdm(mod_psms):
-        for upsm in [unmod_psms[ii] for ii in index[(psm.uid,)]]:
+    for upsm in tqdm.tqdm(unmod_psms):
+        for psm_uid in upsm.get_mod_ids():
+            psm = mod_psms[index[(psm_uid,)][0]]
             psm.similarity_scores.append(
                 SimilarityScore(upsm.data_id, upsm.spec_id,
                                 calculate_spectral_similarity(psm, upsm)))
-            upsm.peptide.clean_fragment_ions()
-        psm.peptide.clean_fragment_ions()
+        upsm.peptide.clean_fragment_ions()
+
+    mod_psms.clean_fragment_ions()
+
     return mod_psms
 
 

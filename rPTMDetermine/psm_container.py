@@ -10,8 +10,8 @@ import csv
 import operator
 import os
 import sys
-from typing import (Callable, Dict, Generic, List, Optional, overload,
-                    Sequence, Set, Tuple, TypeVar)
+from typing import (Callable, Dict, Generic, Iterable, List, Optional,
+                    overload, Sequence, Set, Tuple, TypeVar)
 
 import pandas as pd
 
@@ -30,7 +30,7 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
     builds upon the UserList class and extends the functionality.
 
     """
-    def __init__(self, psms: Optional[List[PSMType]] = None):
+    def __init__(self, psms: Optional[Iterable[PSMType]] = None):
         """
         Initialize the instance of the class.
 
@@ -39,7 +39,7 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
         # TODO
         # The generic type of self.data needs to be overridden, but this is
         # problematic due to https://github.com/python/mypy/issues/5846
-        self.data = psms if psms is not None else []
+        self.data = list(psms) if psms is not None else []
 
     @overload
     def __getitem__(self, idx: int) -> PSMType: ...

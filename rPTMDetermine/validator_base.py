@@ -14,13 +14,12 @@ import math
 import os
 import pickle
 import sys
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Sequence, Tuple
 
 import tqdm
 
 from pepfrag import ModSite, Peptide
 
-from .base_config import SearchEngine
 from . import lda
 from . import mass_spectrum
 from . import peptides
@@ -29,7 +28,6 @@ from .peptide_spectrum_match import PSM, UnmodPSM
 from .psm_container import PSMContainer
 from . import readers
 from . import spectra_readers
-from . import utilities
 
 
 @functools.lru_cache(maxsize=1024)
@@ -141,30 +139,6 @@ class ValidateBase():
                 psm.benchmark = (peptides.merge_seq_mods(psm.seq, psm.mods)
                                  in benchmarks)
 
-    def _fdr_filter(self, data_config) -> \
-            Optional[Callable[[readers.SearchResult], bool]]:
-        """
-        Provides an FDR filter function for processing database search results.
-
-        Args:
-            data_config (dict)
-
-        Returns:
-            Predicate for determining if an identification passes FDR control.
-
-        """
-        if self.config.search_engine == SearchEngine.ProteinPilot:
-            return lambda res: \
-                isinstance(res, readers.ProteinPilotSearchResult) and \
-                res.confidence >= data_config["confidence"]
-        if self.config.search_engine == SearchEngine.Mascot:
-            return lambda res: \
-                isinstance(res, readers.MascotSearchResult) and \
-                res.ionscore is not None and res.ionscore >= \
-                readers.mascot_reader.get_identity_threshold(
-                    self.config.fdr, res.num_matches)
-        return None
-
     def _find_unmod_analogues(self, mod_psms: Sequence[PSM]) \
             -> PSMContainer[UnmodPSM]:
         """
@@ -179,7 +153,8 @@ class ValidateBase():
         # modification and with modifications inline, to the modified PSM
         # objects (psm_info). It then processes the database search results
         # to find matches to the keys in psm_info (unmodified peptides).
-        unmod_psms: List[UnmodPSM] = []
+        unmod_psms: Dict[Tuple[str, str, str, Tuple[ModSite, ...]],
+                         UnmodPSM] = {}
 
         logging.info("Caching PSM sequences.")
         psm_info: Dict[Tuple[str, int], List[Tuple[PSM, List[ModSite]]]] = \
@@ -230,12 +205,16 @@ class ValidateBase():
                     # reading the MS/MS spectra from file.
                     continue
 
-                unmod_psms.extend([
-                    UnmodPSM(psm.uid, data_id, spec_id,
-                             Peptide(psm.seq, psm.charge, mods),
-                             spectrum=spec) for psm, mods in _psms])
+                for psm, mods in _psms:
+                    psm_tuple = (data_id, spec_id, psm.seq, tuple(mods))
+                    if psm_tuple not in unmod_psms:
+                        unmod_psms[psm_tuple] = \
+                            UnmodPSM(data_id, spec_id,
+                                     Peptide(psm.seq, psm.charge, mods),
+                                     spectrum=spec)
+                    unmod_psms[psm_tuple].add_mod_id(psm.uid)
 
-        return PSMContainer(utilities.deduplicate(unmod_psms))
+        return PSMContainer(unmod_psms.values())
 
     def _filter_mods(self, mods: Iterable[ModSite], seq: str)\
             -> List[ModSite]:
