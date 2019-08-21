@@ -439,7 +439,7 @@ def _apply_deamidation_correction(
 
         # Preferentially keep the non-deamidated identification, unless
         # the deamidated version has a score more than one point higher
-        if nondeam_score >= psm.lda_score - 1.:
+        if nondeam_score >= psm.lda_score:  # - 1.:
             nondeam_psm.corrected = True
 
             nondeam_psm.lda_score = nondeam_score
