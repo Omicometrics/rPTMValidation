@@ -73,6 +73,10 @@ class TPPReader(Reader):  # pylint: disable=too-few-public-methods
                 raw_file, scan_no = raw_id[0], int(raw_id[1])
                 charge = int(element.get("assumed_charge"))
                 spec_id = element.get("spectrumNativeID")
+                if spec_id is None:
+                    spec_id = f"0.1.{element.get('start_scan')}"
+                else:
+                    spec_id = spec_id.split(":")[1]
 
                 hits = [(
                     int(hit.get("hit_rank")),
@@ -150,7 +154,7 @@ class TPPReader(Reader):  # pylint: disable=too-few-public-methods
             self,
             raw_file: str,
             scan_no: int,
-            comb_id: str,
+            spec_id: str,
             hit: Tuple[int, str, Tuple[ModSite, ...], int, Dict[str, float],
                        PeptideType]) -> TPPSearchResult:
         """
@@ -160,13 +164,12 @@ class TPPReader(Reader):  # pylint: disable=too-few-public-methods
             TPPSearchResult.
 
         """
-        data_id, spec_id = comb_id.split(":")
         return TPPSearchResult(
             seq=hit[1],
             mods=hit[2],
             charge=hit[3],
             spectrum=spec_id,
-            dataset=data_id,
+            dataset=None,
             rank=hit[0],
             pep_type=hit[5],
             theor_mz=None,
