@@ -11,6 +11,7 @@ import functools
 import itertools
 import logging
 import math
+import operator
 import os
 import pickle
 import sys
@@ -302,7 +303,7 @@ class ValidateBase():
             for isoform, score in isoform_scores.items():
                 isoform.site_prob = site_probability(score, all_scores)
 
-            psms[ii] = max(isoform_scores.keys(), key=lambda p: p.site_prob)
+            psms[ii] = max(isoform_scores.keys(), key=operator.attrgetter("site_prob"))
 
     def filter_localizations(self, psms: Sequence[PSM]) -> PSMContainer:
         """

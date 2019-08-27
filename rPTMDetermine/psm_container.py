@@ -223,7 +223,7 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
             Set of unique benchmark peptides as tuples of sequence and mods.
 
         """
-        return self.get_unique_peptides(predicate=lambda psm: psm.benchmark)
+        return self.get_unique_peptides(predicate=operator.attrgetter("benchmark"))
 
     def get_validated(
         self,

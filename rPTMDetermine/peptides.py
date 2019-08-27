@@ -5,6 +5,7 @@ A set of functions to be used for processing peptide sequences.
 """
 import collections
 import functools
+import operator
 from typing import Sequence, Union
 
 from pepfrag import AA_MASSES, FIXED_MASSES, IonType, ModSite, Peptide
@@ -64,7 +65,7 @@ def merge_seq_mods(seq: str,
                  for _, site, name in mods]
 
     # Sort the modifications by site index
-    mod_sites.sort(key=lambda x: x[1], reverse=True)
+    mod_sites.sort(key=operator.itemgetter(1), reverse=True)
 
     # Insert the modifications into the peptide sequence
     seq_list = list(seq)

@@ -540,7 +540,7 @@ class Validator(validator_base.ValidateBase):
 
         score_getter = None
         if self.config.search_engine == SearchEngine.Mascot:
-            score_getter = lambda r: r.ionscore
+            score_getter = operator.attrgetter("ionscore")
         elif self.config.search_engine == SearchEngine.Comet:
             score_getter = lambda r: r.scores["xcorr"]
                     
