@@ -20,7 +20,7 @@ import lxml.etree as etree
 from .mass_spectrum import Spectrum
 
 
-MGF_TITLE_REGEX = re.compile(r"Locus:([\d\.]+) ")
+MGF_TITLE_REGEX = re.compile(r"Locus:([\d\.]+)")
 
 
 MZMLPrecursor = collections.namedtuple(
