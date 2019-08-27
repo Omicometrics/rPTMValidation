@@ -9,20 +9,30 @@ setup(
     version="0.1",
     packages=[
         "rPTMDetermine",
-        "rPTMDetermine.readers"
+        "rPTMDetermine.readers",
     ],
     ext_modules=cythonize(
         [
             os.path.join("rPTMDetermine", "annotate.pyx"),
             os.path.join("rPTMDetermine", "binomial.pyx"),
-            os.path.join("rPTMDetermine", "ionscore.pyx")
+            os.path.join("rPTMDetermine", "ionscore.pyx"),
         ],
-        compiler_directives={'language_level' : "3"}
+        include_path=[
+            "rPTMDetermine"
+        ],
+        compiler_directives={
+            "language_level" : "3",
+        }
     ),
     include_dirs=[np.get_include()],
     package_data={
-        "rPTMDetermine": ["EnzymeRules.json"],
-        "rPTMDetermine.readers": ["unimod.xml"]
+        "rPTMDetermine": [
+            "binomial.pxd",
+            "EnzymeRules.json",
+        ],
+        "rPTMDetermine.readers": [
+            "unimod.xml",
+        ]
     },
     include_package_data=True
 )
