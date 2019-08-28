@@ -5,7 +5,7 @@ A series of functions used to read different file types.
 """
 from typing import Iterable, List, TextIO, Tuple
 
-from rPTMDetermine.base_config import SearchEngine
+from ..base_config import SearchEngine
 
 from .mascot_reader import MascotReader
 from .msgfplus_reader import MSGFPlusReader

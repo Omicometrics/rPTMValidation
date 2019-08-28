@@ -1,6 +1,6 @@
 import cython
 
-from binomial cimport _log_binom_prob
+from .binomial cimport _log_binom_prob
 
 @cython.cdivision(True)
 cdef double _ionscore(int seqlen, int npeaks, int seqcov, double mzrange, double tol):

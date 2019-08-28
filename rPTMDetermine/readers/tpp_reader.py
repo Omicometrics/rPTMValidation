@@ -95,8 +95,6 @@ class TPPReader(Reader):  # pylint: disable=too-few-public-methods
                         "x:search_result/x:search_hit",
                         namespaces=self.ns_map)]
 
-                element.clear()
-
                 # _build_search_result has been split out as a separate method
                 # such that it may be overridden for specific TPPReader
                 # subclasses, e.g. Comet or X! Tandem, in future

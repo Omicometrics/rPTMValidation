@@ -6,7 +6,7 @@ This module provides a function for reading the Uniprot database.
 import collections
 from typing import Any, Dict, List
 
-from rPTMDetermine.constants import AA_SYMBOLS
+from ..constants import AA_SYMBOLS
 
 
 Modification = collections.namedtuple("Modification", ["name", "mono"])

@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Tuple
 import lxml.etree as etree
 
 from pepfrag import MassType
-from rPTMDetermine.constants import ELEMENT_MASSES
+from ..constants import ELEMENT_MASSES
 
 
 MOD_FORMULA_REGEX = re.compile(r"(\w+)\(([0-9]+)\)")
