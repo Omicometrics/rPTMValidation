@@ -1,0 +1,10 @@
+#ifndef _RPTMDETERMINE_CRPTMDETERMINE_H
+#define _RPTMDETERMINE_CRPTMDETERMINE_H
+
+#include <Python.h>
+
+extern "C" {
+	PyMODINIT_FUNC PyInit_crPTMDetermine(void);
+}
+
+#endif // _RPTMDETERMINE_CRPTMDETERMINE_H

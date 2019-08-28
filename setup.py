@@ -1,8 +1,19 @@
-from distutils.core import setup
+from distutils.core import setup, Extension
 import os
 
 from Cython.Build import cythonize
 import numpy as np
+
+PACKAGE_DIR = "rPTMDetermine"
+
+c_rptmdetermine = Extension(
+    "crPTMDetermine",
+    sources=[
+        os.path.join(PACKAGE_DIR, "converters.cpp"),
+        os.path.join(PACKAGE_DIR, "annotate.cpp"),
+        os.path.join(PACKAGE_DIR, "crPTMDetermine.cpp"),
+    ]
+)
 
 setup(
     name="rPTMDetermine",
@@ -13,12 +24,12 @@ setup(
     ],
     ext_modules=cythonize(
         [
-            os.path.join("rPTMDetermine", "annotate.pyx"),
-            os.path.join("rPTMDetermine", "binomial.pyx"),
-            os.path.join("rPTMDetermine", "ionscore.pyx"),
+            c_rptmdetermine,
+            os.path.join(PACKAGE_DIR, "binomial.pyx"),
+            os.path.join(PACKAGE_DIR, "ionscore.pyx"),
         ],
         include_path=[
-            "rPTMDetermine"
+            PACKAGE_DIR
         ],
         compiler_directives={
             "language_level" : "3",

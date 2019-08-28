@@ -4,8 +4,6 @@ __pycache__
 *.ipynb
 
 # Cython related
-*.c
-*.cpp
 *.html
 *.pyd
 

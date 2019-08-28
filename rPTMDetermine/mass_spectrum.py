@@ -5,7 +5,6 @@ This module provides functions for processing mass spectra.
 """
 from __future__ import annotations
 
-import bisect
 import collections
 import operator
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -13,11 +12,21 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 from pepfrag import Ion
 
+from crPTMDetermine import annotate
+
 from .constants import ITRAQ_MASSES
 
 
 Annotation = collections.namedtuple("Annotation",
                                     ["peak_num", "mass_diff", "ion_pos"])
+                                    
+                                    
+MGF_BLOCK = '''BEGIN IONS
+TITLE=Locus:{spec_id}
+{charge}PEPMASS={pepmass:.5f}
+{rtinseconds}{spec}
+END IONS
+'''
 
 
 class Spectrum():
@@ -267,18 +276,9 @@ class Spectrum():
             A dictionary of ion label to Annotation namedtuple.
 
         """
-        mz = list(self._peaks[:, 0])
-        npeaks = self._peaks.shape[0]
-        insert_idxs = [bisect.bisect_left(mz, ion.mass) for ion in theor_ions]
-
-        anns: Dict[str, Annotation] = {}
-        for idx, (mass, label, pos) in zip(insert_idxs, theor_ions):
-            if idx > 0 and mass - mz[idx - 1] <= tol:
-                anns[label] = Annotation(idx - 1, mass - mz[idx - 1], pos)
-            elif idx < npeaks and mz[idx] - mass <= tol:
-                anns[label] = Annotation(idx, mass - mz[idx], pos)
-
-        return anns
+        return {k: Annotation(*v)
+                for k, v in annotate(list(self._peaks[:, 0]),
+                                     theor_ions, tol).items()}
 
     def denoise(self, assigned_peaks: List[bool],
                 max_peaks_per_window: int = 8) -> Tuple[List[int], Spectrum]:
@@ -337,3 +337,18 @@ class Spectrum():
 
         return new_peaks, Spectrum(self._peaks[new_peaks, :], self.prec_mz,
                                    self.charge)
+                                   
+    def to_mgf_block(self, spec_id: str) -> str:
+        """
+        Constructs a BEGIN IONS - END IONS MGF-format block for the spectrum.
+
+        """
+        return MGF_BLOCK.format(
+            spec_id=spec_id,
+            charge="" if self.charge is None else f"CHARGE={self.charge}+\n",
+            pepmass=self.prec_mz,
+            rtinseconds="" if self.retention_time is None
+            else f"RTINSECONDS={int(self.retention_time)}\n",
+            spec="\n".join([f"{mz:.4f} {intensity:.4f} 1"
+                            for mz, intensity in self])
+        )
