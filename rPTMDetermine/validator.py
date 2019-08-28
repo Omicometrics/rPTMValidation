@@ -357,42 +357,46 @@ class Validator(validator_base.ValidateBase):
         for psm in tqdm.tqdm(self.unmod_psms):
             psm.extract_features(None, self.proteolyzer)
 
-        # Add decoy identifications to the unmodified PSMs
-        logging.info("Generating decoy matches for unmodified analogues.")
-        self.unmod_psms = self._generate_decoy_matches(None, self.unmod_psms)
+        if os.path.exists(self.file_prefix + UNMOD_PSM_FILE):
+            with open(self.file_prefix + UNMOD_PSM_FILE, "rb") as fh:
+                self.unmod_psms = pickle.load(fh)
+        else:
+            # Add decoy identifications to the unmodified PSMs
+            logging.info("Generating decoy matches for unmodified analogues.")
+            self.unmod_psms = self._generate_decoy_matches(None, self.unmod_psms)
 
-        # Validate the unmodified PSMs using LDA
-        unmod_df = self.unmod_psms.to_df()
+            # Validate the unmodified PSMs using LDA
+            unmod_df = self.unmod_psms.to_df()
 
-        logging.info("Validating unmodified analogues.")
-        unmod_features = [f for f in self.unmod_psms[0].features.feature_names()
-                          if f not in self.config.exclude_features]
+            logging.info("Validating unmodified analogues.")
+            unmod_features = [f for f in self.unmod_psms[0].features.feature_names()
+                              if f not in self.config.exclude_features]
 
-        _, _, unmod_lda_threshold =\
-            lda.lda_model(unmod_df, unmod_features)
+            _, _, unmod_lda_threshold =\
+                lda.lda_model(unmod_df, unmod_features)
 
-        logging.info("LDA unmodified validation threshold: "
-                     f"{unmod_lda_threshold}")
+            logging.info("LDA unmodified validation threshold: "
+                         f"{unmod_lda_threshold}")
 
-        unmod_results, unmod_models =\
-            lda.lda_validate(unmod_df, unmod_features, unmod_lda_threshold)
+            unmod_results, unmod_models =\
+                lda.lda_validate(unmod_df, unmod_features, unmod_lda_threshold)
 
-        self.unmod_psms =\
-           lda.merge_lda_results(self.unmod_psms, unmod_results)
+            self.unmod_psms =\
+               lda.merge_lda_results(self.unmod_psms, unmod_results)
 
-        if self.config.correct_deamidation:
-            logging.info(
-                "Applying deamidation correction for unmodified analogues.")
-            self.unmod_psms = lda.apply_deamidation_correction(
-                unmod_models, self.unmod_psms, unmod_features, None,
-                self.proteolyzer)
+            if self.config.correct_deamidation:
+                logging.info(
+                    "Applying deamidation correction for unmodified analogues.")
+                self.unmod_psms = lda.apply_deamidation_correction(
+                    unmod_models, self.unmod_psms, unmod_features, None,
+                    self.proteolyzer)
 
-        unmod_df.to_csv(self.file_prefix + "unmod_model.csv")
-        logging.info("LDA unmodified model features written to "
-                     f"{self.file_prefix}unmod_model.csv")
+            unmod_df.to_csv(self.file_prefix + "unmod_model.csv")
+            logging.info("LDA unmodified model features written to "
+                         f"{self.file_prefix}unmod_model.csv")
 
-        with open(self.file_prefix + UNMOD_PSM_FILE, "wb") as fh:
-            pickle.dump(self.unmod_psms, fh)
+            with open(self.file_prefix + UNMOD_PSM_FILE, "wb") as fh:
+                pickle.dump(self.unmod_psms, fh)
 
         # Filter the unmodified analogues according to their probabilities
         self.unmod_psms = self.unmod_psms.filter_lda_prob()
