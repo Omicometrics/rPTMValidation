@@ -5,11 +5,11 @@ A series of functions used to read different file types.
 """
 from typing import Iterable, List, TextIO, Tuple
 
-from ..base_config import SearchEngine
+from rPTMDetermine.base_config import SearchEngine
 
 from .mascot_reader import MascotReader
 from .msgfplus_reader import MSGFPlusReader
-from .percolator_reader import PercolatorReader
+from .percolator_reader import PercolatorReader, PercolatorTextReader
 from .protein_pilot_reader import ProteinPilotReader
 from .tpp_reader import TPPReader
 from .ptmdb import PTMDB
@@ -45,6 +45,8 @@ def get_reader(search_engine: SearchEngine, ptmdb: PTMDB):
         return MSGFPlusReader(ptmdb)
     if search_engine is SearchEngine.Percolator:
         return PercolatorReader(ptmdb)
+    if search_engine is SearchEngine.PercolatorText:
+        return PercolatorTextReader(ptmdb)
     if search_engine in _TPP_ENGINES:
         return TPPReader(ptmdb)
     raise NotImplementedError(

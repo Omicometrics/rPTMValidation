@@ -30,6 +30,7 @@ class SearchEngine(enum.Enum):
     TPP = enum.auto()
     MSGFPlus = enum.auto()
     Percolator = enum.auto()
+    PercolatorText = enum.auto()
 
 
 class BaseConfig():
