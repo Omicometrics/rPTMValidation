@@ -127,3 +127,12 @@ class Features:
 
         """
         setattr(self, feature, value)
+
+    def isvalid(self):
+        """
+        Check whether the feature is a valid feature
+        set by identifying NoneType
+
+        """
+        return not any(getattr(self, feature) is None
+                       for feature in Features.__slots__)

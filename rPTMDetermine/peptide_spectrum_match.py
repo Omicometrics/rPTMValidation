@@ -314,6 +314,10 @@ class PSM():
                                          denoised_spectrum,
                                          target_mod,
                                          tol)
+        else:
+            for feature in self.features.all_feature_names():
+                if self.features.get(feature) is None:
+                    self.features.set(feature, 0.)
 
         return self.features
 
@@ -480,8 +484,8 @@ class PSM():
         # The fraction of peaks with intensities greater than 20% of the base
         # peak annotated by the theoretical ions
         ions_20 = set(bion_ix + yion_ix) & set(peaks_20)
-        if peaks_20.size > 0:
-            self.features.FracIon20pc = len(ions_20) / peaks_20.size
+        self.features.FracIon20pc = len(ions_20) / peaks_20.size \
+            if peaks_20.size > 0 else 0
 
         # The number of b ions
         self.features.NumIonb = len(bion_ix) / len_normalizer
