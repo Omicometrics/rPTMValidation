@@ -5,6 +5,7 @@ of PSMS.
 
 """
 import copy
+import itertools
 from typing import Callable, Dict, List, Optional, Tuple
 import warnings
 
@@ -177,7 +178,7 @@ def _get_dist_stats(classes, preds, scores) -> ScoreStatsDict:
             for cl in classes}
 
 
-def calculate_probs(classes, preds, scores):
+def calculate_probs(classes, preds, scores, train_stats):
     """
     Calculates the normal distribution probabilities for the predictions.
 
@@ -190,18 +191,15 @@ def calculate_probs(classes, preds, scores):
         Dictionary mapping class to prediction probabilities.
 
     """
-    # Calculate the mean and standard deviation for each class
-    stats = _get_dist_stats(classes, preds, scores)
-
     probs = {}
     # Calculate probabilities based on the normal distribution
     for _class in classes:
         _class = int(_class)
         probs[_class] = \
-            norm.pdf(scores, stats[_class][0], stats[_class][1]) /\
-            sum(norm.pdf(scores, mean, std) for (mean, std) in stats.values())
+            norm.pdf(scores, train_stats[_class][0], train_stats[_class][1]) /\
+            sum(norm.pdf(scores, mean, std) for (mean, std) in train_stats.values())
 
-    return probs, stats
+    return probs
 
 
 def calculate_prob(_class: int, score: float, dist_stats) -> float:
@@ -241,9 +239,6 @@ def calculate_score(prob: float, dist_scores) -> float:
     c_coef = (- 2. * s_d * s_d * m_t * m_t + 2. * s_t * s_t * m_d * m_d -
               (4. * s_d * s_d * s_t * s_t) *
               (np.log(prob / s_d) - np.log((1 - prob) / s_t)))
-
-    # x2 = ((-b_coef - np.sqrt((b_coef * b_coef) - (4 * a_coef * c_coef))) /
-    #        (2 * a_coef))
 
     return ((-b_coef + np.sqrt((b_coef * b_coef) - (4 * a_coef * c_coef))) /
             (2 * a_coef))
@@ -305,13 +300,16 @@ def _lda_validate(df: pd.DataFrame, features: List[str],
 
     results = np.zeros((len(X), 3))
     for train_idx, test_idx in StratifiedKFold(n_splits=folds).split(X, y):
-        model = pipeline.fit(X.iloc[train_idx], y.iloc[train_idx])
+        X_train = X.iloc[train_idx]
+        model = pipeline.fit(X_train, y.iloc[train_idx])
         X_test = X.iloc[test_idx]
+        train_scores = model.decision_function(X_train)
+        train_preds = model.predict(X_train)
         scores = model.decision_function(X_test)
         preds = model.predict(X_test)
 
         # Shift the prob_threshold score to match the full distribution
-        dist_stats = _get_dist_stats(y.unique(), preds, scores)
+        dist_stats = _get_dist_stats(y.unique(), train_preds, train_scores)
         lda_threshold = calculate_score(prob_threshold, dist_stats)
 
         correction = full_lda_threshold - lda_threshold
@@ -321,7 +319,7 @@ def _lda_validate(df: pd.DataFrame, features: List[str],
             cv_models[idx] = cv_model
 
         results[test_idx, 0], results[test_idx, 1] = scores, preds
-        results[test_idx, 2] = calculate_probs(y.unique(), preds, scores)[0][1]
+        results[test_idx, 2] = calculate_probs(y.unique(), preds, scores, dist_stats)[1]
 
     df["score"], df["prob"] = results[:, 0], results[:, 2]
 
@@ -395,6 +393,7 @@ def _apply_deamidation_correction(
     psms: PSMContainer[PSMType],
     features: List[str],
     target_mod: Optional[str],
+    target_residues: Optional[List[str]],
     proteolyzer: proteolysis.Proteolyzer,
     get_model_func: Callable[[PSMType],
                              Tuple[CustomPipeline, float,
@@ -402,7 +401,7 @@ def _apply_deamidation_correction(
         -> PSMContainer[PSMType]:
     """
     Removes the deamidation modification from applicable peptide
-    identifications and revalides using the trained LDA model. If the score
+    identifications and revalidates using the trained LDA model. If the score
     for the non-deamidated analogue is greater than that for the deamidated
     peptide, the non-deamidated analogue is assigned as the peptide match for
     that spectrum.
@@ -421,35 +420,48 @@ def _apply_deamidation_correction(
 
     """
     for ii, psm in enumerate(psms):
-        if not any(ms.mod == "Deamidated" for ms in psm.mods):
+        deam_mods = [ms for ms in psm.mods if ms.mod == "Deamidated"]
+        if not deam_mods:
             continue
-        nondeam_psm = copy.deepcopy(psm)
-        nondeam_psm.peptide.mods = [ms for ms in nondeam_psm.mods
-                                    if ms.mod != "Deamidated"]
-        # Calculate new features
-        nondeam_psm.extract_features(target_mod, proteolyzer)
-
-        # Compare probabilities using the same model used for the deamidated
-        # PSM
+            
+        base_psm = copy.deepcopy(psm)
+        base_psm.mods = [ms for ms in base_psm.mods
+                         if ms.mod != "Deamidated"]
+                         
+        deam_combs = itertools.chain.from_iterable(
+            (itertools.combinations(deam_mods, ii)
+             for ii in range(len(deam_mods))))
+             
         model, correction, dist_stats = get_model_func(psm)
-        nondeam_score = calculate_scores(model, [nondeam_psm], features,
-                                         target_only=True)[0]
-        nondeam_score += correction
-        nondeam_prob = calculate_prob(1, nondeam_score, dist_stats)
+                         
+        for deams in deam_combs:
+            cand_psm = copy.deepcopy(base_psm)
+            cand_psm.mods.extend(deams)
 
-        # Preferentially keep the non-deamidated identification, unless
-        # the deamidated version has a score more than one point higher
-        if nondeam_score >= psm.lda_score:  # - 1.:
-            nondeam_psm.corrected = True
+            # Calculate new features
+            cand_psm.extract_features(target_mod, target_residues, proteolyzer)
 
-            nondeam_psm.lda_score = nondeam_score
-            nondeam_psm.lda_prob = nondeam_prob
+            # Compare probabilities using the same model used for the deamidated
+            # PSM
+            cor_score = calculate_scores(model, [cand_psm], features,
+                                         target_only=True)[0] + correction
+            cor_prob = calculate_prob(1, cor_score, dist_stats)
 
-            # Reset the PSM validation attributes back to None
-            for attr in ["decoy_lda_score", "decoy_lda_prob"]:
-                setattr(nondeam_psm, attr, None)
+            if cor_score >= psm.lda_score:
+                cand_psm.corrected = True
+                
+                cand_psm.mods = sorted(
+                    cand_psm.mods,
+                    key=lambda m: m.site if isinstance(m.site, int) else 0)
 
-            psms[ii] = nondeam_psm
+                cand_psm.lda_score = cor_score
+                cand_psm.lda_prob = cor_prob
+
+                # Reset the PSM validation attributes back to None
+                for attr in ["decoy_lda_score", "decoy_lda_prob"]:
+                    setattr(cand_psm, attr, None)
+
+                psms[ii] = cand_psm
 
     return psms
 
@@ -459,11 +471,12 @@ def apply_deamidation_correction(
     psms: PSMContainer[PSMType],
     features: List[str],
     target_mod: Optional[str],
+    target_residues: Optional[List[str]],
     proteolyzer: proteolysis.Proteolyzer) \
         -> PSMContainer[PSMType]:
     """
     Removes the deamidation modification from applicable peptide
-    identifications and revalides using the trained LDA model. If the score
+    identifications and revalidates using the trained LDA model. If the score
     for the non-deamidated analogue is greater than that for the deamidated
     peptide, the non-deamidated analogue is assigned as the peptide match for
     that spectrum.
@@ -487,7 +500,7 @@ def apply_deamidation_correction(
         return models[psm_uids.index(psm.uid)]
 
     return _apply_deamidation_correction(
-        psms, features, target_mod, proteolyzer, get_model)
+        psms, features, target_mod, target_residues, proteolyzer, get_model)
 
 
 def apply_deamidation_correction_full(
@@ -496,6 +509,7 @@ def apply_deamidation_correction_full(
     psms: PSMContainer[PSMType],
     features: List[str],
     target_mod: Optional[str],
+    target_residues: Optional[List[str]],
     proteolyzer: proteolysis.Proteolyzer) \
         -> PSMContainer[PSMType]:
     """
@@ -518,4 +532,4 @@ def apply_deamidation_correction_full(
         return (model, 0., score_stats)
 
     return _apply_deamidation_correction(
-        psms, features, target_mod, proteolyzer, get_model)
+        psms, features, target_mod, target_residues, proteolyzer, get_model)
