@@ -24,8 +24,10 @@ DECOY_COLOR = "#C00000"
 THRESHOLD_COLOR = "green"
 
 FONTFAMILY = "Times New Roman"
-FONTSIZE = 16
+FONTSIZE = 14
 FONT = font_manager.FontProperties(family=FONTFAMILY, size=FONTSIZE)
+
+SAVE_DPI = 1200
 
 
 def split_target_decoy_scores(psms: List[PSM]) \
@@ -101,10 +103,10 @@ def plot_scores(psms: List[PSM], lda_threshold: float,
     ax.legend(prop=FONT, frameon=False, handletextpad=0.0001, loc=1)
 
     if save_path is not None:
-        plt.savefig(save_path)
+        plt.savefig(save_path, dpi=SAVE_DPI)
 
     plt.show()
-
+    
 
 def plot_score_similarity(psms: Sequence[PSM], lda_threshold: float,
                           save_path: Optional[str] = None,
@@ -134,6 +136,8 @@ def plot_score_similarity(psms: Sequence[PSM], lda_threshold: float,
             sims.append(psm.max_similarity)
             ldas.append(psm.lda_score)
             
+    ax = plt.gca()
+            
     if use_benchmarks and sim_threshold is None:
         sim_score = min([sim for sim, lda in zip(bench_sims, bench_ldas)
                          if lda >= lda_threshold])
@@ -141,23 +145,23 @@ def plot_score_similarity(psms: Sequence[PSM], lda_threshold: float,
         sim_score = sim_threshold
 
     if use_benchmarks:
-        plt.scatter(sims, ldas, marker="^",
+        ax.scatter(sims, ldas, marker="^",
                     facecolors="grey", linewidths=1,
                     label="Other")
     else:
-        plt.scatter(sims, ldas, marker="o", facecolors="none",
+        ax.scatter(sims, ldas, marker="o", facecolors="none",
                     edgecolors=TARGET_COLOR, linewidths=1)
 
     if use_benchmarks:
-        plt.scatter(bench_sims, bench_ldas, marker="o",
+        ax.scatter(bench_sims, bench_ldas, marker="o",
                     facecolors=TARGET_COLOR,
                     label="Benchmark")
 
-    plt.xlabel("Similarity Score", fontproperties=FONT)
-    # plt.xlim(0., 1.)
-    plt.ylabel("LDA Score", fontproperties=FONT)
+    ax.set_xlabel("Similarity Score", fontproperties=FONT)
+    # ax.set_xlim(0., 1.)
+    ax.set_ylabel("LDA Score", fontproperties=FONT)
 
-    ax = plt.gca()
+    
     ax.axhline(lda_threshold, color=THRESHOLD_COLOR, linestyle="--",
                linewidth=2)
 
@@ -173,17 +177,17 @@ def plot_score_similarity(psms: Sequence[PSM], lda_threshold: float,
                   bbox_to_anchor=(0.0, 0.5, 0.5, 0.5), handletextpad=0.0001)
 
     max_lda = max(bench_ldas + ldas)
-    plt.annotate(f"$s_{{LDA}}$={lda_threshold:.2f}",
-                 (0.05, lda_threshold + 0.05 * max_lda),
+    ax.annotate(f"$s_{{LDA}}$={lda_threshold:.2f}",
+                 (0.17, lda_threshold + 0.05 * max_lda),
                  fontproperties=FONT)
                  
 
-    plt.annotate(f"$s_{{similarity}}$={sim_score:.2f}",
+    ax.annotate(f"$s_{{similarity}}$={sim_score:.2f}",
                  (sim_score - 0.1, 1.1 * max_lda), fontproperties=FONT,
                  annotation_clip=False)
 
     if save_path is not None:
-        plt.savefig(save_path)
+        plt.savefig(save_path, dpi=SAVE_DPI)
 
     plt.show()
 
@@ -251,7 +255,7 @@ def plot_recovered_score_similarity(psms: Sequence[PSM],
                  annotation_clip=False)
 
     if save_path is not None:
-        plt.savefig(save_path)
+        plt.savefig(save_path, dpi=SAVE_DPI)
 
     plt.show()
 
@@ -290,7 +294,7 @@ def plot_site_probabilities(psms: Sequence[PSM], threshold: float = 0.99,
                  (0.75 * len(probs), threshold - 0.05), fontproperties=FONT)
 
     if save_path is not None:
-        plt.savefig(save_path)
+        plt.savefig(save_path, dpi=SAVE_DPI)
 
     plt.show()
 
@@ -326,7 +330,7 @@ def plot_validated_recovered_site_probabilities(
     ax.legend(prop=FONT, frameon=False, loc=4, handletextpad=0.01)
 
     if save_path is not None:
-        plt.savefig(save_path)
+        plt.savefig(save_path, dpi=SAVE_DPI)
 
     plt.show()
 
@@ -361,7 +365,7 @@ def plot_similarity_score_dist(scores: Sequence[float], kde: bool = False,
     plt.xlabel("Similarity Score", fontproperties=FONT)
 
     if save_path is not None:
-        plt.savefig(save_path)
+        plt.savefig(save_path, dpi=SAVE_DPI)
 
     plt.show()
 
@@ -430,7 +434,7 @@ def plot_fisher_scores(scores: Dict[str, float],
     plt.ylabel("Fisher Score", fontproperties=FONT)
 
     if save_path is not None:
-        plt.savefig(save_path)
+        plt.savefig(save_path, dpi=SAVE_DPI)
 
     plt.show()
 
@@ -477,7 +481,8 @@ def plot_psm(
         psms: Union[PSM, List[PSM]],
         denoise: bool = False,
         denoise_tol: float = 0.2,
-        add_seq: bool = True):
+        add_seq: bool = True,
+        save_path: Optional[str] = None):
     """
     """
     all_anns = []
@@ -485,7 +490,7 @@ def plot_psm(
     if isinstance(psms, PSM):
         psms = [psms]
 
-    _, axes = plt.subplots(len(psms), 1, sharex=True)
+    _, axes = plt.subplots(len(psms), 1, sharex=True, figsize=(10, 5))
     axes = [axes] if len(psms) == 1 else axes
     for ax, psm in zip(axes, psms):
         if denoise:
@@ -508,7 +513,7 @@ def plot_psm(
         ax.set_ylim(bottom=0)
         for spine in ["top", "right"]:
             ax.spines[spine].set_visible(False)
-        ax.set_ylabel("Intensity")
+        ax.set_ylabel("Intensity", fontproperties=FONT)
 
         max_int = max(intensities)
         max_mz = max(mzs)
@@ -532,7 +537,7 @@ def plot_psm(
                                    label="$\\it{y}$-ions")
                                    
             plt.legend(handles=[b_line, y_line], frameon=False, loc="lower center",
-                   bbox_to_anchor=(0.5, -0.35), ncol=2)
+                   bbox_to_anchor=(0.5, -0.35), ncol=2, prop=FONT)
 
         annotated_peaks = []
         for label, ann in anns.items():
@@ -540,7 +545,10 @@ def plot_psm(
         annotated_peaks.sort(key=operator.itemgetter(1))
         all_anns.append(annotated_peaks)
 
-    plt.xlabel("$\\it{m/z}$")
+    plt.xlabel("m/z", fontproperties=FONT, fontstyle="italic")
+    
+    if save_path is not None:
+        plt.savefig(save_path, dpi=SAVE_DPI)
 
     plt.show()
     
