@@ -480,7 +480,7 @@ def _add_sequence(ax, ions, anns, height, mzs, intensities, max_int, max_mz, pep
 def plot_psm(
         psms: Union[PSM, List[PSM]],
         denoise: bool = False,
-        denoise_tol: float = 0.2,
+        tol: float = 0.2,
         add_seq: bool = True,
         save_path: Optional[str] = None):
     """
@@ -494,16 +494,16 @@ def plot_psm(
     axes = [axes] if len(psms) == 1 else axes
     for ax, psm in zip(axes, psms):
         if denoise:
-            _, denoised_spec = psm.denoise_spectrum(tol=denoise_tol)
+            _, denoised_spec = psm.denoise_spectrum(tol=tol)
             mzs = denoised_spec[:, 0]
             intensities = denoised_spec[:, 1]
             if psm.peptide.fragment_ions is None:
                 raise RuntimeError("No fragment ions available for annotation")
-            anns = denoised_spec.annotate(psm.peptide.fragment_ions)
+            anns = denoised_spec.annotate(psm.peptide.fragment_ions, tol=tol)
         else:
             mzs = psm.spectrum[:, 0]
             intensities = psm.spectrum[:, 1]
-            anns = psm.annotate_spectrum()
+            anns = psm.annotate_spectrum(tol=tol)
         
         psm.peptide.clean_fragment_ions()
 
