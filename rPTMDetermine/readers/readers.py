@@ -67,9 +67,9 @@ def read_fasta_sequences(fasta_file: TextIO) -> Iterable[Tuple[str, str]]:
     subseqs: List[str] = []
     for line in fasta_file:
         if line.startswith('>'):
-            title = line.rstrip()
             if subseqs:
                 yield title, ''.join(subseqs)
+            title = line.rstrip()
             subseqs = []
         else:
             subseqs.append(line.rstrip())
