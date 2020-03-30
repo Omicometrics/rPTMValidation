@@ -8,7 +8,7 @@ import collections
 import csv
 import dataclasses
 import re
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import lxml.etree as etree
 
@@ -20,11 +20,11 @@ from .search_result import PeptideType, SearchResult
 from .ptmdb import PTMDB, ModificationNotFoundException
 
 
-MGF_TITLE_REGEX = re.compile(r"TITLE=Locus:([\d\.]+) ")
+ITRAQ_COL_REGEX = re.compile(r"(%Err )?\d{3}:\d{3}")
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
-class ProteinPilotSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
+class _ProteinPilotSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
 
     __slots__ = ("time", "confidence", "prec_mz", "proteins", "accessions",
                  "byscore", "eval", "mod_prob",)
@@ -32,11 +32,27 @@ class ProteinPilotSearchResult(SearchResult):  # pylint: disable=too-few-public-
     time: str
     confidence: float
     prec_mz: float
-    proteins: str
-    accessions: str
+    proteins: Optional[str]
+    accessions: Optional[Tuple[str, ...]]
     byscore: Optional[float]
     eval: Optional[float]
     mod_prob: Optional[float]
+
+
+@dataclasses.dataclass(eq=True, frozen=True)
+class ProteinPilotSearchResult(_ProteinPilotSearchResult):
+
+    __slots__ = ("itraq_ratios",)
+
+    itraq_ratios: Optional[Dict[str, float]]
+
+
+@dataclasses.dataclass(eq=True, frozen=True)
+class ProteinPilotXMLSearchResult(_ProteinPilotSearchResult):
+
+    __slots__ = ("itraq_peaks",)
+
+    itraq_peaks: Optional[Dict[int, Tuple[float, float]]]
 
 
 class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
@@ -46,6 +62,7 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
     """
     def read(self, filename: str,
              predicate: Optional[Callable[[SearchResult], bool]] = None,
+             read_itraq_ratios: bool = False,
              **kwargs) -> Sequence[SearchResult]:
         """
         Reads the given ProteinPilot Peptide Summary file to extract useful
@@ -55,6 +72,8 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
             filename (str): The path to the Peptide Summary file.
             predicate (Callable, optional): An optional predicate to filter
                                             results.
+            read_itraq_ratios (bool, optional): Whether to include the iTRAQ
+                quantitation ratios in the returned SearchResults.
 
         Returns:
             The read information as a list of SearchResults.
@@ -63,15 +82,28 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
         with open(filename, newline='') as fh:
             reader = csv.DictReader(fh, delimiter='\t')
             results = []
+            itraq_cols = []
             for row in reader:
-                result = self._build_search_result(row)
+                if read_itraq_ratios and not itraq_cols:
+                    itraq_cols = self._get_itraq_cols(row)
+                result = self._build_search_result(row, itraq_cols)
                 if result is None:
                     continue
                 if predicate is None or predicate(result):
                     results.append(result)
             return results
 
-    def _build_search_result(self, row: Dict[str, Any])\
+    @staticmethod
+    def _get_itraq_cols(row: Dict[str, Any]) -> List[str]:
+        """
+        Extracts the names of the iTRAQ ratio columns from a row of the
+        PeptideSummary file.
+
+        """
+        return [k for k in row.keys() if ITRAQ_COL_REGEX.match(k)]
+
+    def _build_search_result(self, row: Dict[str, Any],
+                             itraq_cols: List[str])\
             -> Optional[ProteinPilotSearchResult]:
         """
         Processes the given row of a Peptide Summary file to produce a
@@ -109,13 +141,16 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
             accessions=row["Accessions"],
             byscore=None,
             eval=None,
-            mod_prob=None)
+            mod_prob=None,
+            itraq_ratios=({k: float(row[k]) for k in itraq_cols if row[k]}
+                          if itraq_cols else None)
+        )
 
 
 TempResult = collections.namedtuple(
     "TempResult",
     ("spec_id", "prec_mz", "rank", "seq", "charge", "mods", "conf",
-     "score", "eval", "mod_prob", "pep_type", "rt"))
+     "score", "eval", "mod_prob", "pep_type", "rt", "itraq_peaks"))
 
 
 class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
@@ -138,6 +173,7 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
 
     def read(self, filename: str,
              predicate: Optional[Callable[[SearchResult], bool]] = None,
+             read_itraq_peaks: bool = False,
              **kwargs) -> Sequence[SearchResult]:
         """
         Reads the given ProteinPilot XML file to extract useful
@@ -163,6 +199,9 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
                     element.get(f"{{{self.id_namespace}}}id").split(".")[:-1])
                 prec_mz = float(element.get("precursormass"))
                 retention_time = float(element.get("elution"))
+
+                itraq_peaks: Optional[Dict[int, Tuple[float, float]]] =\
+                    self._get_itraq_peaks(element) if read_itraq_peaks else None
 
                 rank = 0
                 for match_element in element.findall("MATCH"):
@@ -190,7 +229,9 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
                         float(match_element.get("score")),
                         float(match_element.get("eval")),
                         float(match_element.get("mod_prob")),
-                        pep_type, retention_time)
+                        pep_type,
+                        retention_time,
+                        itraq_peaks)
 
                 element.clear()
 
@@ -205,7 +246,7 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
 
                 element.clear()
 
-        return [ProteinPilotSearchResult(
+        return [ProteinPilotXMLSearchResult(
                     seq=r.seq,
                     mods=tuple(r.mods),
                     charge=r.charge,
@@ -221,8 +262,24 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
                     accessions=tuple(match_protein_map.get(match_id, [])),
                     byscore=r.score,
                     eval=r.eval,
-                    mod_prob=r.mod_prob)
+                    mod_prob=r.mod_prob,
+                    itraq_peaks=r.itraq_peaks)
                 for match_id, r in res.items()]
+
+    @staticmethod
+    def _get_itraq_peaks(element) -> Dict[int, Tuple[float, float]]:
+        """
+
+        """
+        peaks: Dict[int, Tuple[float, float]] = {}
+        peaks_element = element.find("ITRAQPEAKS")
+        if peaks_element is not None:
+            for line in peaks_element.text.split("\n"):
+                if any(s for s in line):
+                    tag, peak_area, err_peak_area = line.split("\t")
+                    peaks[int(float(tag))] = \
+                        (float(peak_area), float(err_peak_area))
+        return peaks
 
     def _parse_mods(self, element, mod_xml_tag: str,
                     fixed_site: Optional[str] = None):
