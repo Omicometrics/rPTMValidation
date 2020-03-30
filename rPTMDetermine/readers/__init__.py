@@ -10,7 +10,9 @@ from .modifications import (parse_mods, preparse_mod_string,
 from .msgfplus_reader import MSGFPlusReader, MSGFPlusSearchResult
 from .mzidentml_reader import MZIdentMLReader, MZIdentMLSearchResult
 from .percolator_reader import PercolatorReader, PercolatorSearchResult, PercolatorTextReader
-from .protein_pilot_reader import ProteinPilotReader, ProteinPilotSearchResult
+from .percolator_reader import PercolatorReader, PercolatorSearchResult
+from .protein_pilot_reader import (ProteinPilotReader, ProteinPilotXMLReader,
+                                   ProteinPilotSearchResult)
 from .ptmdb import PTMDB
 from .readers import get_reader, read_fasta_sequences
 from .search_result import PeptideType, SearchResult
@@ -33,6 +35,7 @@ __all__ = [
     "PercolatorTextReader",
     "ProteinPilotReader",
     "ProteinPilotSearchResult",
+    "ProteinPilotXMLReader",
     "PTMDB",
     "get_reader",
     "read_fasta_sequences",
