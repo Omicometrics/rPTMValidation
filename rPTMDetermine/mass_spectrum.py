@@ -79,6 +79,14 @@ class Spectrum():
         """
         return self._peaks[indices]
 
+    def __setitem__(self, key, value):
+        """
+        Implements the __setitem__ method for the Spectrum class, using the
+        composed numpy array.
+
+        """
+        self._peaks[key] = value
+
     def __len__(self) -> int:
         """
         Implements the __len__ method for the Spectrum class, using the
