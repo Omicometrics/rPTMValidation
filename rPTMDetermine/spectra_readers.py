@@ -20,9 +20,6 @@ import lxml.etree as etree
 from .mass_spectrum import Spectrum
 
 
-MGF_TITLE_REGEX = re.compile(r"Locus:([\d\.]+)")
-
-
 MZMLPrecursor = collections.namedtuple(
     "MZMLPrecursor",
     ("prec_id", "selected_ions", "charges", "activation_params"))
@@ -35,10 +32,135 @@ class ParserException(Exception):
     """
 
 
+class MGFReader:
+    """
+    """
+    locus_regex = re.compile(r"Locus:([\d\.]+)")
+
+    native_regex = re.compile(r".*NativeID:\"(.*)\"")
+
+    def __init__(self):
+        """
+        """
+        self._id_getter = None
+
+    @staticmethod
+    def _get_id_locus(text: str) -> str:
+        """
+        Parses the TITLE line to extract spectrum ID from the Locus field.
+
+        Args:
+            text (str): The text of the TITLE line of an MGF block.
+
+        Returns:
+            The spectrum identifier.
+
+        Raises:
+            ParserException
+
+        """
+        match = MGFReader.locus_regex.match(text)
+        if match is None:
+            raise ParserException("No spectrum ID found using locus pattern")
+        return match.group(1)
+
+    @staticmethod
+    def _get_id_native(text: str) -> str:
+        """
+        Parses the TITLE line to extract spectrum ID from the NativeID field.
+
+        Args:
+            text (str): The text of the TITLE line of an MGF block.
+
+        Returns:
+            The spectrum identifier.
+
+        Raises:
+            ParserException
+
+        """
+        match = MGFReader.native_regex.match(text)
+        if match is None:
+            raise ParserException(
+                "No spectrum ID found using native ID pattern")
+        return ".".join(s.split("=")[1] for s in match.group(1).split(" "))
+
+    def _get_id(self, text: str) -> str:
+        """
+        """
+        if self._id_getter is not None:
+            return self._id_getter(text)
+
+        spec_id = None
+        try:
+            spec_id = self._get_id_locus(text)
+        except ParserException:
+            pass
+        else:
+            self._id_getter = self._get_id_locus
+            return spec_id
+
+        try:
+            spec_id = self._get_id_native(text)
+        except ParserException:
+            pass
+        else:
+            self._id_getter = self._get_id_native
+            return spec_id
+
+        raise ParserException("Failed to detect ID in TITLE field")
+
+    def read(self, spec_file: str) -> Dict[str, Spectrum]:
+        """
+        Reads the given MGF data file to extract spectra.
+
+        Args:
+            spec_file (str): The path to the MGF file to read.
+
+        Returns:
+            A dictionary of spectrum ID to numpy array of peaks.
+
+        """
+        spectra: Dict[str, Spectrum] = {}
+        with open(spec_file) as fh:
+            for key, group in itertools.groupby(fh, lambda ln: ln == "END IONS\n"):
+                if next(group) == "END IONS\n":
+                    continue
+
+                items = list(group)
+
+                fields = {}
+                peak_start_idx = 0
+                for ii, line in enumerate(items):
+                    if "=" not in line:
+                        peak_start_idx = ii
+                        break
+                    split_line = line.strip().split("=", maxsplit=1)
+                    fields[split_line[0]] = split_line[1]
+                else:
+                    # No lines containing mz/intensity information found
+                    continue
+
+                spec_id = self._get_id(fields["TITLE"])
+
+                pep_mass_floats = fields["PEPMASS"].split(" ")
+                pep_mass = float(pep_mass_floats[0])
+
+                spectra[spec_id] = Spectrum(
+                    np.array([float(n) for s in items[peak_start_idx:]
+                              for n in s.split(" ")[:2]]).reshape(-1, 2),
+                    pep_mass,
+                    int(fields["CHARGE"].split("+")[0]) if "CHARGE" in fields
+                    else None,
+                    retention_time=float(fields["RTINSECONDS"])
+                    if "RTINSECONDS" in fields else None)
+
+        return spectra
+
+
 def read_mgf_file(spec_file: str) -> Dict[str, Spectrum]:
     """
-    Reads the given tandem mass spectrometry data file to extract individual
-    spectra.
+    Reads the given MGF data file to extract individual spectra.
 
     Args:
         spec_file (str): The path to the MGF file to read.
@@ -47,38 +169,7 @@ def read_mgf_file(spec_file: str) -> Dict[str, Spectrum]:
         A dictionary of spectrum ID to numpy array of peaks.
 
     """
-    spectra: Dict[str, Spectrum] = {}
-    with open(spec_file) as fh:
-        for key, group in itertools.groupby(fh, lambda ln: ln == "END IONS\n"):
-            if next(group) == "END IONS\n":
-                continue
-
-            items = list(group)
-
-            fields = {}
-            peak_start_idx = 0
-            for ii, line in enumerate(items):
-                if "=" not in line:
-                    peak_start_idx = ii
-                    break
-                split_line = line.strip().split("=")
-                fields[split_line[0]] = split_line[1]
-
-            match = MGF_TITLE_REGEX.match(fields["TITLE"])
-            if match is None:
-                raise ParserException("No spectrum ID found in MGF file")
-            spec_id = match.group(1)
-
-            spectra[spec_id] = Spectrum(
-                np.array([float(n) for s in items[peak_start_idx:]
-                          for n in s.split(" ")[:2]]).reshape(-1, 2),
-                float(fields["PEPMASS"]),
-                int(fields["CHARGE"].split("+")[0]) if "CHARGE" in fields
-                else None,
-                retention_time=float(fields["RTINSECONDS"])
-                if "RTINSECONDS" in fields else None)
-
-    return spectra
+    return MGFReader().read(spec_file)
 
 
 def read_mzxml_file(spec_file: str):
