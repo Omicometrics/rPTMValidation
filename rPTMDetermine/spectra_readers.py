@@ -250,13 +250,15 @@ class MZMLReader:
         """
         return self.extract_msn(mzml_file, 2, **kwargs)
 
-    def extract_msn(self, mzml_file: str, n: int, **kwargs) \
+    def extract_msn(self, mzml_file: str, n: int,
+                    act_method: Optional[str] = None,
+                    act_energy: Optional[int] = None) \
             -> Dict[str, Spectrum]:
         """
         Extracts the MSn spectra from the input mzML file.
 
         Args:
-            msml_file (str): The path to the mzML file.
+            mzml_file (str): The path to the mzML file.
             n (int): The MS level for which to return spectral information.
 
         Returns:
@@ -265,11 +267,7 @@ class MZMLReader:
         """
         spectra = {}
 
-        # Parse kwargs
-        act_method = kwargs.get("activation_method", None)
-        act_energy = kwargs.get("activation_energy", None)
-
-        # read from xml data
+        # Read from xml data
         context = etree.iterparse(
             mzml_file, events=("end",),
             tag=[self._fix_tag("referenceableParamGroup"),
@@ -313,12 +311,10 @@ class MZMLReader:
                     (act_method is not None or act_energy is not None)):
                 act_params = precursor.activation_params
                 if act_method is not None and act_method not in act_params:
-                    #print(act_method, act_params)
                     continue
                 if (act_energy is not None and
                         act_params.get("collision energy", None)
                         != act_energy):
-                    #print(act_energy, act_params)
                     continue
 
             # MS spectrum
@@ -354,7 +350,8 @@ class MZMLReader:
             spectra[spec_id] = Spectrum(
                 np.array([mz, intensity]),
                 precursor.selected_ions[0] if precursor is not None else None,
-                precursor.charges[0] if precursor is not None else None,
+                precursor.charges[0] if precursor is not None and
+                precursor.charges else None,
                 start_time)
 
         return spectra
@@ -386,14 +383,16 @@ class MZMLReader:
             precs.append(MZMLPrecursor(prec_id, ions, charges, act_params))
         return precs
 
-    def _parse_id(self, id_str: str) -> str:
+    @staticmethod
+    def _parse_id(id_str: str) -> str:
         """
         Parses the ID string to extract the numeric elements.
 
         """
         return ".".join(re.findall(r"\w+=(\d+)", id_str))
 
-    def decode_binary(self, string: str, default_array_length: int,
+    @staticmethod
+    def decode_binary(string: str, default_array_length: int,
                       precision: int = 64,
                       comp_mode: Optional[CompressionMode] = None) \
             -> Tuple[Any, ...]:
