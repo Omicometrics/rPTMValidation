@@ -26,32 +26,31 @@ ITRAQ_COL_REGEX = re.compile(r"(%Err )?\d{3}:\d{3}")
 @dataclasses.dataclass(eq=True, frozen=True)
 class _ProteinPilotSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
 
-    __slots__ = ("time", "confidence", "prec_mz", "proteins", "accessions",
-                 "byscore", "eval", "mod_prob",)
+    __slots__ = ("time", "confidence", "prec_mz", "proteins", "accessions",)
 
     time: str
     confidence: float
     prec_mz: float
-    proteins: Optional[str]
     accessions: Optional[Tuple[str, ...]]
-    byscore: Optional[float]
-    eval: Optional[float]
-    mod_prob: Optional[float]
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
 class ProteinPilotSearchResult(_ProteinPilotSearchResult):
 
-    __slots__ = ("itraq_ratios",)
+    __slots__ = ("proteins", "itraq_ratios",)
 
+    proteins: Optional[str]
     itraq_ratios: Optional[Dict[str, float]]
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
 class ProteinPilotXMLSearchResult(_ProteinPilotSearchResult):
 
-    __slots__ = ("itraq_peaks",)
+    __slots__ = ("byscore", "eval", "mod_prob", "itraq_peaks",)
 
+    byscore: Optional[float]
+    eval: Optional[float]
+    mod_prob: Optional[float]
     itraq_peaks: Optional[Dict[int, Tuple[float, float]]]
 
 
@@ -63,7 +62,7 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
     def read(self, filename: str,
              predicate: Optional[Callable[[SearchResult], bool]] = None,
              read_itraq_ratios: bool = False,
-             **kwargs) -> Sequence[SearchResult]:
+             **kwargs) -> Sequence[ProteinPilotSearchResult]:
         """
         Reads the given ProteinPilot Peptide Summary file to extract useful
         information on sequence, modifications, m/z etc.
@@ -139,9 +138,6 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
             prec_mz=float(row["Prec m/z"]),
             proteins=row["Names"],
             accessions=row["Accessions"],
-            byscore=None,
-            eval=None,
-            mod_prob=None,
             itraq_ratios=({k: float(row[k]) for k in itraq_cols if row[k]}
                           if itraq_cols else None)
         )
@@ -174,7 +170,7 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
     def read(self, filename: str,
              predicate: Optional[Callable[[SearchResult], bool]] = None,
              read_itraq_peaks: bool = False,
-             **kwargs) -> Sequence[SearchResult]:
+             **kwargs) -> Sequence[ProteinPilotXMLSearchResult]:
         """
         Reads the given ProteinPilot XML file to extract useful
         information on sequence, modifications, m/z etc.
@@ -183,6 +179,8 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
             filename (str): The path to the XML file.
             predicate (Callable, optional): An optional predicate to filter
                                             results.
+            read_itraq_peaks (bool, optional): Whether to extract the iTRAQ
+                                               peak information from the XML.
 
         Returns:
             The read information as a list of SearchResults.
@@ -234,6 +232,9 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
                         itraq_peaks)
 
                 element.clear()
+                for ancestor in element.xpath('ancestor-or-self::*'):
+                    while ancestor.getprevious() is not None:
+                        del ancestor.getparent()[0]
 
             elif element.tag == "SEQUENCE":
                 match_ids = []
@@ -245,8 +246,12 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
                     match_protein_map[match_id] = protein_ids
 
                 element.clear()
+                for ancestor in element.xpath('ancestor-or-self::*'):
+                    while ancestor.getprevious() is not None:
+                        del ancestor.getparent()[0]
 
-        return [ProteinPilotXMLSearchResult(
+        for match_id, r in res.items():
+            yield ProteinPilotXMLSearchResult(
                     seq=r.seq,
                     mods=tuple(r.mods),
                     charge=r.charge,
@@ -258,13 +263,37 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
                     time=r.rt,
                     confidence=r.conf,
                     prec_mz=r.prec_mz,
-                    proteins=None,
                     accessions=tuple(match_protein_map.get(match_id, [])),
                     byscore=r.score,
                     eval=r.eval,
                     mod_prob=r.mod_prob,
                     itraq_peaks=r.itraq_peaks)
-                for match_id, r in res.items()]
+
+    @staticmethod
+    def read_biases(filename: str) -> Dict[Tuple[str, str], float]:
+        """
+        Reads the given ProteinPilot XML file to extract the iTRAQ ratio
+        bias coefficients.
+
+        Args:
+            filename (str): The path to the ProteinPilot XML file.
+
+        """
+        context = etree.iterparse(filename, events=["end"], recover=True,
+                                  encoding="iso-8859-1")
+        biases: Dict[Tuple[str, str], float] = {}
+        for event, element in context:
+            if element.tag == "BIAS":
+                nominator = element.get("nominator")
+                denominator = element.get("denominator")
+                biases[(nominator, denominator)] =\
+                    float(element.get("coefficient"))
+            element.clear()
+            # Also eliminate now-empty references from the root node to elem
+            for ancestor in element.xpath('ancestor-or-self::*'):
+                while ancestor.getprevious() is not None:
+                    del ancestor.getparent()[0]
+        return biases
 
     @staticmethod
     def _get_itraq_peaks(element) -> Dict[int, Tuple[float, float]]:
