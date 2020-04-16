@@ -9,7 +9,7 @@
 #include "annotation.h"
 #include "converters.h"
 	
-static std::map<std::string, Annotation> annotate(
+std::map<std::string, Annotation> annotate(
 		const std::vector<double>& mzArray,
 		const std::vector<Ion>& theorIons,
 		const double tol)
