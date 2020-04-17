@@ -10,7 +10,7 @@ Note that the 'none' type cleavage is not supported currently.
 import json
 import os
 import re
-from typing import List, Optional, Pattern, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Pattern, Tuple
 
 from .constants import RESIDUES
 
@@ -18,7 +18,7 @@ from .constants import RESIDUES
 DEFAULT_RULES = os.path.join(os.path.dirname(__file__), "EnzymeRules.json")
 
 
-class Proteolyzer():
+class Proteolyzer:
     """
     A class for cleaving peptides according to the given enzyme cleavage rule.
 
@@ -43,60 +43,71 @@ class Proteolyzer():
 
         # Check for valid enzyme type
         if self.enzyme not in enzymes:
-            raise KeyError(f'Undefined or unsupported enzyme type: {enzyme}!')
+            raise KeyError(f"Undefined or unsupported enzyme type: {enzyme}!")
 
         self.proteolytic_regex: Optional[Pattern] = None
-        self._site_terminal = None
+        self._site_terminals: Optional[Dict[str, str]] = None
+        self._cleavage_sites: Optional[str] = None
 
-        self._cleavage_site = enzymes[self.enzyme]['Sites']
-        self._removenaa()
-        self._exceptions = enzymes[self.enzyme]['Except']
-        self._terminal = enzymes[self.enzyme]['Terminal']
-        self._parserules()
+        cleavage_sites: List[str] = enzymes[enzyme]["Sites"]
+        cleavage_sites = self._remove_invalid_site(cleavage_sites)
+        self._create_rules(enzymes[enzyme], cleavage_sites)
 
-    def _removenaa(self):
+    def _remove_invalid_site(self, cleavage_sites: Iterable[str]) -> List[str]:
         """
-        Removes residues from the cleavage sites which are not one of the
+        Removes site from cleavage sites which is not one of the
         standard 20 amino acid residues.
+
+        Args:
+            cleavage_sites: The residues targeted for cleavage.
+
+        Returns:
+            Filtered list of cleavage sites.
 
         Raises:
             KeyError
 
         """
-        sites = [''.join(set(s) & RESIDUES)
-                 for s in self._cleavage_site]
-        if not any(sk for sk in sites):
+        sites = ["".join(set(s) & RESIDUES) for s in cleavage_sites]
+        if not any(site for site in sites):
             raise KeyError("Unsupported cleavage sites using the enzyme "
                            f"{self.enzyme}")
-        self._cleavage_site = tuple(sites)
+        return sites
 
-    def _parserules(self):
+    def _create_rules(self, enzyme: Dict[str, Any],
+                      cleavage_sites: Iterable[str]):
         """
-        Parse cleavage rules, and remove the one if the cleavage
-        sites not exist in the protein sequence.
+        Create cleavage rules, and remove the one if cleavage
+        sites not exist in protein sequence.
+
         """
-        enzrules, csx, excepts, termins, siteterminal = [], [], [], [], {}
-        for ii, site in enumerate(self._cleavage_site):
+        # cleavage exceptions
+        excepts: Optional[List[str]] = enzyme.get("Except")
+        # terminals (N / C)
+        terminals: List[str] = enzyme["Terminal"]
+
+        # create cleavage rules
+        rules: List[str] = []
+        sites: List[str] = []
+        site_terminals: Dict[str, Any] = {}
+        for i, (site, terminal) in enumerate(zip(cleavage_sites, terminals)):
             if not site:
                 continue
-            csx.append(site)
-            excepts.append(self._exceptions[ii])
-            termins.append(self._terminal[ii])
-            # set up string split rule
-            rulej = r'([%s])' % site
-            if self._exceptions[ii]:
-                rulej = r'(?<![%s])' % self._exceptions[ii] + rulej \
-                    if self._terminal[ii] == 'N' else\
-                    rulej + r'(?![%s])' % self._exceptions[ii]
-            enzrules.append(rulej)
-            # get the combine direction
-            for rk in site:
-                siteterminal[rk] = self._terminal[ii]
-        self._cleavage_site = tuple(csx)
-        self._exceptions = tuple(excepts)
-        self._terminal = tuple(termins)
-        self.proteolytic_regex = re.compile("|".join(enzrules))
-        self._site_terminal = siteterminal
+
+            sites.append(site)
+            # sequence split rules
+            rule = f"([{site}])"
+            # exceptions
+            if excepts is not None:
+                _rule = (f"(?<![{excepts[i]}{rule}])" if terminal == "N"
+                         else f"{rule}(?![{excepts[i]}])")
+            rules.append(rule)
+            # combination direction: C/N terminal
+            site_terminals.update((r, terminal) for r in site)
+
+        self._cleavage_sites = "".join(sites)
+        self._site_terminals = site_terminals
+        self.proteolytic_regex = re.compile("|".join(rules))
 
     def _split_sequence(self, sequence: str) -> List[str]:
         """
@@ -110,13 +121,13 @@ class Proteolyzer():
 
         """
         if self.proteolytic_regex is None:
-            raise RuntimeError("Proteolytic regex not defined")
+            raise ValueError("Proteolytic regex not defined")
         return [s for s in self.proteolytic_regex.split(sequence) if s]
 
     def is_cleaved(self, sequence: str) -> bool:
         """
-        Evaluates whether a peptide sequence has been proteolytically cleaved
-        using the rule associated with the current instance of the
+        Evaluates whether a peptide sequence has been proteolytically
+        cleaved using the rule associated with current instance of the
         Proteolyzer.
 
         Args:
@@ -126,9 +137,14 @@ class Proteolyzer():
             A boolean indicating whether the peptide follows the cleavage
             rule.
 
+        Raises:
+            ValueError
+
         """
         # TODO: deal with terminal of cleavage
-        return any(sequence[-1] in sites for sites in self._cleavage_site)
+        if self._cleavage_sites is not None:
+            return sequence[-1] in self._cleavage_sites
+        raise ValueError("Proteolyzer._cleavage_sites has not been initialized")
 
     def count_missed_cleavages(self, sequence: str) -> int:
         """
@@ -140,92 +156,101 @@ class Proteolyzer():
         Returns:
             An integer number of missed cleavages.
 
+        Raises:
+            ValueError
+
         """
         if self.proteolytic_regex is None:
-            raise RuntimeError("Proteolytic regex not defined")
-        # Subtract one for the main sequence itself and another one for the
-        # cleavage residue at the terminus
+            raise ValueError("Proteolytic regex is not defined")
+        if self._cleavage_sites is None:
+            raise ValueError("Cleavage sites are not defined")
+
+        # Subtract one for the main sequence itself and another one
+        # for the cleavage residue at the terminus
         missed = len(re.findall(self.proteolytic_regex, sequence))
-        if any(sequence[-1] in cs for cs in self._cleavage_site):
+        if sequence[-1] in self._cleavage_sites:
             missed -= 1
         return missed
 
-    def cleave(self, sequence: str, numbermissed: int = 1,
-               lenrange: Tuple[int, int] = (7, 60)) -> Tuple[str, ...]:
+    def cleave(self, sequence: str,
+               num_missed: int = 1,
+               len_range: Tuple[int, int] = (7, 30)) -> Tuple[str, ...]:
         """
         Cleavage of the input sequence using the constructed enzyme
         object, with number of missed cleavage allowed.
-        Arguments
-        - sequence: protein sequence in ..fasta file
-        - numbermissed: number of missed cleavage allowed
+
+        Arguments:
+        sequence : str
+            sequence string, e.g., protein sequence in ..fasta file
+         num_missed : int
+            number of missed cleavages
+
+        Raises:
+            ValueError
+
         """
-        if self._site_terminal is None:
-            raise RuntimeError("Site terminal is not defined")
+        if self._site_terminals is None:
+            raise ValueError("Cleavage terminal is not defined.")
+        if self._cleavage_sites is None:
+            raise ValueError("Cleavage sites are not defined")
 
-        min_len, max_len = lenrange
-        # Split the sequence according to the cleavage rules of the enzyme
-        split_seq = self._split_sequence(sequence)
-        seq_len = len(split_seq)
+        min_len, max_len = len_range
 
-        if seq_len == 1:
-            return (tuple(split_seq[0],)
-                    if max_len >= len(split_seq[0]) >= min_len
-                    and RESIDUES.issuperset(split_seq[0]) else tuple())
+        # Split the sequence according to the cleavage rules
+        # defined by specified enzyme
+        split_seq: List[str] = self._split_sequence(sequence)
 
-        # Get all peptides with zero missed cleavage
-        comb_peps = []
-        for ii in range(seq_len):
-            nmk, j0, ci = 0, ii, split_seq[ii]
-            try:
-                cterm = self._site_terminal[ci]
-            except KeyError:
-                # the last splitted sequence
-                if ii == seq_len - 1:
-                    try:
-                        if self._site_terminal[split_seq[ii - 1]] == 'C':
-                            comb_peps.append(split_seq[ii])
-                    except KeyError:
+        # Get all peptides
+        peps: List[str] = []
+        # the indices of cleavage sites
+        site_index = [i for i, seq in enumerate(split_seq)
+                      if seq in self._cleavage_sites]
+
+        term: Optional[str] = None
+        term_next: Optional[str] = None
+        nmc: int = 0
+        s: List[str] = []
+        # get peptides
+        for i in site_index:
+            nmc, s = 0, [split_seq[i]]
+            # cleavage terminal (at C/N side)
+            term = self._site_terminals.get(s[0])
+
+            # if the cleavage happens at C-terminal of the site,
+            # then previous split sequence which is not a cleavage
+            # site should be added
+            if i > 0 and i - 1 not in site_index:
+                if term == "C":
+                    s.insert(0, split_seq[i - 1])
+                    peps.append("".join(s))
+                elif i == 1:
+                    peps.append(split_seq[i - 1])
+
+            # more missed cleavages
+            for s_next in split_seq[i + 1:]:
+                term_next = self._site_terminals.get(s_next)
+                s.append(s_next)
+                # combine subsequences
+                if term_next == "C" or (term_next != "C" and term == "N"):
+                    peps.append("".join(s[:-1])
+                                if term_next == "N" else "".join(s))
+
+                # count one more missed cleavage
+                if (term == "C" and term_next is None) or term_next == "N":
+                    nmc += 1
+                    # stop search if the number of missed cleavages
+                    # exceeds that allowed
+                    if nmc > num_missed:
                         break
-                else:
-                    continue
 
-            # set up initial peptide sequence for searching next
-            # sequence if number of missed cleavage larger than 0
-            if cterm == 'C':
-                if ii == 0:
-                    sk = ci
-                else:
-                    cj = split_seq[ii - 1]
-                    sk = cj + ci
-                    if split_seq[ii - 1] in self._site_terminal and \
-                            self._site_terminal[cj] == cterm:
-                        nmk += 1
-            elif cterm == 'N' and ii < seq_len - 1:
-                sk = ci + split_seq[ii + 1]
-                j0 += 1
-                if split_seq[ii + 1] in self._site_terminal and\
-                        self._site_terminal[split_seq[ii + 1]] == cterm:
-                    nmk += 1
-            # no missed cleavage
-            comb_peps.append(sk)
-            # get peptides with larger number of missed cleavage
-            if nmk == numbermissed:
-                continue
-            for jj in range(j0 + 1, seq_len):
-                cj = split_seq[jj]
-                if cj in self._site_terminal:
-                    if self._site_terminal[cj] == 'C':
-                        sk += cj
-                        nmk += 1
-                        if nmk == numbermissed:
-                            break
-                    else:
-                        nmk += 1
-                        if nmk > numbermissed:
-                            break
-                        sk += cj
-                else:
-                    sk += cj
-            comb_peps.append(sk)
-        return tuple([x for x in comb_peps if max_len >= len(x) >= min_len
-                      and RESIDUES.issuperset(x)])
+                if term_next is not None:
+                    term = term_next
+
+        if term_next is None and term == "C":
+            if nmc <= num_missed:
+                peps.append("".join(s))
+            # the last subsequence
+            peps.append(split_seq[len(split_seq) - 1])
+
+        return tuple(set(x for x in peps if max_len >= len(x) >= min_len
+                         and RESIDUES.issuperset(x)))
