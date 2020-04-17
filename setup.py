@@ -12,7 +12,8 @@ c_rptmdetermine = Extension(
         os.path.join(PACKAGE_DIR, "converters.cpp"),
         os.path.join(PACKAGE_DIR, "annotate.cpp"),
         os.path.join(PACKAGE_DIR, "crPTMDetermine.cpp"),
-    ]
+    ],
+    extra_compile_args=['-std=c++11']
 )
 
 setup(
@@ -45,5 +46,6 @@ setup(
             "unimod.xml",
         ]
     },
-    include_package_data=True
+    include_package_data=True,
+    language="c++"
 )
