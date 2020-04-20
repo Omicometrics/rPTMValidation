@@ -18,7 +18,7 @@ c_rptmdetermine = Extension(
 
 setup(
     name="rPTMDetermine",
-    version="0.1",
+    version="2.0.0a",
     packages=[
         "rPTMDetermine",
         "rPTMDetermine.readers",
