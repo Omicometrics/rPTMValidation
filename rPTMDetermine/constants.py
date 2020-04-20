@@ -4,16 +4,16 @@ A module to define some constants used throughout peptide and mass spectrum
 analyses.
 
 """
-from typing import Any, Dict, List, Set
+from typing import Dict, List, Set
 
 from pepfrag import IonType, Mass
 
-DEFAULT_FRAGMENT_IONS: Dict[IonType, Dict[str, Any]] = {
-    IonType.precursor: {"neutral_losses": ["H2O", "NH3"]},
-    IonType.imm: {},
-    IonType.b: {"neutral_losses": ["H2O", "NH3"]},
-    IonType.y: {"neutral_losses": ["H2O", "NH3"]},
-    IonType.a: {"neutral_losses": []}
+DEFAULT_FRAGMENT_IONS: Dict[int, List[str]] = {
+    IonType.precursor.value: ["H2O", "NH3"],
+    IonType.imm.value: [],
+    IonType.b.value: ["H2O", "NH3"],
+    IonType.y.value: ["H2O", "NH3"],
+    IonType.a.value: []
 }
 
 AA_SYMBOLS: Dict[str, str] = {

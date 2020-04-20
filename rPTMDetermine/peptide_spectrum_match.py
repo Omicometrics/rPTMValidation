@@ -244,11 +244,11 @@ class PSM():
 
         if ion_types is None:
             ion_types = {
-                IonType.precursor: {"neutral_losses": ["H2O", "NH3"]},
-                IonType.imm: {},
-                IonType.b: {"neutral_losses": ["H2O", "NH3"]},
-                IonType.y: {"neutral_losses": ["H2O", "NH3"]},
-                IonType.a: {"neutral_losses": []}
+                IonType.precursor.value: ["H2O", "NH3"],
+                IonType.imm.value: [],
+                IonType.b.value: ["H2O", "NH3"],
+                IonType.y.value: ["H2O", "NH3"],
+                IonType.a.value: []
             }
 
         # Get the theoretical ions for the peptide
@@ -429,11 +429,12 @@ class PSM():
             elif "-" in ion and ion[1] == "b":
                 ion_indices["bnl"].append(peakj)
 
-            if peakj >= mod_ion_start[list(iontag)[0]]:
+            if target_mod is not None and peakj >= mod_ion_start[list(iontag)[0]]:
                 seq_mod_ions.append(peakj)
 
         # The total sum of the modified ion intensities
-        self.features.TotalIntMod = intensities[seq_mod_ions].sum()
+        if target_mod is not None:
+            self.features.TotalIntMod = intensities[seq_mod_ions].sum()
 
         # The peaks annotated by theoretical ions
         ann_peaks = np.array(list({v for v, _ in ions.values()}))
