@@ -24,7 +24,7 @@ def preparse_mod_string(mods: str) -> str:
     Pre-parses the modification string to a list of ModSites.
 
     Args:
-        mod_str (str): The modification string.
+        mods (str): The modification string.
 
     Returns:
         list of ModSites.
@@ -56,28 +56,13 @@ def _parse_mod_string(mod_str: str, ptmdb: PTMDB, mass_type: MassType)\
         UnknownModificationException
 
     """
-    mod_list = mod_str.strip().split('@')
-
-    # Get the name of the modification
-    name = mod_list[0]
-    if '(' in name and mod_list[1] != "N-term":
-        # For cases such as Delta:H(4)C(2)(H), extract up to the final bracket
-        # pair as the modification name
-        name = name[:name.rfind('(')]
-
-    # Get the mass change associated with the modification
-    try:
-        mass = ptmdb.get_mass(name, mass_type)
-    except ModificationNotFoundException:
-        msg = f"Failed to detect mass for modification {name}"
-        logging.warning(msg)
-        raise UnknownModificationException(msg)
+    name, site = mod_str.strip().split('@')
 
     # Get the site of the modification
     try:
-        site: Union[str, int] = int(mod_list[1])
+        site: Union[str, int] = int(site)
     except ValueError:
-        site_str = mod_list[1].lower()
+        site_str = site.lower()
         if site_str.startswith('c') and "term" in site_str:
             site = "cterm"
         elif site_str.startswith('n') and "term" in site_str:
@@ -86,6 +71,22 @@ def _parse_mod_string(mod_str: str, ptmdb: PTMDB, mass_type: MassType)\
             msg = f"Failed to detect site for modification {mod_str}"
             logging.warning(msg)
             raise UnknownModificationException(msg)
+
+    if '(' in name and site != "nterm":
+        # For cases such as Delta:H(4)C(2)(H), extract up to the final bracket
+        # pair as the modification name, so long as the final brackets do not
+        # contain a number
+        idx = name.rfind('(')
+        if not name[idx + 1].isdigit():
+            name = name[:idx]
+
+    # Get the mass change associated with the modification
+    try:
+        mass = ptmdb.get_mass(name, mass_type)
+    except ModificationNotFoundException:
+        msg = f"Failed to detect mass for modification {name}"
+        logging.warning(msg)
+        raise UnknownModificationException(msg)
 
     return ModSite(mass, site, name)
 
@@ -135,7 +136,6 @@ def parse_mods(mods_str: str, ptmdb: PTMDB,
     if not mods_str:
         return []
 
-    mods: List[ModSite] = []
     if '@' in mods_str:
         # Ignore modifications that begin with "No ", since these reflect the
         # absence of a modification, e.g. quantitative label

@@ -14,7 +14,7 @@ from .percolator_reader import PercolatorReader, PercolatorSearchResult
 from .protein_pilot_reader import (ProteinPilotReader, ProteinPilotXMLReader,
                                    ProteinPilotSearchResult)
 from .ptmdb import PTMDB
-from .readers import get_reader, read_fasta_sequences
+from .readers import get_reader, read_fasta_sequences, SearchEngine
 from .search_result import PeptideType, SearchResult
 from .tpp_reader import TPPReader, TPPSearchResult
 from .uniprot import read_uniprot_ptms
@@ -40,6 +40,7 @@ __all__ = [
     "get_reader",
     "read_fasta_sequences",
     "PeptideType",
+    "SearchEngine",
     "SearchResult",
     "TPPReader",
     "TPPSearchResult",

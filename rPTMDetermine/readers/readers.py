@@ -3,54 +3,68 @@
 A series of functions used to read different file types.
 
 """
+import enum
 from typing import Iterable, List, TextIO, Tuple
-
-from rPTMDetermine.base_config import SearchEngine
 
 from .mascot_reader import MascotReader
 from .msgfplus_reader import MSGFPlusReader
 from .percolator_reader import PercolatorReader, PercolatorTextReader
-from .protein_pilot_reader import ProteinPilotReader
+from .protein_pilot_reader import ProteinPilotReader, ProteinPilotXMLReader
 from .tpp_reader import TPPReader
 from .ptmdb import PTMDB
 
 
-_TPP_ENGINES = {
-    SearchEngine.Comet,
-    SearchEngine.TPP,
-    SearchEngine.XTandem
+class SearchEngine(enum.Enum):
+    """
+    An enumeration to represent the search engines for which search results
+    can be read and parsed.
+
+    """
+    ProteinPilot = enum.auto()
+    ProteinPilotXML = enum.auto()
+    Mascot = enum.auto()
+    Comet = enum.auto()
+    XTandem = enum.auto()
+    TPP = enum.auto()
+    MSGFPlus = enum.auto()
+    Percolator = enum.auto()
+    PercolatorText = enum.auto()
+
+
+ENGINE_READER_MAP = {
+    SearchEngine.ProteinPilot: ProteinPilotReader,
+    SearchEngine.ProteinPilotXML: ProteinPilotXMLReader,
+    SearchEngine.Mascot: MascotReader,
+    SearchEngine.Comet: TPPReader,
+    SearchEngine.XTandem: TPPReader,
+    SearchEngine.TPP: TPPReader,
+    SearchEngine.MSGFPlus: MSGFPlusReader,
+    SearchEngine.Percolator: PercolatorReader,
+    SearchEngine.PercolatorText: PercolatorTextReader,
 }
 
 
 def get_reader(search_engine: SearchEngine, ptmdb: PTMDB):
     """
-    Constructs the appropriate Reader based on the SearchEngine.
+    Constructs the appropriate `Reader` based on the `search_engine`.
 
     Args:
-        search_engine (SearchEngine): The SearchEngine used for database
-                                      search.
+        search_engine: The SearchEngine used for database search.
+        ptmdb: The PTMDB for `Reader` construction.
 
     Returns:
-        Reader.
+        The `Reader` associated with the configured search_engine.
 
     Raises:
         NotImplementedError.
 
     """
-    if search_engine is SearchEngine.ProteinPilot:
-        return ProteinPilotReader(ptmdb)
-    if search_engine is SearchEngine.Mascot:
-        return MascotReader(ptmdb)
-    if search_engine is SearchEngine.MSGFPlus:
-        return MSGFPlusReader(ptmdb)
-    if search_engine is SearchEngine.Percolator:
-        return PercolatorReader(ptmdb)
-    if search_engine is SearchEngine.PercolatorText:
-        return PercolatorTextReader(ptmdb)
-    if search_engine in _TPP_ENGINES:
-        return TPPReader(ptmdb)
-    raise NotImplementedError(
-        f"Cannot read search results for engine: {search_engine}")
+    try:
+        return ENGINE_READER_MAP[search_engine](ptmdb)
+    except KeyError:
+        raise NotImplementedError(
+            f"Cannot read search results for engine: {search_engine}"
+        )
 
 
 def read_fasta_sequences(fasta_file: TextIO) -> Iterable[Tuple[str, str]]:

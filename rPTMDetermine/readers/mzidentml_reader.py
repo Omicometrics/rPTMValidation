@@ -57,7 +57,7 @@ class MZIdentMLReader(Reader):  # pylint: disable=too-few-public-methods
     @overrides
     def read(self, filename: str,
              predicate: Optional[Callable[[SearchResult], bool]] = None,
-             **kwargs) -> Sequence[SearchResult]:
+             **kwargs) -> List[MZIdentMLSearchResult]:
         """
         Reads the given mzIdentML result file.
 

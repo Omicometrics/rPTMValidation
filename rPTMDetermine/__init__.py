@@ -3,25 +3,20 @@ Expose the public rPTMDetermine API.
 
 """
 
-from .base_config import MissingConfigOptionException
+from .config import MissingConfigOptionException
 from .mass_spectrum import Spectrum
-from .peptide_spectrum_match import PSM, UnmodPSM
+from .peptide_spectrum_match import PSM
 from .proteolysis import Proteolyzer
 from .psm_container import PSMContainer
-from .retriever import Retriever
+from .rptmdetermine_config import RPTMDetermineConfig
 from .validator import Validator
-from .retriever import RetrieverConfig
-from .validator import ValidatorConfig
 
 __all__ = [
+    'RPTMDetermineConfig',
     "MissingConfigOptionException",
     "Spectrum",
     "PSM",
-    "UnmodPSM",
     "Proteolyzer",
     "PSMContainer",
-    "Retriever",
     "Validator",
-    "RetrieverConfig",
-    "ValidatorConfig"
 ]

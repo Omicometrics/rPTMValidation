@@ -5,7 +5,7 @@ database search result readers.
 
 """
 import abc
-from typing import Callable, Optional, Sequence
+from typing import Callable, List, Optional
 
 from .ptmdb import PTMDB
 from .search_result import SearchResult
@@ -26,7 +26,7 @@ class Reader(metaclass=abc.ABCMeta):  # pylint: disable=too-few-public-methods
     @abc.abstractmethod
     def read(self, filename: str,
              predicate: Optional[Callable[[SearchResult], bool]] = None,
-             **kwargs) -> Sequence[SearchResult]:
+             **kwargs) -> List[SearchResult]:
         """
         Reads the database search results file.
 

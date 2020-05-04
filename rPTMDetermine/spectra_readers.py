@@ -10,7 +10,7 @@ import functools
 import itertools
 import re
 import struct
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional, Tuple
 import zlib
 
 import numpy as np
@@ -18,6 +18,9 @@ import numpy as np
 import lxml.etree as etree
 
 from .mass_spectrum import Spectrum
+
+
+SpectrumGenerator = Generator[Tuple[str, Spectrum], None, None]
 
 
 MZMLPrecursor = collections.namedtuple(
@@ -91,7 +94,6 @@ class MGFReader:
         if self._id_getter is not None:
             return self._id_getter(text)
 
-        spec_id = None
         try:
             spec_id = self._get_id_locus(text)
         except ParserException:
@@ -110,18 +112,14 @@ class MGFReader:
 
         raise ParserException("Failed to detect ID in TITLE field")
 
-    def read(self, spec_file: str) -> Dict[str, Spectrum]:
+    def read(self, spec_file: str) -> SpectrumGenerator:
         """
         Reads the given MGF data file to extract spectra.
 
         Args:
             spec_file (str): The path to the MGF file to read.
 
-        Returns:
-            A dictionary of spectrum ID to numpy array of peaks.
-
         """
-        spectra: Dict[str, Spectrum] = {}
         with open(spec_file) as fh:
             for key, group in itertools.groupby(fh, lambda ln: ln == "END IONS\n"):
                 if next(group) == "END IONS\n":
@@ -130,7 +128,6 @@ class MGFReader:
                 items = list(group)
 
                 fields = {}
-                peak_start_idx = 0
                 for ii, line in enumerate(items):
                     if "=" not in line:
                         peak_start_idx = ii
@@ -146,7 +143,7 @@ class MGFReader:
                 pep_mass_floats = fields["PEPMASS"].split(" ")
                 pep_mass = float(pep_mass_floats[0])
 
-                spectra[spec_id] = Spectrum(
+                spectrum = Spectrum(
                     np.array([float(n) for s in items[peak_start_idx:]
                               for n in s.split(" ")[:2]]).reshape(-1, 2),
                     pep_mass,
@@ -155,51 +152,7 @@ class MGFReader:
                     retention_time=float(fields["RTINSECONDS"])
                     if "RTINSECONDS" in fields else None)
 
-        return spectra
-
-
-def read_mgf_file(spec_file: str) -> Dict[str, Spectrum]:
-    """
-    Reads the given MGF data file to extract individual spectra.
-
-    Args:
-        spec_file (str): The path to the MGF file to read.
-
-    Returns:
-        A dictionary of spectrum ID to numpy array of peaks.
-
-    """
-    return MGFReader().read(spec_file)
-
-
-def read_mzxml_file(spec_file: str):
-    """
-    Reads the given mzXML file to extract spectra.
-
-    """
-    # TODO
-    raise NotImplementedError()
-
-
-def read_spectra_file(spec_file: str, **kwargs) -> Dict[str, Spectrum]:
-    """
-    Determines the format of the given tandem mass spectrum file and delegates
-    to the appropriate reader.
-
-    Args:
-        spec_file (str): The path to the spectrum file to read.
-
-    Returns:
-
-    """
-    if spec_file.endswith('.mgf'):
-        return read_mgf_file(spec_file)
-    if spec_file.lower().endswith('.mzml'):
-        return MZMLReader().extract_ms2(spec_file, **kwargs)
-    if spec_file.lower().endswith('.mzxml'):
-        return read_mzxml_file(spec_file)
-    raise NotImplementedError(
-        f"Unsupported spectrum file type for {spec_file}")
+                yield spec_id, spectrum
 
 
 class CompressionMode(enum.Enum):
@@ -222,38 +175,30 @@ class MZMLReader:
         self.namespace = namespace
         self.ns_map = {'x': self.namespace}
 
-    def extract_ms1(self, mzml_file: str, **kwargs) \
-            -> Dict[str, Spectrum]:
+    def extract_ms1(self, mzml_file: str, **kwargs) -> SpectrumGenerator:
         """
         Extracts the MS1 spectra from the input mzML file.
 
         Args:
-            msml_file (str): The path to the mzML file.
-
-        Returns:
-            A list of the MS1 spectra encoded in dictionaries.
+            mzml_file (str): The path to the mzML file.
 
         """
         return self.extract_msn(mzml_file, 1, **kwargs)
 
-    def extract_ms2(self, mzml_file: str, **kwargs) \
-            -> Dict[str, Spectrum]:
+    def extract_ms2(self, mzml_file: str, **kwargs) -> SpectrumGenerator:
         """
         Extracts the MS2 spectra from the input mzML file.
 
         Args:
-            msml_file (str): The path to the mzML file.
-
-        Returns:
-            A list of the MS2 spectra encoded in dictionaries.
+            mzml_file (str): The path to the mzML file.
 
         """
-        return self.extract_msn(mzml_file, 2, **kwargs)
+        yield from self.extract_msn(mzml_file, 2, **kwargs)
 
-    def extract_msn(self, mzml_file: str, n: int,
-                    act_method: Optional[str] = None,
-                    act_energy: Optional[int] = None) \
-            -> Dict[str, Spectrum]:
+    def extract_msn(
+            self, mzml_file: str, n: int,
+            act_method: Optional[str] = None,
+            act_energy: Optional[int] = None) -> SpectrumGenerator:
         """
         Extracts the MSn spectra from the input mzML file.
 
@@ -261,12 +206,7 @@ class MZMLReader:
             mzml_file (str): The path to the mzML file.
             n (int): The MS level for which to return spectral information.
 
-        Returns:
-            A list of the MSn spectra encoded in dictionaries.
-
         """
-        spectra = {}
-
         # Read from xml data
         context = etree.iterparse(
             mzml_file, events=("end",),
@@ -347,14 +287,15 @@ class MZMLReader:
 
             element.clear()
 
-            spectra[spec_id] = Spectrum(
+            spectrum = Spectrum(
                 np.array([mz, intensity]),
                 precursor.selected_ions[0] if precursor is not None else None,
                 precursor.charges[0] if precursor is not None and
                 precursor.charges else None,
-                start_time)
+                start_time
+            )
 
-        return spectra
+            yield spec_id, spectrum
 
     def _extract_precursors(self, spectrum) -> List[MZMLPrecursor]:
         """
@@ -376,7 +317,8 @@ class MZMLReader:
                 elif element.get("name") == "charge state":
                     charges.append(int(element.get("value")))
             act_params = {e.get("name"): e.get("value")
-                          for e in precursor.xpath("x:activation/x:cvParam", namespaces=self.ns_map)}
+                          for e in precursor.xpath("x:activation/x:cvParam",
+                                                   namespaces=self.ns_map)}
             if "collision energy" in act_params:
                 act_params["collision energy"] = \
                     float(act_params["collision energy"])
@@ -442,3 +384,23 @@ class MZMLReader:
 
         """
         return f"{{{self.namespace}}}{tag}"
+
+
+def read_spectra_file(spec_file: str, **kwargs) -> SpectrumGenerator:
+    """
+    Determines the format of the given tandem mass spectrum file and delegates
+    to the appropriate reader.
+
+    Args:
+        spec_file (str): The path to the spectrum file to read.
+
+    Returns:
+
+    """
+    if spec_file.endswith('.mgf'):
+        yield from MGFReader().read(spec_file)
+    elif spec_file.lower().endswith('.mzml'):
+        yield from MZMLReader().extract_ms2(spec_file, **kwargs)
+    else:
+        raise NotImplementedError(
+            f"Unsupported spectrum file type for {spec_file}")

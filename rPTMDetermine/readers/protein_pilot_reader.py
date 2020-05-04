@@ -62,7 +62,7 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
     def read(self, filename: str,
              predicate: Optional[Callable[[SearchResult], bool]] = None,
              read_itraq_ratios: bool = False,
-             **kwargs) -> Sequence[ProteinPilotSearchResult]:
+             **kwargs) -> List[ProteinPilotSearchResult]:
         """
         Reads the given ProteinPilot Peptide Summary file to extract useful
         information on sequence, modifications, m/z etc.
@@ -170,7 +170,7 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
     def read(self, filename: str,
              predicate: Optional[Callable[[SearchResult], bool]] = None,
              read_itraq_peaks: bool = False,
-             **kwargs) -> Sequence[ProteinPilotXMLSearchResult]:
+             **kwargs) -> List[ProteinPilotXMLSearchResult]:
         """
         Reads the given ProteinPilot XML file to extract useful
         information on sequence, modifications, m/z etc.

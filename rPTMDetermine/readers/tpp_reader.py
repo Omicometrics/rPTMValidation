@@ -50,7 +50,7 @@ class TPPReader(Reader):  # pylint: disable=too-few-public-methods
 
     def read(self, filename: str,
              predicate: Optional[Callable[[SearchResult], bool]] = None,
-             **kwargs) -> Sequence[SearchResult]:
+             **kwargs) -> List[TPPSearchResult]:
         """
         Reads the specified pepXML file.
 

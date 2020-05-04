@@ -8,7 +8,7 @@ import argparse
 import json
 import pickle
 
-from rPTMDetermine import Validator, ValidatorConfig
+from rPTMDetermine import Validator, RPTMDetermineConfig
 from rPTMDetermine.validator import write_results
 
 

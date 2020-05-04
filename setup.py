@@ -21,6 +21,8 @@ setup(
     version="2.0.0a",
     packages=[
         "rPTMDetermine",
+        "rPTMDetermine.config",
+        "rPTMDetermine.machinelearning",
         "rPTMDetermine.readers",
     ],
     ext_modules=cythonize(

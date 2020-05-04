@@ -65,7 +65,7 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
 
     def read(self, filename: str,
              predicate: Optional[Callable[[SearchResult], bool]] = None,
-             **kwargs) -> Sequence[SearchResult]:
+             **kwargs) -> List[MascotSearchResult]:
         """
         Reads the given Mascot dat result file.
 

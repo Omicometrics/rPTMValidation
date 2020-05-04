@@ -6,8 +6,11 @@ A script providing utility functions for peptide modification validation.
 from bisect import bisect_left
 import collections
 import operator
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import (Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple,
+                    TypeVar)
 
+
+T = TypeVar('T')
 
 Slices = collections.namedtuple("Slices", ["idxs", "bounds"])
 
@@ -83,7 +86,7 @@ def sort_lists(key: int, *args):
     return zip(*sorted(zip(*args), key=operator.itemgetter(key)))
 
 
-def deduplicate(items: Sequence[Any]) -> List[Any]:
+def deduplicate(items: Iterable[T]) -> List[T]:
     """
     Deduplicates a list, retaining the order of the elements.
 

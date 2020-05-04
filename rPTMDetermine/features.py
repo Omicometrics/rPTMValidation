@@ -42,7 +42,8 @@ class Features:
         "FracIonMod",
         "MatchScore",
         "MatchScoreMod",
-        "SeqTagm",)
+        "SeqTagm",
+    )
 
     NumPeaks: Optional[float]
     TotInt: Optional[float]
@@ -136,3 +137,27 @@ class Features:
         """
         return not any(getattr(self, feature) is None
                        for feature in Features.__slots__)
+
+    def to_list(self, features: Optional[List[str]]) -> List[float]:
+        """
+        Converts the set features to a list, optionally limiting the `features`
+        to be output.
+
+        Args:
+            features: The features to be output. If not provided (or None), all
+                      features with non-None values will be output.
+
+        """
+        if features is None:
+            features = Features.all_feature_names()
+
+        # Python 3.8 one-liner:
+        # return [v for f in features if (v := self.get(f)) is not None]
+        values: List[float] = []
+        for feature in features:
+            val = self.get(feature)
+            if val is not None:
+                values.append(val)
+
+        return values
+

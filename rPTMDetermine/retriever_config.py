@@ -7,7 +7,7 @@ rPTMDetermine.
 
 from typing import Any, Dict, Optional
 
-from .base_config import BaseConfig
+from rPTMDetermine.config.config import BaseConfig
 
 
 class RetrieverConfig(BaseConfig):

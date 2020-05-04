@@ -137,7 +137,8 @@ class PTMDB:
             return res
 
         raise ModificationNotFoundException(
-            f"No modification {name} found in Unimod")
+            f"No modification {name} found in Unimod"
+        )
 
     @functools.lru_cache()
     def get_mass(self, name: str, mass_type: MassType = MassType.mono) \

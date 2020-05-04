@@ -45,7 +45,7 @@ class MSGFPlusReader(MZIdentMLReader):  # pylint: disable=too-few-public-methods
         spec_idents: Dict[Tuple[str, Optional[str]], List[Ident]],
         peptides: Dict[str, Tuple[str, List[ModSite]]],
         pep_types: Dict[str, PeptideType]) \
-            -> Sequence[MSGFPlusSearchResult]:
+            -> List[MSGFPlusSearchResult]:
         """
         Converts the identifications to MSGFPlusSearchResult objects.
 

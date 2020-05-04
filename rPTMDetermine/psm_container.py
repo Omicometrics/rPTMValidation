@@ -11,19 +11,28 @@ import operator
 import os
 import sys
 from typing import (Callable, Dict, Generic, Iterable, List, Optional,
-                    overload, Sequence, Set, Tuple, TypeVar)
+                    overload, Sequence, Set, Tuple, TypeVar, TYPE_CHECKING)
 
-import pandas as pd
+import numpy as np
 
 from pepfrag import ModSite, Peptide
 
-from .peptide_spectrum_match import PSM, SimilarityScore
-from .readers import parse_mods
+from .peptide_spectrum_match import PSM
+from .readers import parse_mods, PTMDB, UnknownModificationException
+
+if TYPE_CHECKING:
+    # Optional dependencies are specified here to enable type checking
+    # (see https://stackoverflow.com/questions/61384752)
+    import pandas as pd
 
 
 PSMType = TypeVar("PSMType", bound=PSM)
 
 
+# TODO: use SQLAlchemy, backed by sqlite3, to create a PSM database, which
+#       can be queried to enable quick lookups. Would use a "spectra" table
+#       to independently store `Spectrum` objects, then join on the
+#       (data_id, spec_id) with "psms" table
 class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=too-many-ancestors
     """
     A class to provide a customized iterable container of PSMs. The class
@@ -36,10 +45,8 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
 
         """
         super().__init__()
-        # TODO
-        # The generic type of self.data needs to be overridden, but this is
-        # problematic due to https://github.com/python/mypy/issues/5846
-        self.data = list(psms) if psms is not None else []
+
+        self.data: List[PSMType] = list(psms) if psms is not None else []
 
     @overload
     def __getitem__(self, idx: int) -> PSMType: ...
@@ -87,41 +94,6 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
         return PSMContainer([p for p in self.data if p.data_id == data_id and
                              p.spec_id == spec_id])
 
-    def filter_lda_prob(self, threshold: float = 0.99) \
-            -> PSMContainer[PSMType]:
-        """
-        Filters the PSMs to those with an LDA probability exceeding the
-        threshold value.
-
-        Args:
-            threshold (float): The threshold probability to exceed.
-
-        Returns:
-            PSMContainer
-
-        """
-        return PSMContainer(
-            [p for p in self.data if p.lda_prob >= threshold])
-
-    def filter_lda_similarity(self, lda_threshold: float,
-                              sim_threshold: float) -> PSMContainer[PSMType]:
-        """
-        Filters the PSMs to those with an LDA prob exceeding the threshold
-        value and a maximum similarity score exceeding the similarity score
-        threshold.
-
-        Args:
-            lda_threshold (float): The threshold LDA probability to exceed.
-            sim_threshold (float): The similarity score threshold to exceed.
-
-        Returns:
-            PSMContainer
-
-        """
-        return PSMContainer(
-            [p for p in self.data if p.lda_prob >= lda_threshold and
-             p.max_similarity >= sim_threshold])
-
     def filter_site_prob(self, threshold: float) -> PSMContainer[PSMType]:
         """
         Filters the PSMs to those without a site probability or with a site
@@ -162,7 +134,7 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
         a list of positions in the PSMContainer.
 
         Args:
-            attribute (str): The PSM attribute on which to build an index.
+            attributes: The PSM attributes on which to build an index.
 
         Returns:
             Index dictionary mapping values to positions.
@@ -213,18 +185,6 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
                 peptides.add((psm.seq, tuple(psm.mods)))  # type: ignore
         return peptides
 
-    def get_benchmark_peptides(self)\
-            -> Set[Tuple[str, Tuple[ModSite]]]:
-        """
-        Finds the unique peptides, by sequence and modifications, which
-        correspond to benchmark peptides.
-
-        Returns:
-            Set of unique benchmark peptides as tuples of sequence and mods.
-
-        """
-        return self.get_unique_peptides(predicate=operator.attrgetter("benchmark"))
-
     def get_validated(
         self,
         lda_threshold: float,
@@ -248,77 +208,92 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
              round(psm.max_similarity, 2) >= sim_threshold and
              (psm.site_prob is None or psm.site_prob >= site_prob)])
 
-    def to_df(self, target_only: bool = False) -> pd.DataFrame:
+    def to_df(self) -> pd.DataFrame:
         """
-        Converts the psm features, including decoy, into a pandas dataframe,
-        including a flag indicating whether the features correspond to a
-        target or decoy peptide and the peptide sequence.
+        Converts the psm features into a pandas dataframe, including the peptide
+        sequence.
 
         Returns:
             pandas.DataFrame
 
         """
+        import pandas as pd
+
         rows = []
         for psm in self.data:
             trow = {"data_id": psm.data_id, "spec_id": psm.spec_id,
-                    "seq": psm.seq, "target": True, "uid": psm.uid}
+                    "seq": psm.seq, "uid": psm.uid}
             for feature, value in psm.features:
                 trow[feature] = value
             rows.append(trow)
-            if not target_only and psm.decoy_id is not None:
-                drow = {"data_id": "", "spec_id": "",
-                        "seq": psm.decoy_id.seq, "target": False,
-                        "uid": psm.uid}
-                for feature, value in psm.decoy_id.features:
-                    drow[feature] = value
-                rows.append(drow)
 
         return pd.DataFrame(rows)
 
+    def to_feature_array(
+        self,
+        features: Optional[List[str]] = None
+    ) -> np.array:
+        """
+        Constructs an `np.array` using the features of the contained `PSM`s.
 
-def read_csv(csv_file: str, ptmdb, spectra=None, sep: str = "\t")\
-        -> PSMContainer:
-    """
-    Converts the contents of a CSV file to a PSMContainer. Each row of the
-    file should contain the details of a single PSM. This function is
-    designed to be used to read CSV files output by this program.
+        Args:
+            features:
 
-    Args:
-        csv_file (str): The path to the CSV file.
+        Returns:
+            numpy array
 
-    Returns:
-        PSMContainer.
+        """
+        return np.array([psm.features.to_list(features) for psm in self.data])
 
-    """
-    if not os.path.exists(csv_file):
-        print(f"CSV file {csv_file} does not exist - exiting")
-        sys.exit(1)
+    @classmethod
+    def from_csv(
+        cls,
+        csv_file: str,
+        ptmdb: PTMDB,
+        spectra=None,
+        sep: str = ','
+    ) -> PSMContainer[PSM]:
+        """
+        Converts the contents of a CSV file to a PSMContainer. Each row of the
+        file should contain the details of a single PSM. This function is
+        designed to be used to read CSV files output by this program.
 
-    psms = []
-    with open(csv_file, newline="") as fh:
-        reader = csv.DictReader(fh, delimiter=sep)
-        for row in reader:
-            psm = PSM(
-                row.get("DataID", row.get("Rawset", None)),
-                row["SpectrumID"],
-                Peptide(
-                    row["Sequence"],
-                    int(row["Charge"]),
-                    parse_mods(row["Modifications"], ptmdb)
+        Args:
+            csv_file (str): The path to the CSV file.
+            ptmdb:
+            spectra:
+            sep:
+
+        Returns:
+            PSMContainer.
+
+        """
+        if not os.path.exists(csv_file):
+            print(f"CSV file {csv_file} does not exist - exiting")
+            sys.exit(1)
+
+        psms: PSMContainer[PSM] = PSMContainer()
+        with open(csv_file, newline="") as fh:
+            reader = csv.DictReader(fh, delimiter=sep)
+            for row in reader:
+                try:
+                    mods = parse_mods(row['Modifications'], ptmdb)
+                except UnknownModificationException:
+                    continue
+
+                psm = PSM(
+                    row['DataID'],
+                    row['SpectrumID'],
+                    Peptide(
+                        row['Sequence'],
+                        int(row['Charge']),
+                        mods
+                    )
                 )
-            )
-            psm.lda_score = float(row["rPTMDetermineScore"])
-            psm.lda_prob = float(row["rPTMDetermineProb"])
-            site_prob = row["SiteProbability"]
-            psm.site_prob = (float(site_prob) if site_prob else None)
 
-            if "SimilarityScore" in row:
-                psm.similarity_scores = [SimilarityScore(
-                    None, None, float(row["SimilarityScore"]))]
+                if spectra is not None:
+                    psm.spectrum = spectra[psm.data_id][psm.spec_id]
 
-            if spectra is not None:
-                psm.spectrum = spectra[psm.data_id][psm.spec_id]
+                psms.append(psm)
 
-            psms.append(psm)
-
-    return PSMContainer(psms)
+        return psms

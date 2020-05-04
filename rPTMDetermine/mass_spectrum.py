@@ -37,11 +37,20 @@ class Spectrum():
 
     """
 
-    __slots__ = ("_peaks", "prec_mz", "charge", "retention_time",)
+    __slots__ = (
+        "_peaks",
+        "prec_mz",
+        "charge",
+        "retention_time",
+        "_raw_base_peak_intensity",
+    )
 
-    def __init__(self, peak_list: Union[np.ndarray, List[List[float]]],
-                 prec_mz: float, charge: Optional[int],
-                 retention_time: Optional[float] = None):
+    def __init__(
+            self,
+            peak_list: Union[np.ndarray, List[List[float]]],
+            prec_mz: float,
+            charge: Optional[int],
+            retention_time: Optional[float] = None):
         """
         Initializes the class.
 
@@ -49,7 +58,7 @@ class Spectrum():
             peak_list (list): A list of lists containing m/z, intensity pairs.
             prec_mz (float): The mass/charge ratio of the spectrum precursor.
             charge (int): The charge state of the spectrum precursor.
-            ret_time (float): The retention time for the spectrum.
+            retention_time (float): The retention time for the spectrum.
 
         """
         self._peaks = (peak_list if isinstance(peak_list, np.ndarray)
@@ -59,6 +68,11 @@ class Spectrum():
         self.prec_mz = prec_mz
         self.charge = charge
         self.retention_time = retention_time
+
+        # A public property `raw_base_peak_intensity` provides read-only
+        # access to this attribute so that it may not be inadvertently
+        # changed following normalization
+        self._raw_base_peak_intensity = self.max_intensity()
 
         # Sort the spectrum by the m/z ratios
         self._mz_sort()
@@ -149,6 +163,15 @@ class Spectrum():
 
         """
         self._peaks = self._peaks[self._peaks[:, 0].argsort()]
+
+    @property
+    def raw_base_peak_intensity(self) -> float:
+        """
+        A read-only property to access the pre-normalization base peak
+        intensity.
+
+        """
+        return self._raw_base_peak_intensity
 
     @property
     def mz(self) -> np.array:

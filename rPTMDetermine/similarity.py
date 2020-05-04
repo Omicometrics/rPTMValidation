@@ -9,13 +9,13 @@ from typing import Any, Dict, Iterable, List, Sequence, Set, Tuple
 import numpy as np
 import tqdm
 
-from .peptide_spectrum_match import PSM, SimilarityScore, UnmodPSM
+from .peptide_spectrum_match import PSM, SimilarityScore
 from .psm_container import PSMContainer
 from .mass_spectrum import Spectrum
 
 
 def calculate_similarity_scores(mod_psms: PSMContainer[PSM],
-                                unmod_psms: PSMContainer[UnmodPSM]) \
+                                unmod_psms: PSMContainer) \
         -> PSMContainer[PSM]:
     """
     Calculates the similarity between the mass spectra of modified and
