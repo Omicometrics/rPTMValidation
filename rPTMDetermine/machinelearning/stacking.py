@@ -7,6 +7,7 @@ the label for two classes should be 0 and 1.
 """
 import bisect
 import collections
+from typing import Dict, Iterable, List, Tuple, Union
 
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
@@ -20,90 +21,113 @@ Scaler = collections.namedtuple("Scaler", ["center", "normalizer"])
 Model = collections.namedtuple("Model", ["weights", "scaler", "combination"])
 
 
-def _get_qvalues(scores, groups):
+def calculate_q_values(scores, groups):
     """
-    Calculate q values.
+    Calculates q values.
+
     Note:
-    1. In groups, 0 is assigned to a decoy identification,
-       otherwise, it will be considered as a target identification.
+    1. In groups, 0 is assigned to a negative identification,
+       otherwise, it will be considered as a positive identification.
     2. The input scores must be sorted in DESCENDING ORDER
        in advance.
-    """
 
-    # calculate fdr
-    fdr = []
-    _nd, _nt = 0, 0
-    for _s, _g in zip(scores, groups):
-        if _g == 0:
-            _nd += 1
+    Args:
+
+    """
+    # Calculate fdr
+    fdrs = []
+    num_decoy, num_target = 0, 0
+    for _, group in zip(scores, groups):
+        if group == 0:
+            num_decoy += 1
         else:
-            _nt += 1
-        fdr.append(_nd / _nt if _nt > 0 and _nd < _nt else 1)
+            num_target += 1
+        fdrs.append(
+            num_decoy / num_target
+            if num_target > 0 and num_decoy < num_target
+            else 1
+        )
 
-    # calculate q values according to obtained fdrs
-    qvalues = []
-    _fdr_c_min = 1
-    for _fdr in fdr[::-1]:
-        if _fdr > _fdr_c_min:
-            qvalues.append(_fdr_c_min)
+    # Calculate q values according to obtained FDRs
+    q_values = []
+    fdr_c_min = 1
+    for fdr in fdrs[::-1]:
+        if fdr > fdr_c_min:
+            q_values.append(fdr_c_min)
         else:
-            qvalues.append(_fdr)
-            _fdr_c_min = _fdr
+            q_values.append(fdr)
+            fdr_c_min = fdr
 
-    return np.array(qvalues)[::-1]
+    return np.array(q_values)[::-1]
 
 
-class Stacking():
+class Stacking:
     """
-    Stacked generalization using regularized discriminant analysis
+    Stacked generalization using regularized discriminant analysis.
+
     """
 
-    # tuple for covariance and mean of the training data. The covariance
+    # Tuple for covariance and mean of the training data. The covariance
     # matrix is factorized by SVD into score matrix U and diagonal matrix
     # D storing the singular values
     _Cov = collections.namedtuple("Cov", ["mean", "cov", "U", "D", "prior"])
 
-    def __init__(self, kfold=3):
+    def __init__(self, kfold: int = 3):
         # k fold cross validation
-        self._kfold = kfold
+        self.kfold = kfold
         alphas = np.linspace(0.03, 0.51, 17)
         alphas = np.insert(alphas, [0, 0], [0.01, 0.02])
         self.alphas = alphas[:, np.newaxis]
 
-    def _construct_cov(self, X, y, do_svd=True):
+    def _construct_cov(
+            self,
+            x: np.ndarray,
+            y: np.ndarray,
+            do_svd: bool = True
+    ) -> Dict[int, _Cov]:
         """
-        Construct the covariances with decompositions by SVD
-        for training.
+        Constructs the covariances with decompositions by SVD for training.
+
         """
-        _n = y.size
-        covs = {}
-        for _y in [0, 1]:
-            _X_c = X[y == _y]
-            _x = np.mean(_X_c, axis=0)
-            _cov = np.cov(_X_c.T)
+        y_size = y.size
+        covariances = {}
+        for y_label in [0, 1]:
+            sel_x = x[y == y_label]
+            sel_x_mean = np.mean(sel_x, axis=0)
+            covariance = np.cov(sel_x.T)
             # do SVD
             u, d = None, None
             if do_svd:
-                u, d, _ = np.linalg.svd(_cov)
-            covs[_y] = self._Cov(_x, _cov, u, d, np.log(_X_c.shape[0] / _n))
-        return covs
+                u, d, _ = np.linalg.svd(covariance)
+            covariances[y_label] = self._Cov(
+                sel_x_mean, covariance, u, d, np.log(sel_x.shape[0] / y_size)
+            )
 
-    def _construct_cov_cv(self, X, y, fold=3):
+        return covariances
+
+    def _construct_cov_cv(
+            self,
+            x: np.ndarray,
+            y: np.ndarray,
+            fold: int = 3
+    ) -> List[Tuple[Dict[int, _Cov], np.ndarray]]:
         """
-        Construct covariance matrix for RDA with
-        double cross validation
+        Construct covariance matrix for RDA with double cross validation.
+
         """
-        # 3 fold cross validation for outer data partition
+        # Cross validation for outer data partition
         skf = StratifiedKFold(n_splits=fold, random_state=0)
-        # calcualte covariances and mean values for cross
-        # validation
+        # Calculate covariances and mean values for cross validation
         partitions = []
-        for tr_idx, val_idx in skf.split(X, y):
-            _cov = self._construct_cov(X[tr_idx], y[tr_idx], do_svd=False)
-            partitions.append((_cov, val_idx))
+        for tr_idx, val_idx in skf.split(x, y):
+            covariances = self._construct_cov(
+                x[tr_idx], y[tr_idx], do_svd=False
+            )
+            partitions.append((covariances, val_idx))
         return partitions
 
-    def _calculate_weight(self, u, d, m, alpha, prior):
+    @staticmethod
+    def _calculate_weight(u: np.ndarray, d, m: float, alpha, prior):
         """
         Calculate RDA weights using SVD
         """
@@ -115,25 +139,40 @@ class Stacking():
         w = np.dot(_C, u.T)
         return w, w0
 
-    def _calculate_weights(self, covs, alpha):
+    def _calculate_weights(
+            self,
+            covariances: Dict[int, _Cov],
+            alpha
+    ) -> Dict[int, Weight]:
         """
-        Calculate the weights for the classification
+        Calculate the weights for the classification.
+
         """
         weights = collections.defaultdict()
         for _label in [0, 1]:
-            w, w0 = self._calculate_weight(covs[_label].U, covs[_label].D,
-                                           covs[_label].mean, alpha,
-                                           covs[_label].prior)
+            w, w0 = self._calculate_weight(
+                covariances[_label].U,
+                covariances[_label].D,
+                covariances[_label].mean,
+                alpha,
+                covariances[_label].prior
+            )
             weights[_label] = Weight(w, w0)
         return weights
 
-    def _rda_cv(self, X, y, cv_covs, sel_index):
+    def _rda_cv(
+            self,
+            x: np.ndarray,
+            y: np.ndarray,
+            cv_covariances: List[Tuple[Dict[int, _Cov], np.ndarray]],
+            sel_index
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Regularized linear discriminant analysis
         """
-        X = X[:, sel_index]
+        x = x[:, sel_index]
 
-        # select the best alpha, with probability (1 / (1 + exp(x)))
+        # Select the best alpha, with probability (1 / (1 + exp(x)))
         # higher than 0.99, which corresponds to score difference x
         # lower than -ln(99).
         t = -np.log(99)
@@ -142,60 +181,67 @@ class Stacking():
         npos, nnegs = np.zeros(self.alphas.size), np.zeros(self.alphas.size)
 
         # cross validation to calculate scores
-        for _cov, _val_idx in cv_covs:
+        for covariances, val_idx in cv_covariances:
 
             # validation set
-            Xval = X[_val_idx]
-            yval = y[_val_idx]
+            x_val = x[val_idx]
+            y_val = y[val_idx]
 
             # get weights
-            _weights = {_label: None for _label in [0, 1]}
-            for _label in [0, 1]:
-                _cov_c = _cov[_label].cov[sel_index]
-                _cov_c = _cov_c[:, sel_index]
-                _x = _cov[_label].mean[sel_index]
+            weights = {label: None for label in [0, 1]}
+            for label in [0, 1]:
+                covariance = covariances[label].cov[sel_index]
+                covariance = covariance[:, sel_index]
+                mean_x = covariances[label].mean[sel_index]
 
                 # if only a single model is selected.
-                if _cov_c.ndim < 2:
-                    _cov_c = _cov_c.flatten()
-                    w0 = _cov[_label].prior - (_x ** 2 / (_cov_c * 2))
-                    w = _x / _cov_c
+                if covariance.ndim < 2:
+                    covariance = covariance.flatten()
+                    w0 = covariances[label].prior - \
+                        (mean_x ** 2 / (covariance * 2))
+                    w = mean_x / covariance
                 else:
                     # svd
-                    u, d, _ = np.linalg.svd(_cov_c)
-                    w, w0 = self._calculate_weight(u, d, _x, self.alphas,
-                                                   _cov[_label].prior)
-                _weights[_label] = Weight(w, w0)
+                    u, d, _ = np.linalg.svd(covariance)
+                    w, w0 = self._calculate_weight(
+                        u,
+                        d,
+                        mean_x,
+                        self.alphas,
+                        covariances[label].prior
+                    )
+                weights[label] = Weight(w, w0)
 
             # predictions on testing data
-            dw = _weights[0].w - _weights[1].w
-            dc = _weights[0].c - _weights[1].c
+            dw = weights[0].w - weights[1].w
+            dc = weights[0].c - weights[1].c
 
             # score differences
             if dw.ndim == 2:
-                val_scores = np.dot(Xval, dw.T) + dc
+                val_scores = np.dot(x_val, dw.T) + dc
             else:
-                val_scores = Xval * dw + dc
+                val_scores = x_val * dw + dc
 
-            npos += np.count_nonzero(val_scores[yval == 1] <= t, axis=0)
-            nnegs += np.count_nonzero(val_scores[yval == 0] > t, axis=0)
+            npos += np.count_nonzero(val_scores[y_val == 1] <= t, axis=0)
+            nnegs += np.count_nonzero(val_scores[y_val == 0] > t, axis=0)
 
         return npos, nnegs
 
-    def _model_selection(self, X, y):
+    def _model_selection(self, x: np.ndarray, y: np.ndarray):
         """
-        Do model selection using double cross validation and
-        backward elimination.
+        Performs model selection using double cross validation and backward
+        elimination.
+
         """
-        _c = X.shape[1]
-        # preallocate the covariance matrices and SVD decompositions
-        partitions = self._construct_cov_cv(X, y)
-        # number of each group
+        _c = x.shape[1]
+        # Preallocate the covariance matrices and SVD decompositions
+        partitions = self._construct_cov_cv(x, y)
+        # Number of each group
         _, _ns = np.unique(y, return_counts=True)
 
-        # best combinations in each iteration
+        # Best combinations in each iteration
         best_num, best_del, best_alpha = [], [], []
-        # iterate through all combinations with backward elimination
+        # Iterate through all combinations with backward elimination
         _sel = np.ones(_c, dtype=bool)
         for i in range(_c):
             _ix_c, _ns_c, _sel_alphas = np.where(_sel)[0], [], []
@@ -206,7 +252,7 @@ class Stacking():
                 _sel[j] = False
 
                 # select best parameters using cross validation
-                npos, nnegs = self._rda_cv(X, y, partitions, _sel)
+                npos, nnegs = self._rda_cv(x, y, partitions, _sel)
                 # AUC
                 auc = (npos / _ns[1] + nnegs / _ns[0]) / 2
                 # optimal classification
@@ -232,17 +278,22 @@ class Stacking():
 
         return np.where(_sel)[0], best_num[j], best_alpha[j]
 
-    def _rda_prediction(self, X, weights):
+    @staticmethod
+    def _rda_prediction(
+            x: np.ndarray,
+            weights: Dict[int, Weight]
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Prediction using RDA
         """
-        scores = {_label: np.dot(X, weights[_label].w) + weights[_label].c
+        scores = {_label: np.dot(x, weights[_label].w) + weights[_label].c
                   for _label in [0, 1]}
         return scores[1], 1 / (1 + np.exp(scores[0] - scores[1]))
 
-    def fit(self, X, y):
+    def fit(self, x: np.ndarray, y: np.ndarray):
         """
-        Adatpively fit the data using regularized discriminant analysis.
+        Adaptively fits the data using regularized discriminant analysis.
+
         """
         y = self._check_y(y)
 
@@ -252,44 +303,44 @@ class Stacking():
         scores, probs, qvals = np.zeros(_n), np.zeros(_n), np.zeros(_n)
 
         # 3 fold cross validation for outer data partition
-        skf = StratifiedKFold(n_splits=self._kfold, random_state=0)
+        skf = StratifiedKFold(n_splits=self.kfold, random_state=0)
         model_cv = []
-        for tr_idx, te_idx in skf.split(X, y):
+        for train_idx, test_idx in skf.split(x, y):
             # outer cross validation
-            Xtr = X[tr_idx]
-            ytr = y[tr_idx]
+            x_train = x[train_idx]
+            y_train = y[train_idx]
 
             # model selection using cross validation to get the best
             # combinations of models and optimized regularization
             # parameter.
-            b_comb, b_num, b_alpha = self._model_selection(Xtr, ytr)
+            b_comb, b_num, b_alpha = self._model_selection(x_train, y_train)
 
             # do prediction
-            _covs = self._construct_cov(Xtr[:, b_comb], ytr)
-            _weights = self._calculate_weights(_covs, b_alpha)
+            covariances = self._construct_cov(x_train[:, b_comb], y_train)
+            weights = self._calculate_weights(covariances, b_alpha)
 
             # test X
-            Xte = X[te_idx][:, b_comb]
-            _scores, _probs = self._rda_prediction(Xte, _weights)
+            x_test = x[test_idx][:, b_comb]
+            _scores, _probs = self._rda_prediction(x_test, weights)
 
             # normalize the scores and get q values
-            _scores, _qvalues, _scaler = self._normalizer(_scores, y[te_idx])
+            _scores, q_values, _scaler = self._normalizer(_scores, y[test_idx])
 
             # save the weights and scalings for future prediction
-            model_cv.append(Model(_weights, _scaler, b_comb))
+            model_cv.append(Model(weights, _scaler, b_comb))
 
-            scores[te_idx] = _scores
-            probs[te_idx] = _probs
-            qvals[te_idx] = _qvalues
+            scores[test_idx] = _scores
+            probs[test_idx] = _probs
+            qvals[test_idx] = q_values
 
         # model selection and fitting
-        b_comb, b_num, b_alpha = self._model_selection(X, y)
-        _covs = self._construct_cov(X[:, b_comb], y)
-        _weights = self._calculate_weights(_covs, b_alpha)
+        b_comb, b_num, b_alpha = self._model_selection(x, y)
+        covariances = self._construct_cov(x[:, b_comb], y)
+        weights = self._calculate_weights(covariances, b_alpha)
         # predict training scores to get scalers which ensure
         # the q values of validated identifications
         # lower than 0.01
-        _scores, _ = self._rda_prediction(X[:, b_comb], _weights)
+        _scores, _ = self._rda_prediction(x[:, b_comb], weights)
         _, _, _scaler = self._normalizer(_scores, y)
 
         # final models
@@ -297,45 +348,56 @@ class Stacking():
         self.model_cv = tuple(model_cv)
         self._best_num_ = b_num
         self._best_alpha = b_alpha
-        self.stacked_weights = _weights
+        self.stacked_weights = weights
         self.scaler = _scaler
 
         return scores, probs, qvals
 
-    def predict(self, X):
+    def predict(
+            self,
+            x: Union[np.ndarray, Iterable[Iterable[float]]]
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Output predicted scores.
         """
-        if not isinstance(X, np.ndarray):
-            X = np.array(X)
-        return self._rda_prediction(X[:, self.combination_index],
-                                    self.stacked_weights)
+        if not isinstance(x, np.ndarray):
+            x = np.array(x)
+        return self._rda_prediction(
+            x[:, self.combination_index],
+            self.stacked_weights
+        )
 
-    def predict_cv(self, X):
+    def predict_cv(
+            self,
+            x: Union[np.ndarray, Iterable[Iterable[float]]]
+    ) -> np.ndarray:
         """
-        Output predicted scores obtained from cross validation
-        for validation of new identifications, by consensus voting.
+        Output predicted scores obtained from cross validation for validation
+        of new identifications, by consensus voting.
+
         If all scores of an identification fall in q values less than
         0.01 defined in cross validation fit, then the identification
         is confirmed.
         This can guarantee that the error rates (i.e., q value) in
         validated identifications are still less than 0.01.
+
         """
-        if not isinstance(X, np.ndarray):
-            X = np.array(X)
+        if not isinstance(x, np.ndarray):
+            x = np.array(x)
 
         # do prediction
-        scores = np.empty((X.shape[0], len(self.model_cv)))
-        for i, _model in enumerate(self.model_cv):
-            X_c = X[:, _model.combination]
-            _score, _ = self._rda_prediction(X_c, _model.weights)
-            _score -= _model.scaler.center
-            _score /= _model.scaler.normalizer
-            scores[:, i] = _score
+        scores = np.empty((x.shape[0], len(self.model_cv)))
+        for i, model in enumerate(self.model_cv):
+            x_sel = x[:, model.combination]
+            score, _ = self._rda_prediction(x_sel, model.weights)
+            score -= model.scaler.center
+            score /= model.scaler.normalizer
+            scores[:, i] = score
 
         return scores
 
-    def _normalizer(self, scores, y):
+    @staticmethod
+    def _normalizer(scores, y):
         """
         Normalize the scores so that median of decoy scores
         becomes -1.0 and score at q value 0.01 is 0.0
@@ -343,14 +405,14 @@ class Stacking():
         sort_index = np.argsort(scores)[::-1]
 
         # get q values
-        qvalues = _get_qvalues(scores[sort_index], y[sort_index])
+        q_values = calculate_q_values(scores[sort_index], y[sort_index])
 
         # if all identifications having q values lower than 0.01
         # return min scores
-        if qvalues[-1] <= 0.01:
+        if q_values[-1] <= 0.01:
             m = scores.min()
         else:
-            j = bisect.bisect_left(qvalues, 0.01)
+            j = bisect.bisect_left(q_values, 0.01)
             # if j equals 0, meaning no identification has q value
             # lower than 0.01, return 0
             j = sort_index[j]
@@ -366,7 +428,7 @@ class Stacking():
         # order of scores
         _index = np.argsort(sort_index)
 
-        return norm_scores, qvalues[_index], Scaler(m, dm)
+        return norm_scores, q_values[_index], Scaler(m, dm)
 
     def _check_y(self, y):
         """

@@ -277,7 +277,10 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
             reader = csv.DictReader(fh, delimiter=sep)
             for row in reader:
                 try:
-                    mods = parse_mods(row['Modifications'], ptmdb)
+                    mods = parse_mods(
+                        row.get('Modifications', row['Mods']),
+                        ptmdb
+                    )
                 except UnknownModificationException:
                     continue
 

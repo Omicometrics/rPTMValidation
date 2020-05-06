@@ -6,19 +6,16 @@ from __future__ import annotations
 
 import collections
 import random
-from typing import Optional, Protocol
+from typing import Optional, Protocol, Tuple
 import warnings
 
 import numpy as np
 from sklearn import base
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from sklearn.preprocessing import MaxAbsScaler
+from sklearn.svm import LinearSVC
 
 from .stacking import Stacking
-
-
-def _warn(*args, **kwargs):
-    pass
 
 
 class SKEstimator(Protocol):
@@ -29,49 +26,117 @@ class SKEstimator(Protocol):
         ...
 
 
+# TODO: remove warning handling from the machinelearning subpackage
+#       If it needs to be included, then it should be done in validate.py, i.e.
+#       the executable module used to run rPTMDetermine.
+def _warn(*args, **kwargs):
+    pass
+
+
 warnings.warn = _warn
 np.seterr(divide="ignore", invalid="ignore", over="ignore")
 
 Model = collections.namedtuple("Model", ["estimator", "scaler"])
 
 
-def subsample(n: int, m: int, nrep: int):
+SUBSAMPLE_FRACTIONS = [
+    (1, 0),
+    (0.8, 1000),
+    (0.6, 3000),
+    (0.3, 5000),
+    (0.2, 10000),
+    (0.1, 3e4),
+    (0.05, 3e5),
+    (0.01, 1e6)
+]
+
+
+def construct_model(x_pos: np.ndarray, x_neg: np.ndarray) -> Classifier:
     """
-    Random subsampling m samples from total n samples
-    nrep times
+    Constructs validation model.
+
+    """
+    print(
+        f'No. of positives: {x_pos.shape[0]}\n'
+        f'No. of decoys: {x_neg.shape[0]}'
+    )
+
+    x = np.concatenate((x_pos, x_neg), axis=0)
+    y = np.concatenate(
+        (np.ones(x_pos.shape[0]), np.zeros(x_neg.shape[0])),
+        axis=0
+    )
+
+    # Number of samples in each positive and negatives
+    _, ns = np.unique(y, return_counts=True)
+    # Number of samples in minor group
+    minor_group_size = ns.min()
+
+    sub_sample_fraction = min(
+        r for r, t in SUBSAMPLE_FRACTIONS if minor_group_size > t
+    )
+
+    model = Classifier(
+        GridSearchCV(
+            LinearSVC(),
+            {'C': [2 ** i for i in range(-12, 4)]},
+            cv=5
+        ),
+        kfold=10,
+        num_sub_samples=30,
+        sub_sample_fraction=sub_sample_fraction
+    )
+    model.fit(x, y)
+
+    return model
+
+
+def subsample(n: int, m: int, repeats: int) -> Tuple[np.ndarray, ...]:
+    """
+    Random sub-sampling of `m` samples from total `n` samples `repeats` times.
+
     """
     # to make the results reproducible, use fixed seeds
     # to randomly shuffle the sequence
-    seeds = list(range(nrep))
+    seeds = list(range(repeats))
     idx = np.arange(n, dtype=int)
-    randsampleidx = []
-    for i in range(nrep):
+    rand_sample_idx = []
+    for i in range(repeats):
         random.Random(seeds[i] * 10).shuffle(idx)
-        randsampleidx.append(np.sort(idx[:m]))
+        rand_sample_idx.append(np.sort(idx[:m]))
 
-    return tuple(randsampleidx)
+    return tuple(rand_sample_idx)
 
 
-def fisher_scores(X: np.ndarray, y: np.ndarray, k) -> np.ndarray:
+def select_by_fisher_scores(x: np.ndarray, y: np.ndarray, k: int) -> np.ndarray:
     """
-    Fisher score.
-    Select features with top k Fisher scores.
+    Select features with top `k` Fisher scores.
+
     Ref:
     Gu Q, et al. Generalized Fisher Score for Feature Selection.
     2012. arXiv:1202.3725.
+
+    Args:
+        x:
+        y:
+        k: Number of features to keep.
+
+    Returns:
+        Array with top `k` features.
+
     """
-    n, p = X.shape
+    n, p = x.shape
     if k >= p or k <= 0:
         return np.arange(p, dtype=int)
 
     cs, ncs = np.unique(y, return_counts=True)
     # overall mean and std
-    gmean = np.mean(X, axis=0)
+    gmean = np.mean(x, axis=0)
     # fisher score through each class
     cmean2, cvar2 = np.zeros(p), np.zeros(p)
     for ck, nk in zip(cs, ncs):
-        cmean2 += nk * (np.mean(X[y == ck], axis=0) ** 2)
-        cvar2 += nk * (np.std(X[y == ck], axis=0) ** 2)
+        cmean2 += nk * (np.mean(x[y == ck], axis=0) ** 2)
+        cvar2 += nk * (np.std(x[y == ck], axis=0) ** 2)
 
     # fisher scores
     fscore = (cmean2 - n * (gmean ** 2)) / cvar2
@@ -100,53 +165,55 @@ class CrossValidationClassifier:
         self._select_feature = False
         self.scaler = scaler
 
-        self._labels: np.ndarry = None
+        self._labels: Optional[np.ndarray] = None
+        self.dc_scores: Optional[np.ndarray] = None
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> CrossValidationClassifier:
+    def fit(self, x: np.ndarray, y: np.ndarray) -> CrossValidationClassifier:
         """
-        Classify `X` according to the input label in `y`.
+        Classify `x` according to the input label in `y`.
         """
-        r, c = X.shape
+        r, c = x.shape
         # NOTE: This ratio is arbitrary without any judgement.
         if r / c < 2:
             self._select_feature = True
 
         self._labels = np.sort(np.unique(y))
-        self._cross_validation(X, y)
+        self._cross_validation(x, y)
 
         return self
 
-    def _cross_validation(self, X: np.ndarray, y: np.ndarray):
+    def _cross_validation(self, x: np.ndarray, y: np.ndarray):
         """
         Perform cross validation
         """
-        self._dcscores = np.zeros(y.shape)
+        self.dc_scores = np.zeros(y.shape)
 
-        # cross validation
         skf = StratifiedKFold(n_splits=self.kfold)
-        for tridx, vlidx in skf.split(X, y):
+        for train_idx, test_idx in skf.split(x, y):
             # nested cross validation
-            Xc = X[tridx]
-            yc = y[tridx]
-            Xv = X[vlidx]
+            x_train = x[train_idx]
+            y_train = y[train_idx]
+            x_test = x[test_idx]
 
             # feature selection
             if self._select_feature:
-                selected = fisher_scores(Xc, yc, self.num_features)
-                Xc = Xc[:, selected]
-                Xv = Xv[:, selected]
+                selected = select_by_fisher_scores(
+                    x_train, y_train, self.num_features
+                )
+                x_train = x_train[:, selected]
+                x_test = x_test[:, selected]
 
             scaler = self.scaler()
 
             # test set
-            Xcn = scaler.fit_transform(Xc)
-            self.estimator.fit(Xcn, yc)
+            x_train = scaler.fit_transform(x_train)
+            self.estimator.fit(x_train, y_train)
 
             # predicted scores
-            Xv = scaler.transform(Xv)
+            x_test = scaler.transform(x_test)
 
-            _predict_scores = self.estimator.decision_function(Xv)
-            self._dcscores[vlidx] = _predict_scores
+            _predict_scores = self.estimator.decision_function(x_test)
+            self.dc_scores[test_idx] = _predict_scores
 
         return self
 
@@ -166,7 +233,7 @@ class EnsembleClassifier:
             # See: https://github.com/python/typing/issues/213
             scaler=MaxAbsScaler,
             num_sub_samples: int = 1,
-            sub_sample_frac: Optional[float] = None,
+            sub_sample_fraction: Optional[float] = None,
             num_features: Optional[float] = None):
         """
         under-sampling with cross validation
@@ -176,9 +243,9 @@ class EnsembleClassifier:
         self.num_sub_samples = num_sub_samples
 
         # fraction of samples sampled for validation
-        self.sub_sample_frac = sub_sample_frac
-        if sub_sample_frac is None or sub_sample_frac >= 1:
-            self.sub_sample_frac = 1
+        self.sub_sample_fraction = sub_sample_fraction
+        if sub_sample_fraction is None or sub_sample_fraction >= 1:
+            self.sub_sample_fraction = 1
 
         # number of features retained if not enough sample
         if num_features is None:
@@ -195,39 +262,40 @@ class EnsembleClassifier:
             self.scaler
         )
 
-    def predict(self, X: np.ndarray, y: np.ndarray):
+    def predict(self, x: np.ndarray, y: np.ndarray):
         """
         Predict the labels along with probabilities using cross validation.
 
         Args:
-            X: Feature matrix, size of n by p
+            x: Feature matrix, size of n by p.
             y: Sample labels, should be -1 and 1, if not,
-               corrected to -1 and 1
+               corrected to -1 and 1.
+
         """
         self._label_stats(y)
-        self._check_X(X)
+        self._check_x(x)
 
         # remove features
         if self._del_feature.any():
-            X = X[:, ~self._del_feature]
+            x = x[:, ~self._del_feature]
 
-        self._subsample_predict(X, y)
+        self._subsample_predict(x, y)
         self._stacking()
 
-    def predicta(self, X: np.ndarray, use_cv: bool = False):
+    def predicta(self, x: np.ndarray, use_cv: bool = False) -> np.ndarray:
         """
         Predict additional dataset
 
         """
-        n = X.shape[0]
+        n = x.shape[0]
         if self._del_feature.any():
-            X = X[:, ~self._del_feature]
+            x = x[:, ~self._del_feature]
 
         # scores
         scores = np.empty((n, self.num_sub_samples))
         for j, _model in enumerate(self.models):
-            X_scaled = _model.scaler.transform(X)
-            scores[:, j] = _model.estimator.decision_function(X_scaled)
+            x_scaled = _model.scaler.transform(x)
+            scores[:, j] = _model.estimator.decision_function(x_scaled)
 
         # stacking and estimate posterior probability
         if use_cv:
@@ -237,65 +305,62 @@ class EnsembleClassifier:
 
         return score
 
-    def _subsample_predict(self, X: np.ndarray, y: np.ndarray) \
+    def _subsample_predict(self, x: np.ndarray, y: np.ndarray) \
             -> EnsembleClassifier:
         """
-        perform prediction using subsampling for imbalanced problem
+        Perform prediction using sub-sampling for imbalanced problem.
+
         """
-        # preallocation
         scores = np.empty((self._num, self.num_sub_samples))
         models, indices = [], []
 
         # class sample indices
-        majix, = np.where(y == self._label_major)
-        mnjix, = np.where(y == self._label_minor)
+        major_idx, = np.where(y == self._label_major)
+        minor_idx, = np.where(y == self._label_minor)
 
-        # repeated random undersampling from major class
-        nsubsamples = int(self._num_minor * self.sub_sample_frac)
+        # repeated random under-sampling from major class
+        num_sub_samples = int(self._num_minor * self.sub_sample_fraction)
         sub_major = subsample(
-            self._num_major, nsubsamples, self.num_sub_samples
+            self._num_major, num_sub_samples, self.num_sub_samples
         )
 
         sub_minor = None
-        if self.sub_sample_frac < 1:
+        if self.sub_sample_fraction < 1:
             sub_minor = subsample(
-                self._num_minor, nsubsamples, self.num_sub_samples
+                self._num_minor, num_sub_samples, self.num_sub_samples
             )
 
-        # iterate through subsamples
-        for i, subsample in enumerate(sub_major):
+        # iterate through sub-samples
+        for i, sub in enumerate(sub_major):
             # reconstruct a new estimator
             estimator = base.clone(self.estimator)
             # under-sampled trains
-            seltrains = np.zeros(self._num, dtype=bool)
-            seltrains[majix[subsample]] = True
-            ix = mnjix if sub_minor is None else mnjix[sub_minor[i]]
-            seltrains[ix] = True
+            sel_train = np.zeros(self._num, dtype=bool)
+            sel_train[major_idx[sub]] = True
+            ix = minor_idx if sub_minor is None else minor_idx[sub_minor[i]]
+            sel_train[ix] = True
 
-            X_train = X[seltrains]
+            x_train = x[sel_train]
             # classification with k-fold cross validation
-            self._cvclassify.fit(X_train, y[seltrains])
+            self._cvclassify.fit(x_train, y[sel_train])
 
-            # fitting model using subsampled samples
-            scaler = self.scaler().fit(X_train)
-            Xcn = scaler.transform(X_train)
-            clf = estimator.fit(Xcn, y[seltrains])
+            # fitting model using sub-sampled samples
+            scaler = self.scaler().fit(x_train)
+            x_train = scaler.transform(x_train)
+            clf = estimator.fit(x_train, y[sel_train])
 
             # get predictions
-            scores[seltrains, i] = self._cvclassify._dcscores
+            scores[sel_train, i] = self._cvclassify.dc_scores
 
             # out of sample prediction
-            if not seltrains.all():
+            if not sel_train.all():
                 # scale out of samples
-                Xoos = scaler.transform(X[~seltrains])
-
-                # scores
-                pred_scores = clf.decision_function(Xoos)
-                scores[~seltrains, i] = pred_scores
+                x_out_of_sample = scaler.transform(x[~sel_train])
+                scores[~sel_train, i] = clf.decision_function(x_out_of_sample)
 
             # save training information
             models.append(Model(clf, scaler))
-            indices.append(np.where(seltrains)[0])
+            indices.append(np.where(sel_train)[0])
 
         self.models = models
         self.scores = scores
@@ -343,17 +408,19 @@ class EnsembleClassifier:
 
         return self
 
-    def _check_X(self, X):
+    def _check_x(self, x: np.ndarray):
         """
-        Remove features with majority a single value.
+        Removes features with majority a single value.
+
         During cross validation, normalization of this kind
         of features may probably result in NaN values in the
         matrix, raising ValueError.
+
         """
-        r, c = X.shape
+        r, c = x.shape
         _del_feature = np.zeros(c, dtype=bool)
         for i in range(c):
-            _, nuc = np.unique(X[:, i], return_counts=True)
+            _, nuc = np.unique(x[:, i], return_counts=True)
             if np.amax(nuc) / r >= 0.6:
                 _del_feature[i] = True
 
@@ -372,8 +439,9 @@ class Classifier:
             estimator: SKEstimator,
             kfold: int = 5,
             num_sub_samples: int = 1,
-            sub_sample_frac: float = 1.,
-            num_features: Optional[int] = None):
+            sub_sample_fraction: float = 1.,
+            num_features: Optional[int] = None
+    ):
         """
         Cross-validated classification using `estimator`.
 
@@ -381,73 +449,79 @@ class Classifier:
             estimator: Machine learning classifier.
             kfold: Number of folds in cross validation.
             num_sub_samples: Number of sub samples.
-            sub_sample_frac:
+            sub_sample_fraction:
             num_features:
 
         """
         self.estimator = estimator
 
         # fraction of samples sampled for validation
-        if sub_sample_frac is not None and sub_sample_frac < 0:
-            raise ValueError("Fraction for sampling must be positive.")
-        if sub_sample_frac is None or sub_sample_frac > 1:
-            sub_sample_frac = 1
+        if sub_sample_fraction is not None and sub_sample_fraction < 0:
+            raise ValueError(
+                'Fraction for sampling must be positive.'
+            )
+        if sub_sample_fraction is None or sub_sample_fraction > 1:
+            sub_sample_fraction = 1
 
         # model parameters
         self.kfold = kfold
         self.num_sub_samples = num_sub_samples
-        self.sub_sample_frac = sub_sample_frac
+        self.sub_sample_fraction = sub_sample_fraction
         self.num_features = num_features
 
         self.ensemble: Optional[EnsembleClassifier] = None
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> Classifier:
+    def fit(self, x: np.ndarray, y: np.ndarray) -> Classifier:
         """
         Validate the PTM identifications with features in `X` and
         labels in `y`.
 
         """
-        # ensemble model
         num_features = (
-            X.shape[1] if self.num_features is None else self.num_features
+            x.shape[1] if self.num_features is None else self.num_features
         )
         if self.num_features is None:
-            num_features = X.shape[1]
+            num_features = x.shape[1]
         ems = EnsembleClassifier(
             self.estimator,
             kfold=self.kfold,
             num_sub_samples=self.num_sub_samples,
-            sub_sample_frac=self.sub_sample_frac,
+            sub_sample_fraction=self.sub_sample_fraction,
             num_features=num_features
         )
         # reset labels to 0 and 1
         y = self._reset_labels(y)
-        ems.predict(X, y)
+        ems.predict(x, y)
 
         self.ensemble = ems
 
         return self
 
-    def predict(self, X: np.ndarray, use_cv: bool = False):
+    def predict(self, x: np.ndarray, use_cv: bool = False) -> np.ndarray:
         """
-        Prediction of additional data X
+        Prediction of additional data `x`.
+
         """
-        if not isinstance(X, np.ndarray):
-            X = np.array(X)
+        if not isinstance(x, np.ndarray):
+            x = np.array(x)
 
-        if X.ndim == 1:
-            X = X.reshape(1, -1)
+        if x.ndim == 1:
+            x = x.reshape(1, -1)
 
-        return self.ensemble.predicta(X, use_cv=use_cv)
+        return self.ensemble.predicta(x, use_cv=use_cv)
 
     def _reset_labels(self, y: np.ndarray) -> np.ndarray:
         """
-        reset the label to be 0 and 1
-        and set back once the learning finished
+        Resets the label to be 0 and 1 and stores the original labels for
+        restoring once the learning is finished.
+
+        Args:
+            y: Array of class labels.
+
         """
         classes = np.unique(y)
         if classes.size != 2:
-            raise ValueError("Two classes are required.")
+            raise ValueError('Two classes are required.')
 
         temp_y = y.copy()
         # correct the label to be 0 and 1

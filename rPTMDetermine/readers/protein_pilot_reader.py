@@ -267,7 +267,8 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
                     byscore=r.score,
                     eval=r.eval,
                     mod_prob=r.mod_prob,
-                    itraq_peaks=r.itraq_peaks)
+                    itraq_peaks=r.itraq_peaks
+            )
 
     @staticmethod
     def read_biases(filename: str) -> Dict[Tuple[str, str], float]:

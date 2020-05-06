@@ -29,7 +29,7 @@ END IONS
 '''
 
 
-class Spectrum():
+class Spectrum:
     """
     A class to represent a mass spectrum. The class composes a numpy array to
     store the spectral signals and provides methods for manipulating and
@@ -189,8 +189,11 @@ class Spectrum():
         """
         return self._peaks[:, 1]
 
-    def select(self, peaks: List[int],
-               col: Optional[Union[int, List[int]]] = None) -> np.array:
+    def select(
+            self,
+            peaks: List[int],
+            cols: Optional[Union[int, List[int]]] = None
+    ) -> np.array:
         """
         Extracts only those peak indices in the given list.
 
@@ -203,8 +206,8 @@ class Spectrum():
             Current Spectrum object filtered by the given indices.
 
         """
-        return (self._peaks[peaks, :] if col is None
-                else self._peaks[peaks, col])
+        return (self._peaks[peaks, :] if cols is None
+                else self._peaks[peaks, cols])
 
     def normalize(self):
         """

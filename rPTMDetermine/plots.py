@@ -380,43 +380,71 @@ def plot_similarity_score_dist(scores: Sequence[float], kde: bool = False,
     plt.show()
 
 
-def plot_spectra(spectra: Sequence[np.array]):
+def plot_spectra(
+        spectra: Sequence[np.array],
+        normalize: bool = False,
+        max_x: Optional[float] = None,
+        save_path: Optional[str] = None
+):
     """
     Plots any number of mass spectra, vertically aligned.
 
     Args:
         spectra (list): A list of numpy arrays (n x 2).
+        normalize: If True, all spectra are normalized before plotting.
+        max_x: The maximum value of m/z to be plotted.
+        save_path: The path to which to save the figure.
 
     """
     _, axes = plt.subplots(len(spectra), 1, sharex=True)
     axes = [axes] if len(spectra) == 1 else axes
+
     for ax, spectrum in zip(axes, spectra):
-        ax.stem(spectrum[:, 0], spectrum[:, 1], "black", basefmt=' ',
-                markerfmt=' ', label=None)
-        ax.set_ylabel("Intensity", fontproperties=FONT)
+        if normalize:
+            spectrum = spectrum.normalize()
+        if max_x is not None:
+            spectrum = spectrum[spectrum.mz <= max_x]
+
+        ax.stem(
+            spectrum[:, 0],
+            spectrum[:, 1],
+            "black",
+            basefmt=' ',
+            markerfmt=' ',
+            label=None
+        )
+        ax.set_ylabel(
+            "Relative Intensity" if normalize else "Intensity",
+            fontproperties=FONT
+        )
 
         ax.set_ylim(bottom=0)
         for spine in ["top", "right"]:
             ax.spines[spine].set_visible(False)
 
-    plt.xlabel("$\\it{m/z}$", fontproperties=FONT)
+    plt.xlabel('m/z', fontproperties=FONT, style='italic')
 
-    plt.show()
+    if save_path is not None:
+        plt.savefig(save_path, dpi=SAVE_DPI)
+    else:
+        plt.show()
 
 
-def plot_spectrum(spectrum: np.array):
+def plot_spectrum(spectrum: np.array, **kwargs):
     """
     Plots a single mass spectrum.
 
     Args:
         spectrum (numpy array)
     """
-    plot_spectra([spectrum])
+    plot_spectra([spectrum], **kwargs)
 
 
-def plot_fisher_scores(scores: Dict[str, float],
-                       threshold: Optional[float] = None,
-                       save_path: Optional[str] = None):
+def plot_fisher_scores(
+        scores: Dict[str, float],
+        threshold: Optional[float] = None,
+        save_path: Optional[str] = None
+):
     """
     Plots Fisher scores against their features.
 
@@ -511,6 +539,8 @@ def _add_ions(ax: Axes, ions: Sequence[str], anns: Dict[str, Annotation],
     """
     for ion in ions:
         ann = anns[ion]
+        if ann.peak_num >= len(mzs):
+            continue
         mz = mzs[ann.peak_num]
 
         # Line down to the annotated peak
@@ -584,10 +614,10 @@ def plot_psm(
 
         max_mz = max(spec[:, 0])
 
-        if mz_range is not None:
-            # Filtering on the mz can invalidate the annotation indices,
-            # so prevent annotation in this case
-            continue
+        # if mz_range is not None:
+        #     # Filtering on the mz can invalidate the annotation indices,
+        #     # so prevent annotation in this case
+        #     continue
        
         if annotation == "sequence":
             def add_sequence(ions: Sequence[str], height: float, b_type: bool):
@@ -636,8 +666,9 @@ def plot_psm(
 
         annotated_peaks = []
         for label, ann in anns.items():
-            annotated_peaks.append((label, spec[:, 0][ann.peak_num],
-                                    ann.mass_diff))
+            if ann.peak_num < len(spec[:, 0]):
+                annotated_peaks.append((label, spec[:, 0][ann.peak_num],
+                                        ann.mass_diff))
         annotated_peaks.sort(key=operator.itemgetter(1))
         all_anns.append(annotated_peaks)
 

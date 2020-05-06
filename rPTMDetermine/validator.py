@@ -13,13 +13,12 @@ from typing import (Callable, cast, Dict, Iterable, List, Optional,
                     Sequence, Set, Tuple)
 
 import numpy as np
-from sklearn.model_selection import GridSearchCV
-from sklearn.svm import LinearSVC
 import tqdm
 
 from pepfrag import Peptide
 
 from . import (
+    machinelearning,
     mass_spectrum,
     peptides,
     readers,
@@ -27,7 +26,6 @@ from . import (
     validator_base
 )
 from .constants import RESIDUES
-from .machinelearning import Classifier
 from .peptide_spectrum_match import PSM
 from .psm_container import PSMContainer
 from .readers import SearchEngine
@@ -39,17 +37,6 @@ ENGINE_SCORE_GETTER_MAP: Dict[SearchEngine, ScoreGetter] = {
     SearchEngine.Mascot: operator.attrgetter("ionscore"),
     SearchEngine.Comet: lambda r: r.scores["xcorr"]
 }
-
-SUBSAMPLE_FRACTIONS = [
-    (1, 0),
-    (0.8, 1000),
-    (0.6, 3000),
-    (0.3, 5000),
-    (0.2, 10000),
-    (0.1, 3e4),
-    (0.05, 3e5),
-    (0.01, 1e6)
-]
 
 
 def count_matched_ions(
@@ -186,9 +173,21 @@ class Validator(validator_base.ValidateBase):
     def decoy_psms(self, value: Iterable[PSM]):
         self.psm_containers['decoy_psms'] = PSMContainer(value)
 
-    def validate(self):
+    def validate(
+            self,
+            model_extra_psm_containers: Optional[Sequence[PSMContainer]] = None,
+            # TODO: put this into the configuration file?
+            model_features: Optional[Sequence[str]] = None
+    ):
         """
         Validates the identifications in the input data files.
+
+        Args:
+            model_extra_psm_containers: Additional PSMContainers containing
+                                        modified identifications.
+            model_features: List of features to use in model construction. If
+                            None, all of the available features will be used
+                            (subject to data size requirements).
 
         """
         # Process the input files to extract the modification identifications
@@ -205,6 +204,42 @@ class Validator(validator_base.ValidateBase):
         self._calculate_features()
 
         self._filter_psms(lambda psm: psm.features.ErrPepMass <= 2)
+
+        # TODO: how to handle different model configurations, mod vs. decoy etc.
+        x_pos = self._subsample_unmods(
+            extra_containers=model_extra_psm_containers,
+            features=model_features
+        )
+
+        x_decoy = self._subsample_decoys(x_pos, features=model_features)
+
+        model = machinelearning.construct_model(x_pos, x_decoy)
+
+        threshold = machinelearning.calculate_score_threshold(
+            model, x_pos, x_decoy
+        )
+
+        # Since only part of the positive and decoy identifications are used
+        # for model construction, predict all identifications to check whether
+        # the established score criteria remain valid for all identifications,
+        # i.e. to ensure that FDR does not exceed 1%.
+        full_fdr = machinelearning.evaluate_fdr(
+            model,
+            self.unmod_psms.to_feature_array(features=model_features),
+            x_decoy,
+            threshold
+        )
+        # TODO: log this + raise some error if greater than 1?
+        print(full_fdr * 100)
+
+        validated_counts = self._classify_all(
+            model, threshold, features=model_features
+        )
+        for label, container in self.psm_containers.items():
+            print(
+                f'{validated_counts[label]} out of {len(container)} {label} '
+                'identifications are validated'
+            )
 
     def localize(self):
         """
@@ -363,10 +398,12 @@ class Validator(validator_base.ValidateBase):
         data_id: str
     ) -> PSMContainer[PSM]:
         """
-        Converts `SearchResult`s to `PSM`s, after applying filters on peptide
-        type (keep only target identifications), identification rank (keep only
-        top-ranking identification), amino acid residues (check all valid) and
-        modifications (keep only those with the target modification).
+        Converts `SearchResult`s to `PSM`s after filtering.
+
+        Filters are applied on peptide type (keep only target identifications),
+        identification rank (keep only top-ranking identification), amino acid
+        residues (check all valid) and modifications (keep only those with the
+        target modification).
 
         Args:
             search_res: The database search results.
@@ -520,50 +557,22 @@ class Validator(validator_base.ValidateBase):
         sorted_ix = np.argsort(dists)[::-1]
         return x_decoy[sorted_ix[:int(n_decoy * retain_fraction)]]
 
-    def _construct_model(
-        self,
-        extra_containers: Optional[List[PSMContainer]] = None,
-        features: Optional[List[str]] = None
-    ) -> Classifier:
-        """
-        Constructs validation model.
+    def _classify_all(
+            self,
+            model: machinelearning.Classifier,
+            score_threshold: float,
+            features: Optional[Sequence[str]] = None
+    ) -> Dict[str, int]:
+        val_counts: Dict[str, int] = {}
+        for label, psm_container in self.psm_containers.items():
+            x = psm_container.to_feature_array(features=features)
+            scores = model.predict(x, use_cv=True)
+            # TODO: add scores to PSMs
+            val_counts[label] = machinelearning.count_above_threshold(
+                scores, score_threshold
+            )
 
-        """
-        x_pos = self._subsample_unmods(
-            extra_containers=extra_containers,
-            features=features
-        )
-
-        x_decoy = self._subsample_decoys(x_pos, features=features)
-
-        x = np.concatenate((x_pos, x_decoy), axis=0)
-        y = np.concatenate(
-            (np.ones(x_pos.shape[0]), np.zeros(x_decoy.shape[0])),
-            axis=0
-        )
-
-        # Number of samples in each positive and negatives
-        _, ns = np.unique(y, return_counts=True)
-        # Number of samples in minor group
-        minor_group_size = ns.min()
-
-        sub_sample_frac = min(
-            r for r, t in SUBSAMPLE_FRACTIONS if minor_group_size > t
-        )
-
-        model = Classifier(
-            GridSearchCV(
-                LinearSVC(),
-                {'C': [2 ** i for i in range(-12, 4)]},
-                cv=5
-            ),
-            kfold=10,
-            num_sub_samples=30,
-            sub_sample_frac=sub_sample_frac
-        )
-        model.fit(x, y)
-
-        return model
+        return val_counts
 
     def _has_target_residue(self, seq: str) -> bool:
         """

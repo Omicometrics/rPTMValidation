@@ -154,7 +154,7 @@ def match_spectra(spectrum1: Tuple[Spectrum, dict],
         if len(peak_idxs) == 1:
             idx2 = peak_idxs[0]
         else:
-            peak_ints = spec2.select(peak_idxs, col=1)
+            peak_ints = spec2.select(peak_idxs, cols=1)
             idx2 = peak_idxs[np.argmax(peak_ints)]
 
         matched_idxs.append((idx1, idx2))
@@ -232,7 +232,7 @@ def _merged_matches(indices1: Sequence[int], indices2: Sequence[int],
                 # peak intensity
                 m_indices2 = [indices2[ii] for ii, idx in enumerate(indices1)
                               if idx == idx1]
-                peak_ints = list(spec2.select(m_indices2, col=1))
+                peak_ints = list(spec2.select(m_indices2, cols=1))
                 merged.append(
                     (idx1, m_indices2[peak_ints.index(max(peak_ints))]))
     else:

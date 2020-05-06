@@ -121,7 +121,9 @@ class MGFReader:
 
         """
         with open(spec_file) as fh:
-            for key, group in itertools.groupby(fh, lambda ln: ln == "END IONS\n"):
+            for key, group in itertools.groupby(
+                    fh, lambda ln: ln == "END IONS\n"
+            ):
                 if next(group) == "END IONS\n":
                     continue
 
