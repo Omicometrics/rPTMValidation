@@ -116,7 +116,7 @@ class Stacking:
 
         """
         # Cross validation for outer data partition
-        skf = StratifiedKFold(n_splits=fold, random_state=0)
+        skf = StratifiedKFold(n_splits=fold)
         # Calculate covariances and mean values for cross validation
         partitions = []
         for tr_idx, val_idx in skf.split(x, y):
