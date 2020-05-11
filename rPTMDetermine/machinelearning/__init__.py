@@ -4,14 +4,20 @@ from .classification import (
 )
 from .scoring import (
     calculate_score_threshold,
-    count_above_threshold,
-    evaluate_fdr
+    count_consensus_votes,
+    count_majority_votes,
+    evaluate_fdr,
+    passes_consensus,
+    passes_majority
 )
 
 __all__ = [
     'Classifier',
     'calculate_score_threshold',
     'construct_model',
-    'count_above_threshold',
+    'count_consensus_votes',
+    'count_majority_votes',
     'evaluate_fdr',
+    'passes_consensus',
+    'passes_majority',
 ]

@@ -98,7 +98,8 @@ def evaluate_fdr(
         model: classification.Classifier,
         x_pos: np.ndarray,
         x_neg: np.ndarray,
-        score_threshold: float
+        score_threshold: float,
+        use_consensus: bool = True
 ) -> float:
     """
     Evaluates the FDR of the given data sets after classification using `model`.
@@ -107,20 +108,80 @@ def evaluate_fdr(
     pos_scores = model.predict(x_pos, use_cv=True)
     neg_scores = model.predict(x_neg, use_cv=True)
 
-    num_val_pos = count_above_threshold(pos_scores, score_threshold)
-    num_val_neg = count_above_threshold(neg_scores, score_threshold)
+    count_fn = count_consensus_votes if use_consensus else count_majority_votes
+    num_val_pos = count_fn(pos_scores, score_threshold)
+    num_val_neg = count_fn(neg_scores, score_threshold)
 
     return num_val_neg / num_val_pos
 
 
-def count_above_threshold(
+def count_consensus_votes(
         x: np.ndarray,
         threshold: float
 ) -> int:
     """
-    Counts the number of rows in `x` which pass the score `threshold`.
+    Counts the number of rows in `x` which achieve a strict consensus or pass
+    the score `threshold`.
+
+    Args:
+        x: An array with rows of scores.
+        threshold: The score threshold.
 
     """
     return np.count_nonzero(
-        ((x >= 0).sum(axis=1) == 3) | (x.sum(axis=1) >= threshold)
+        (x >= 0).sum(axis=1).all() | (x.sum(axis=1) >= threshold)
     )
+
+
+def count_majority_votes(
+        x: np.ndarray,
+        threshold: float
+) -> int:
+    """
+    Counts the number of rows in `x` which achieve a majority vote or pass
+    the score `threshold`.
+
+    Args:
+        x: An array with rows of scores.
+        threshold: The score threshold.
+
+    """
+    # Perform ceiling division to find the number of votes required for a
+    # majority
+    required_votes = - (- x.shape[1] // 2)
+    return np.count_nonzero(
+        (x >= 0).sum(axis=1) >= required_votes | (x.sum(axis=1) >= threshold)
+    )
+
+
+def passes_consensus(
+        x: np.ndarray,
+        threshold: float
+) -> bool:
+    """
+    Determines whether the scores in `x` achieve consensus or pass the score
+    `threshold`.
+
+    Args:
+        x: An array with a single row of scores.
+        threshold: The score threshold.
+
+    """
+    return (x >= 0).all() or x.sum() >= threshold
+
+
+def passes_majority(
+        x: np.ndarray,
+        threshold: float
+) -> bool:
+    """
+    Determines whether the scores in `x` achieve a majority verdict or pass the
+    score `threshold`.
+
+    Args:
+        x: An array with a single row of scores.
+        threshold: The score threshold.
+
+    """
+    required_votes = - (- x.shape[1] // 2)
+    return (x >= 0).sum() >= required_votes or x.sum() >= threshold
