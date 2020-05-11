@@ -119,6 +119,8 @@ class Validator(validator_base.ValidateBase):
 
         self.search_results: Dict[str, List[readers.SearchResult]] = {}
 
+        # The PSMContainers are stored in this manner to make it easy to add
+        # additional containers while working interactively.
         self.psm_containers = {
             'psms': PSMContainer(),
             'neg_psms': PSMContainer(),
@@ -128,6 +130,8 @@ class Validator(validator_base.ValidateBase):
 
         # Used for multiprocessing throughout the class methods
         self.pool = mp.Pool()
+
+        self.model: Optional[machinelearning.Classifier] = None
 
     @property
     def psms(self) -> PSMContainer[PSM]:
@@ -161,6 +165,10 @@ class Validator(validator_base.ValidateBase):
     def decoy_psms(self, value: Iterable[PSM]):
         self.psm_containers['decoy_psms'] = PSMContainer(value)
 
+    ########################
+    # Validation
+    ########################
+
     def validate(
             self,
             model_extra_psm_containers: Optional[Sequence[PSMContainer]] = None,
@@ -191,20 +199,21 @@ class Validator(validator_base.ValidateBase):
 
         self._calculate_features()
 
-        #self._filter_psms(lambda psm: psm.features.ErrPepMass <= 2)
-
         # TODO: how to handle different model configurations, mod vs. decoy etc.
         x_pos = self._subsample_unmods(
             extra_containers=model_extra_psm_containers,
             features=model_features
         )
 
-        x_decoy = self._subsample_decoys(x_pos, features=model_features)
+        x_decoy = machinelearning.subsample_negative(
+            x_pos,
+            self.decoy_psms.to_feature_array(model_features)
+        )
 
-        model = machinelearning.construct_model(x_pos, x_decoy)
+        self.model = machinelearning.construct_model(x_pos, x_decoy)
 
         threshold = machinelearning.calculate_score_threshold(
-            model, x_pos, x_decoy
+            self.model, x_pos, x_decoy
         )
 
         # Since only part of the positive and decoy identifications are used
@@ -213,7 +222,7 @@ class Validator(validator_base.ValidateBase):
         # i.e. to ensure that FDR does not exceed 1%.
         def eval_fdr(use_consensus=True):
             return machinelearning.evaluate_fdr(
-                model,
+                self.model,
                 self.unmod_psms.to_feature_array(features=model_features),
                 x_decoy,
                 threshold,
@@ -227,7 +236,7 @@ class Validator(validator_base.ValidateBase):
         print(f'Majority FDR: {majority_fdr * 100}')
 
         validated_counts = self._classify_all(
-            model, threshold, features=model_features
+            threshold, features=model_features
         )
         for label, container in self.psm_containers.items():
             print(
@@ -236,7 +245,6 @@ class Validator(validator_base.ValidateBase):
             )
 
         self._correct_and_localize(
-            model,
             features=model_features,
             extra_containers=model_extra_psm_containers
         )
@@ -248,7 +256,6 @@ class Validator(validator_base.ValidateBase):
 
     def _correct_and_localize(
             self,
-            model: machinelearning.Classifier,
             features: Optional[List[str]] = None,
             extra_containers: Optional[List[PSMContainer]] = None
     ):
@@ -263,16 +270,15 @@ class Validator(validator_base.ValidateBase):
         for psm in itertools.chain(
                 self.psms, self.neg_psms, *extra_containers
         ):
-            cand_psms = PSMContainer([psm])
-            cand_psms.extend(
-                localization.generate_deamidation_candidates(psm, self.unimod)
+            cand_psms = localization.generate_deamidation_candidates(
+                psm, self.ptmdb
             )
             cand_psms.extend(
                 localization.generate_alternative_nterm_candidates(
                     psm,
                     self.modification,
                     'Carbamyl',
-                    self.unimod.get_mass('Carbamyl')
+                    self.ptmdb.get_mass('Carbamyl')
                 )
             )
             for cand_psm in cand_psms:
@@ -281,9 +287,9 @@ class Validator(validator_base.ValidateBase):
             # Perform correction by selecting the isoform with the highest
             # score
             feature_array = cand_psms.to_feature_array(features=features)
-            isoform_scores = model.predict(feature_array)
+            isoform_scores = self.model.predict(feature_array)
             max_isoform_score_idx = np.argmax(isoform_scores)
-            validation_scores = model.predict(
+            validation_scores = self.model.predict(
                 feature_array[max_isoform_score_idx],
                 use_cv=True
             )
@@ -298,7 +304,7 @@ class Validator(validator_base.ValidateBase):
                     self.modification,
                     self.mod_mass,
                     self.config.target_residue,
-                    model,
+                    self.model,
                     features=features
                 )
 
@@ -550,6 +556,22 @@ class Validator(validator_base.ValidateBase):
 
         return psms
 
+    ########################
+    # Retrieval
+    ########################
+
+    def retrieve(self):
+        """
+        """
+        if self.model is None:
+            raise RuntimeError('validate must be called prior to retrieve')
+
+        # TODO: generate peptide candidates, match to spectra a la version 1
+
+    ########################
+    # Utility functions
+    ########################
+
     def _process_mass_spectra(self):
         """
         Processes the input mass spectra to match to their peptides.
@@ -617,62 +639,8 @@ class Validator(validator_base.ValidateBase):
             sorted_ix[:int(sorted_ix.size * retain_fraction)]
         ]
 
-    def _subsample_decoys(
-            self,
-            x_pos: np.ndarray,
-            retain_fraction: float = 0.2,
-            features: Optional[List[str]] = None) -> np.ndarray:
-        """
-        Sub-samples decoy identifications to remove those matches of lowest
-        quality and bring the number of identifications closer to the positive
-        set.
-
-        """
-        x_decoy = self.decoy_psms.to_feature_array(features)
-        x = np.concatenate((x_pos, x_decoy), axis=0)
-        min_x = x.min(axis=0)
-        max_x = x.max(axis=0)
-        range_x = max_x - min_x
-
-        # min-max standardization
-        x_decoy_std = (x_decoy - min_x) / range_x
-        x_pos_std = (x_pos - min_x) / range_x
-
-        n_decoy = x_decoy.shape[0]
-
-        # pre-allocate for distances between decoys and positive features
-        dists = np.empty(n_decoy)
-
-        # normalizer
-        norm_decoy = np.sqrt((x_decoy_std * x_decoy_std).sum(axis=1))
-        norm_pos = np.sqrt((x_pos_std * x_pos_std).sum(axis=1))
-
-        # calculate distances using dot product to avoid memory problem due to
-        # very large size of distance matrix constructed, separate them into
-        # 300 blocks
-        block_size = int(n_decoy / 300) + 1
-        for i in range(300):
-            _ix = np.arange(
-                block_size * i,
-                min(block_size * (i + 1), n_decoy),
-                dtype=int
-            )
-            # calculate distance using dot product
-            dist_curr = \
-                np.dot(x_decoy_std[_ix], x_pos_std.T) / \
-                (norm_decoy[_ix][:, np.newaxis] * norm_pos)
-
-            dist_curr.sort(axis=1)
-            # for each decoy, get the closest 3 distances to positives,
-            # and calculate their mean.
-            dists[_ix] = dist_curr[:, -3:].mean(axis=1)
-
-        sorted_ix = np.argsort(dists)[::-1]
-        return x_decoy[sorted_ix[:int(n_decoy * retain_fraction)]]
-
     def _classify_all(
             self,
-            model: machinelearning.Classifier,
             score_threshold: float,
             features: Optional[Sequence[str]] = None
     ) -> Dict[str, int]:
@@ -680,7 +648,6 @@ class Validator(validator_base.ValidateBase):
         Classifies all PSMs held by the Validator using `model`.
 
         Args:
-            model: The trained machine learning classifier.
             score_threshold: The score cut-off for FDR (q value) control.
             features: An optional subset of features to use for each PSM. This
                       must match the features used to train the model.
@@ -689,7 +656,7 @@ class Validator(validator_base.ValidateBase):
         val_counts: Dict[str, int] = {}
         for label, psm_container in self.psm_containers.items():
             x = psm_container.to_feature_array(features=features)
-            scores = model.predict(x, use_cv=True)
+            scores = self.model.predict(x, use_cv=True)
             val_counts[label] = machinelearning.count_consensus_votes(
                 scores, score_threshold
             )

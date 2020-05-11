@@ -86,14 +86,14 @@ class ValidateBase:
 
         # The UniMod PTM DB
         logging.info("Reading UniMod PTM DB.")
-        self.unimod = readers.PTMDB()
+        self.ptmdb = readers.PTMDB()
 
         # The database search reader
         self.reader: readers.Reader = readers.get_reader(
-            self.config.search_engine, self.unimod)
+            self.config.search_engine, self.ptmdb)
 
         self.decoy_reader: readers.Reader = readers.get_reader(
-            self.config.decoy_search_engine, self.unimod
+            self.config.decoy_search_engine, self.ptmdb
         )
 
         # All database search results
@@ -101,7 +101,7 @@ class ValidateBase:
             collections.defaultdict(lambda: collections.defaultdict(list))
 
         # Get the mass change associated with the target modification
-        self.mod_mass = self.unimod.get_mass(self.config.modification)
+        self.mod_mass = self.ptmdb.get_mass(self.config.modification)
 
         self.file_prefix = f"{output_dir}/{path_str}_"
 
