@@ -7,6 +7,7 @@ This module provides functions for reading ProteinPilot results
 import collections
 import csv
 import dataclasses
+import logging
 import re
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -120,7 +121,8 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
 
         try:
             parsed_mods = modifications.parse_mods(mods, self.ptmdb)
-        except modifications.UnknownModificationException:
+        except modifications.UnknownModificationException as ex:
+            logging.warning(ex)
             return None
 
         return ProteinPilotSearchResult(

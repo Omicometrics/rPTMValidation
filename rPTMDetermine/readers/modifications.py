@@ -4,7 +4,6 @@ A script providing functions for parsing and processing the modifications
 applied to peptides.
 
 """
-import logging
 from typing import List, Union
 
 from pepfrag import MassType, ModSite
@@ -68,9 +67,9 @@ def _parse_mod_string(mod_str: str, ptmdb: PTMDB, mass_type: MassType)\
         elif site_str.startswith('n') and "term" in site_str:
             site = "nterm"
         else:
-            msg = f"Failed to detect site for modification {mod_str}"
-            logging.warning(msg)
-            raise UnknownModificationException(msg)
+            raise UnknownModificationException(
+                f"Failed to detect site for modification {mod_str}"
+            )
 
     if '(' in name and site != "nterm":
         # For cases such as Delta:H(4)C(2)(H), extract up to the final bracket
@@ -84,9 +83,9 @@ def _parse_mod_string(mod_str: str, ptmdb: PTMDB, mass_type: MassType)\
     try:
         mass = ptmdb.get_mass(name, mass_type)
     except ModificationNotFoundException:
-        msg = f"Failed to detect mass for modification {name}"
-        logging.warning(msg)
-        raise UnknownModificationException(msg)
+        raise UnknownModificationException(
+            f"Failed to detect mass for modification {name}"
+        )
 
     return ModSite(mass, site, name)
 
@@ -113,8 +112,11 @@ def _parse_bar_mod_string(mod_str: str) -> ModSite:
     return ModSite(float(mod_list[0]), site, mod_list[2])
 
 
-def parse_mods(mods_str: str, ptmdb: PTMDB,
-               mass_type: MassType = MassType.mono) -> List[ModSite]:
+def parse_mods(
+        mods_str: str,
+        ptmdb: PTMDB,
+        mass_type: MassType = MassType.mono
+) -> List[ModSite]:
     """
     Parses the modification string and maps to the UniMod DB to extract
     the modification mass, site in the sequence and name.
