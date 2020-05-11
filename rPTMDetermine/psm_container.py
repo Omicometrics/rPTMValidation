@@ -278,7 +278,7 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
             for row in reader:
                 try:
                     mods = parse_mods(
-                        row.get('Modifications', row['Mods']),
+                        row.get('Modifications', row.get('Mods')),
                         ptmdb
                     )
                 except UnknownModificationException:
