@@ -9,9 +9,9 @@ PACKAGE_DIR = "rPTMDetermine"
 c_rptmdetermine = Extension(
     "crPTMDetermine",
     sources=[
-        os.path.join(PACKAGE_DIR, "converters.cpp"),
-        os.path.join(PACKAGE_DIR, "annotate.cpp"),
-        os.path.join(PACKAGE_DIR, "crPTMDetermine.cpp"),
+        os.path.join(PACKAGE_DIR, "crPTMDetermine", "converters.cpp"),
+        os.path.join(PACKAGE_DIR, "crPTMDetermine", "annotate.cpp"),
+        os.path.join(PACKAGE_DIR, "crPTMDetermine", "crPTMDetermine.cpp"),
     ],
     extra_compile_args=['-std=c++11']
 )
@@ -22,6 +22,7 @@ setup(
     packages=[
         "rPTMDetermine",
         "rPTMDetermine.config",
+        "rPTMDetermine.crPTMDetermine",
         "rPTMDetermine.machinelearning",
         "rPTMDetermine.plotting",
         "rPTMDetermine.readers",
