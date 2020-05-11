@@ -49,10 +49,10 @@ def slice_list(values: List[float], nslices: int = 800) -> Slices:
 def longest_sequence(seq: Sequence[int]) -> Tuple[int, Optional[List[int]]]:
     """
     Finds the length (and subsequence) of the longest consecutive sequence
-    of integers in a sorted list. This algorithm is O(n) in compexity.
+    of integers in a sorted list. This algorithm is O(n) in complexity.
 
     Args:
-        seq (list): A sorted list of integers.
+        seq: A sorted list of integers.
 
     Returns:
         A tuple of maximum consecutive sequence length and the subsequence.
@@ -80,7 +80,7 @@ def sort_lists(key: int, *args):
         *args: The lists to sort by a common list.
 
     Returns:
-        tuple of ordered lists.
+        tuple of ordered tuples.
 
     """
     return zip(*sorted(zip(*args), key=operator.itemgetter(key)))
