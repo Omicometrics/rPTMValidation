@@ -4,7 +4,7 @@ from rPTMDetermine.proteolysis import Proteolyzer
 
 
 class TestProteolyzer(unittest.TestCase):
-    def test_trypsin_short_protein_no_missed_cleavages(self):
+    def test_trypsin_no_missed_cleavages(self):
         """
         Tests that the correct peptide sequences are generated using no
         missed cleavages.
@@ -23,7 +23,7 @@ class TestProteolyzer(unittest.TestCase):
             sorted(peptides)
         )
 
-    def test_trypsin_short_protein_one_missed_cleavages(self):
+    def test_trypsin_one_missed_cleavages(self):
         """
         Tests that the correct peptide sequences are generated using one
         missed cleavages.
@@ -64,6 +64,22 @@ class TestProteolyzer(unittest.TestCase):
                 'AAAKGHYTMPLYKAGWYMTR'
             )),
             sorted(peptides)
+        )
+
+    def test_trypsin_above_length_range(self):
+        """
+        Tests that peptides above the configured maximum length are not
+        returned.
+
+        """
+        proteolyzer = Proteolyzer('Trypsin')
+
+        protein = 'AAAAAAAAAAKAAAAAAK'
+        peptides = proteolyzer.cleave(protein, len_range=(7, 10))
+
+        self.assertEqual(
+            ('AAAAAAK',),
+            peptides
         )
 
     def test_tryptically_cleaved(self):
