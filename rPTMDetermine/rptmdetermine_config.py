@@ -48,7 +48,7 @@ class RPTMDetermineConfig(Config):
         lambda v: {key: DataSetConfig(val) for key, val in v.items()}
     )
     _modification_field = ConfigField('modification')
-    _target_residues_field = ConfigField('target_residues')
+    _target_residue_field = ConfigField('target_residue')
     config_fields: List[ConfigField] = [
         _search_engine_field,
         ConfigField(
@@ -60,7 +60,7 @@ class RPTMDetermineConfig(Config):
         _data_sets_field,
         ConfigField('enzyme', True, 'Trypsin'),
         _modification_field,
-        _target_residues_field,
+        _target_residue_field,
         ConfigField('output_dir', True, None),
         ConfigField('exclude_features', True, []),
         ConfigField('fdr', True, 0.01),
@@ -75,7 +75,7 @@ class RPTMDetermineConfig(Config):
     data_sets: Dict[str, DataSetConfig]
     enzyme: str
     modification: str
-    target_residues: List[str]
+    target_residue: str
     output_dir: Optional[str]
     exclude_features: List[str]
     fdr: float

@@ -5,7 +5,7 @@ Module contains a class to define a Peptide Spectrum Match (PSM).
 """
 import bisect
 import collections
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 
@@ -37,8 +37,19 @@ class PSM:
 
     """
 
-    __slots__ = ("data_id", "spec_id", "peptide", "_spectrum",
-                 "features", "ml_score", "site_prob", "target",)
+    __slots__ = (
+        "data_id",
+        "spec_id",
+        "peptide",
+        "_spectrum",
+        "features",
+        "ml_scores",
+        "site_score",
+        "site_prob",
+        "target",
+        "site_diff_score",
+        "alternative_localizations",
+    )
 
     def __init__(self, data_id: Optional[str], spec_id: Optional[str],
                  peptide: Peptide, spectrum=None, target=True):
@@ -56,6 +67,7 @@ class PSM:
         self.data_id = data_id
         self.spec_id = spec_id
         self.peptide = peptide
+        self.target = target
 
         # This can be set later before processing occurs
         self.spectrum = spectrum
@@ -64,13 +76,15 @@ class PSM:
         self.features: Features = Features()
 
         # The results of validation
-        self.ml_score: Optional[float] = None
+        self.ml_scores: Optional[List[float]] = None
 
-        # The localization site probability
+        # Localization attributes
+        self.site_score: Optional[float] = None
         self.site_prob: Optional[float] = None
-
-        # TODO: move this to the composed peptide (pepfrag)
-        self.target = target
+        self.site_diff_score: Optional[float] = None
+        self.alternative_localizations: Optional[
+            Sequence[Tuple[Sequence[int], float]]
+        ] = None
 
     @property
     def seq(self) -> str:
@@ -128,7 +142,8 @@ class PSM:
         """
         if val is not None and not isinstance(val, mass_spectrum.Spectrum):
             raise TypeError(
-                "Setting PSM.spectrum requires a mass_spectrum.Spectrum")
+                "Setting PSM.spectrum requires a mass_spectrum.Spectrum"
+            )
         self._spectrum = val
 
     @property
@@ -154,6 +169,8 @@ class PSM:
             "spectrum": self.spectrum,
             "features": self.features,
             "site_prob": self.site_prob,
+            "site_diff_score": self.site_diff_score,
+            "alternative_localizations": self.alternative_localizations,
             "target": self.target
         }
         return f"<{self.__class__.__name__} {out}>"

@@ -60,7 +60,7 @@ class ValidateBase:
         self.modification = self.config.modification
 
         path_str = (f"{self.modification.replace('->', '2')}_"
-                    f"{''.join(self.config.target_residues)}")
+                    f"{self.config.target_residue}")
 
         output_dir = self.config.output_dir
         if output_dir is None:
@@ -109,11 +109,11 @@ class ValidateBase:
             -> List[ModSite]:
         """
         Filters the modification list to remove those instances of the
-        target_mod at one of the target_residues.
+        target modification at the target residue.
 
         Args:
-            mods (list of ModSites)
-            seq (str): The peptide sequence.
+            mods: The peptide's ModSites.
+            seq: The peptide sequence.
 
         Returns:
             Filtered list of ModSites.
@@ -128,7 +128,7 @@ class ValidateBase:
                 continue
 
             if (mod_site.mod != self.config.target_mod and
-                    seq[site - 1] not in self.config.target_residues):
+                    seq[site - 1] != self.config.target_residue):
                 new_mods.append(mod_site)
 
         return new_mods

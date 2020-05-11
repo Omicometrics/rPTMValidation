@@ -4,11 +4,10 @@ A set of functions to be used for processing peptide sequences.
 
 """
 import collections
-import functools
 import operator
 from typing import Sequence, Union
 
-from pepfrag import AA_MASSES, FIXED_MASSES, IonType, ModSite, Peptide
+from pepfrag import ModSite
 
 from .readers import preparse_mod_string
 
@@ -16,27 +15,10 @@ from .readers import preparse_mod_string
 Ion = collections.namedtuple("Ion", ["mass", "label", "pos"])
 
 
-def calculate_mz(seq: str, mods: Sequence[ModSite],
-                 charge: int) -> float:
-    """
-    Calculates the mass/charge ratio of a peptide given its sequence,
-    modifications and charge state.
-
-    Args:
-        seq (str): The peptide sequence.
-        mods (list of ModSites): The modifications applied to the peptide.
-        charge (int): The charge state of the peptide.
-
-    Returns:
-        float: The mass/charge ratio of the peptide.
-
-    """
-    return (sum(AA_MASSES[r].mono for r in seq) +
-            sum(m for m, _, _ in mods) + FIXED_MASSES["H2O"]) / charge
-
-
-def merge_seq_mods(seq: str,
-                   mods: Union[str, Sequence[ModSite]]) -> str:
+def merge_seq_mods(
+        seq: str,
+        mods: Union[str, Sequence[ModSite]]
+) -> str:
     """
     Inserts modifications into the corresponding locations of the peptide
     sequence.
@@ -73,16 +55,3 @@ def merge_seq_mods(seq: str,
         seq_list.insert(int(site), f"[{name}]")
 
     return ''.join(seq_list)
-
-
-@functools.lru_cache(maxsize=10000)
-def get_by_ion_mzs(peptide: Peptide):
-    """
-    Get the b/y-type fragment ions for the peptide.
-
-    """
-    return [ion.mass for ion in peptide.fragment(
-        ion_types={
-            IonType.b: {"neutral_losses": []},
-            IonType.y: {"neutral_losses": []},
-        })]

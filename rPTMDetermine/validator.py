@@ -5,12 +5,23 @@ spectra.
 
 """
 from bisect import bisect_left
+import csv
+import itertools
 import logging
 import multiprocessing as mp
 import operator
 import os
-from typing import (Callable, cast, Dict, Iterable, List, Optional,
-                    Sequence, Set, Tuple)
+from typing import (
+    Callable,
+    cast,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple
+)
 
 import numpy as np
 import tqdm
@@ -18,9 +29,8 @@ import tqdm
 from pepfrag import Peptide
 
 from . import (
+    localization,
     machinelearning,
-    mass_spectrum,
-    peptides,
     readers,
     utilities,
     validator_base
@@ -37,30 +47,6 @@ ENGINE_SCORE_GETTER_MAP: Dict[SearchEngine, ScoreGetter] = {
     SearchEngine.Mascot: operator.attrgetter("ionscore"),
     SearchEngine.Comet: lambda r: r.scores["xcorr"]
 }
-
-
-def count_matched_ions(
-        peptide: Peptide,
-        spectrum: mass_spectrum.Spectrum) -> int:
-    """
-    Fragments the peptide and counts the number of ions matched against
-    the given spectrum.
-
-    Args:
-        peptide (pepfrag.Peptide): The peptide to fragment.
-        spectrum (Spectrum): The spectrum against which to match ions.
-
-    Returns:
-        integer: The number of matching ions between the peptide fragments
-                 and the mass spectrum.
-
-    """
-    ion_mzs = peptides.get_by_ion_mzs(peptide)
-    bisect_idxs = [bisect_left(ion_mzs, mz) for mz in spectrum.mz]
-    return len(
-        [idx for idx, mz in zip(bisect_idxs, list(spectrum.mz))
-         if (idx > 0 and mz - ion_mzs[idx - 1] <= 0.2) or
-         (idx < len(ion_mzs) and ion_mzs[idx] - mz <= 0.2)])
 
 
 def get_fdr_threshold(
@@ -83,8 +69,10 @@ def get_fdr_threshold(
         else:
             topranking[res.spectrum] = res
 
-    scores = {readers.PeptideType.normal: [],
-              readers.PeptideType.decoy: []}
+    scores = {
+        readers.PeptideType.normal: [],
+        readers.PeptideType.decoy: []
+    }
     for res in topranking.values():
         scores[res.pep_type].append(score_getter(res))
     tscores = sorted(scores[readers.PeptideType.normal])
@@ -203,7 +191,7 @@ class Validator(validator_base.ValidateBase):
 
         self._calculate_features()
 
-        self._filter_psms(lambda psm: psm.features.ErrPepMass <= 2)
+        #self._filter_psms(lambda psm: psm.features.ErrPepMass <= 2)
 
         # TODO: how to handle different model configurations, mod vs. decoy etc.
         x_pos = self._subsample_unmods(
@@ -223,14 +211,20 @@ class Validator(validator_base.ValidateBase):
         # for model construction, predict all identifications to check whether
         # the established score criteria remain valid for all identifications,
         # i.e. to ensure that FDR does not exceed 1%.
-        full_fdr = machinelearning.evaluate_fdr(
-            model,
-            self.unmod_psms.to_feature_array(features=model_features),
-            x_decoy,
-            threshold
-        )
-        # TODO: log this + raise some error if greater than 1?
-        print(full_fdr * 100)
+        def eval_fdr(use_consensus=True):
+            return machinelearning.evaluate_fdr(
+                model,
+                self.unmod_psms.to_feature_array(features=model_features),
+                x_decoy,
+                threshold,
+                use_consensus=use_consensus
+            )
+
+        consensus_fdr = eval_fdr()
+        majority_fdr = eval_fdr(use_consensus=False)
+        # TODO: log these
+        print(f'Consensus FDR: {consensus_fdr * 100}')
+        print(f'Majority FDR: {majority_fdr * 100}')
 
         validated_counts = self._classify_all(
             model, threshold, features=model_features
@@ -241,12 +235,131 @@ class Validator(validator_base.ValidateBase):
                 'identifications are validated'
             )
 
-    def localize(self):
+        self._correct_and_localize(
+            model,
+            features=model_features,
+            extra_containers=model_extra_psm_containers
+        )
+
+        self._output_results(
+            threshold,
+            extra_containers=model_extra_psm_containers
+        )
+
+    def _correct_and_localize(
+            self,
+            model: machinelearning.Classifier,
+            features: Optional[List[str]] = None,
+            extra_containers: Optional[List[PSMContainer]] = None
+    ):
         """
         For peptide identifications with multiple possible modification sites,
-        localizes the modification site by computing site probabilities.
+        localizes the modification site inplace by computing site probabilities.
 
         """
+        if extra_containers is None:
+            extra_containers = []
+
+        for psm in itertools.chain(
+                self.psms, self.neg_psms, *extra_containers
+        ):
+            cand_psms = PSMContainer([psm])
+            cand_psms.extend(
+                localization.generate_deamidation_candidates(psm, self.unimod)
+            )
+            cand_psms.extend(
+                localization.generate_alternative_nterm_candidates(
+                    psm,
+                    self.modification,
+                    'Carbamyl',
+                    self.unimod.get_mass('Carbamyl')
+                )
+            )
+            for cand_psm in cand_psms:
+                cand_psm.extract_features()
+
+            # Perform correction by selecting the isoform with the highest
+            # score
+            feature_array = cand_psms.to_feature_array(features=features)
+            isoform_scores = model.predict(feature_array)
+            max_isoform_score_idx = np.argmax(isoform_scores)
+            validation_scores = model.predict(
+                feature_array[max_isoform_score_idx],
+                use_cv=True
+            )
+
+            # Replace the modifications with the corrected ones
+            psm.mods = cand_psms[max_isoform_score_idx].mods
+            psm.ml_scores = validation_scores
+
+            if any(ms.mod == self.modification for ms in psm.mods):
+                localization.localize(
+                    psm,
+                    self.modification,
+                    self.mod_mass,
+                    self.config.target_residue,
+                    model,
+                    features=features
+                )
+
+    def _output_results(
+            self,
+            threshold: float,
+            extra_containers: Optional[List[PSMContainer]] = None
+    ):
+        """
+        Outputs the validation results to CSV format.
+
+        Args:
+             threshold: The classification score threshold.
+             extra_containers: Additional containers of PSMs to be written to
+                               file.
+
+        """
+        if extra_containers is None:
+            extra_containers = []
+
+        output_file = os.path.join(
+            self.config.output_dir,
+            f'{self.modification}_{self.config.target_residue}.csv'
+        )
+
+        if not os.path.isdir(self.config.output_dir):
+            os.makedirs(self.config.output_dir)
+
+        with open(output_file, 'w', newline='') as fh:
+            writer = csv.writer(fh)
+            writer.writerow([
+                'DataID',
+                'SpectrumID',
+                'Sequence',
+                'Charge',
+                'Modifications',
+                'PassesConsensus',
+                'PassesMajority',
+                'Localized',
+                'Scores',
+                'SiteScore',
+                'SiteProbability',
+                'SiteDiffScore'
+            ])
+            for psm in itertools.chain(
+                    self.psms, self.neg_psms, *extra_containers
+            ):
+                writer.writerow([
+                    psm.data_id,
+                    psm.spec_id,
+                    psm.seq,
+                    psm.charge,
+                    ';'.join((f'{m.mod}@{m.site}' for m in psm.mods)),
+                    machinelearning.passes_consensus(psm.ml_scores, threshold),
+                    machinelearning.passes_majority(psm.ml_scores, threshold),
+                    localization.is_localized(psm),
+                    ';'.join(map(str, psm.ml_scores[0].tolist())),
+                    psm.site_score,
+                    psm.site_prob,
+                    psm.site_diff_score
+                ])
 
     def _read_results(self):
         """
@@ -294,8 +407,8 @@ class Validator(validator_base.ValidateBase):
                 for mod in ident.mods:
                     if (mod.mod not in allowed_mods or
                             (isinstance(mod.site, int) and
-                             ident.seq[mod.site - 1] in
-                             self.config.target_residues)):
+                             ident.seq[mod.site - 1] ==
+                             self.config.target_residue)):
                         break
                 else:
                     if self._valid_peptide_length(ident.seq):
@@ -425,8 +538,8 @@ class Validator(validator_base.ValidateBase):
                 ident.dataset if ident.dataset is not None else data_id
 
             if any(ms.mod == self.modification and isinstance(ms.site, int)
-                   and ident.seq[ms.site - 1] == res for ms in ident.mods
-                   for res in self.config.target_residues):
+                   and ident.seq[ms.site - 1] == self.config.target_residue
+                   for ms in ident.mods):
                 psms.append(
                     PSM(
                         dataset,
@@ -563,30 +676,42 @@ class Validator(validator_base.ValidateBase):
             score_threshold: float,
             features: Optional[Sequence[str]] = None
     ) -> Dict[str, int]:
+        """
+        Classifies all PSMs held by the Validator using `model`.
+
+        Args:
+            model: The trained machine learning classifier.
+            score_threshold: The score cut-off for FDR (q value) control.
+            features: An optional subset of features to use for each PSM. This
+                      must match the features used to train the model.
+
+        """
         val_counts: Dict[str, int] = {}
         for label, psm_container in self.psm_containers.items():
             x = psm_container.to_feature_array(features=features)
             scores = model.predict(x, use_cv=True)
-            # TODO: add scores to PSMs
-            val_counts[label] = machinelearning.count_above_threshold(
+            val_counts[label] = machinelearning.count_consensus_votes(
                 scores, score_threshold
             )
+            # Add scores to PSMs
+            for psm, _scores in zip(psm_container, scores):
+                psm.ml_scores = _scores
 
         return val_counts
 
     def _has_target_residue(self, seq: str) -> bool:
         """
-        Determines whether the given peptide `seq` contains one of the
-        configured `target_residues`.
+        Determines whether the given peptide `seq` contains the
+        configured `target_residue`.
 
         Args:
             seq: The peptide sequence.
 
         Returns:
-            Boolean indicating whether a configured residue was found in `seq`.
+            Boolean indicating whether the configured residue was found in `seq`.
 
         """
-        return any(res in seq for res in self.config.target_residues)
+        return self.config.target_residue in seq
 
     def _valid_peptide_length(self, seq: str) -> bool:
         """Evaluates whether the peptide `seq` is within the required length
