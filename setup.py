@@ -23,6 +23,7 @@ setup(
         "rPTMDetermine",
         "rPTMDetermine.config",
         "rPTMDetermine.machinelearning",
+        "rPTMDetermine.plotting",
         "rPTMDetermine.readers",
     ],
     ext_modules=cythonize(
@@ -35,7 +36,7 @@ setup(
             PACKAGE_DIR
         ],
         compiler_directives={
-            "language_level" : "3",
+            "language_level": "3",
         }
     ),
     include_dirs=[np.get_include()],
