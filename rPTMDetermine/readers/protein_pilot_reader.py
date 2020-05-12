@@ -9,7 +9,7 @@ import csv
 import dataclasses
 import logging
 import re
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import lxml.etree as etree
 
@@ -282,6 +282,8 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
             filename (str): The path to the ProteinPilot XML file.
 
         """
+        # The tag argument is not used here as it would prevent memory
+        # clearing during processing
         context = etree.iterparse(filename, events=["end"], recover=True,
                                   encoding="iso-8859-1")
         biases: Dict[Tuple[str, str], float] = {}
