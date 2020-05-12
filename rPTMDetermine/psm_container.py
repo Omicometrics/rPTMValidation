@@ -17,6 +17,10 @@ import numpy as np
 
 from pepfrag import ModSite, Peptide
 
+from . import (
+    localization,
+    machinelearning
+)
 from .peptide_spectrum_match import PSM
 from .readers import parse_mods, PTMDB, UnknownModificationException
 
@@ -187,26 +191,28 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
 
     def get_validated(
         self,
-        lda_threshold: float,
-        sim_threshold: float,
-        site_prob: float) -> PSMContainer[PSMType]:
+        score_threshold: float,
+        use_consensus: bool = True
+    ) -> PSMContainer[PSMType]:
         """
         Extracts the validated identifications from the full set of PSMs.
 
         Args:
-            lda_threshold (float): The LDA score threshold.
-            sim_threshold (float): The similarity score threshold.
-            site_prob (float): The minimum site probability for localization.
+            score_threshold: The classification score threshold.
+            use_consensus: If True, strict score consensus is required. If
+                           False, majority voting will be used instead.
 
         Returns:
             A PSMContainer containing only validated PSMs.
 
         """
-        return PSMContainer(
-            [psm for psm in self.data if
-             round(psm.lda_score, 2) >= lda_threshold and
-             round(psm.max_similarity, 2) >= sim_threshold and
-             (psm.site_prob is None or psm.site_prob >= site_prob)])
+        pass_function = (machinelearning.passes_consensus if use_consensus
+                         else machinelearning.passes_majority)
+        return PSMContainer([
+            psm for psm in self.data if
+            pass_function(psm.ml_scores, score_threshold) and
+            localization.is_localized(psm)
+        ])
 
     def to_df(self) -> pd.DataFrame:
         """
