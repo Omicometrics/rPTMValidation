@@ -1,16 +1,17 @@
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt
 
-from .. import Spectrum
+from rPTMDetermine import Spectrum
 
 from .constants import *
+
 
 def plot_spectra(
         spectra: Sequence[Spectrum],
         normalize: bool = False,
-        max_x: Optional[float] = None,
+        mz_range: Optional[Tuple[float, float]] = None,
         save_path: Optional[str] = None
 ):
     """
@@ -19,7 +20,7 @@ def plot_spectra(
     Args:
         spectra (list): A list of numpy arrays (n x 2).
         normalize: If True, all spectra are normalized before plotting.
-        max_x: The maximum value of m/z to be plotted.
+        mz_range: The range of m/z values to be plotted.
         save_path: The path to which to save the figure.
 
     """
@@ -29,8 +30,12 @@ def plot_spectra(
     for ax, spectrum in zip(axes, spectra):
         if normalize:
             spectrum = spectrum.normalize()
-        if max_x is not None:
-            spectrum = spectrum[spectrum.mz <= max_x]
+
+        if mz_range is not None:
+            spectrum = spectrum[
+                (spectrum[:, 0] >= mz_range[0]) &
+                (spectrum[:, 0] <= mz_range[1])
+            ]
 
         ax.stem(
             spectrum[:, 0],
