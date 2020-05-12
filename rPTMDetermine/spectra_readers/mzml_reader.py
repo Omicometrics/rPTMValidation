@@ -54,7 +54,7 @@ class MZMLReader:
             mzml_file (str): The path to the mzML file.
 
         """
-        return self.extract_msn(mzml_file, 1, **kwargs)
+        yield from self.extract_msn(mzml_file, 1, **kwargs)
 
     def extract_ms2(self, mzml_file: str, **kwargs) -> SpectrumGenerator:
         """
