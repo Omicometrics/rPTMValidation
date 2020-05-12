@@ -26,6 +26,7 @@ setup(
         "rPTMDetermine.machinelearning",
         "rPTMDetermine.plotting",
         "rPTMDetermine.readers",
+        "rPTMDetermine.spectra_readers"
     ],
     ext_modules=cythonize(
         [
