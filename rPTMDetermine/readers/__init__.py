@@ -5,14 +5,25 @@ Expose the public readers API.
 
 from .base_reader import Reader
 from .mascot_reader import MascotReader, MascotSearchResult
-from .modifications import (parse_mods, preparse_mod_string,
-                            UnknownModificationException)
+from .modifications import (
+    parse_mods,
+    preparse_mod_string,
+    UnknownModificationException
+)
 from .msgfplus_reader import MSGFPlusReader, MSGFPlusSearchResult
 from .mzidentml_reader import MZIdentMLReader, MZIdentMLSearchResult
-from .percolator_reader import PercolatorReader, PercolatorSearchResult, PercolatorTextReader
+from .percolator_reader import (
+    PercolatorReader,
+    PercolatorSearchResult,
+    PercolatorTextReader
+)
 from .percolator_reader import PercolatorReader, PercolatorSearchResult
-from .protein_pilot_reader import (ProteinPilotReader, ProteinPilotXMLReader,
-                                   ProteinPilotSearchResult)
+from .protein_pilot_reader import (
+    ProteinPilotReader,
+    ProteinPilotXMLReader,
+    ProteinPilotSearchResult,
+    ProteinPilotXMLSearchResult
+)
 from .ptmdb import PTMDB
 from .readers import get_reader, read_fasta_sequences, SearchEngine
 from .search_result import PeptideType, SearchResult
@@ -36,6 +47,7 @@ __all__ = [
     "ProteinPilotReader",
     "ProteinPilotSearchResult",
     "ProteinPilotXMLReader",
+    "ProteinPilotXMLSearchResult",
     "PTMDB",
     "get_reader",
     "read_fasta_sequences",
