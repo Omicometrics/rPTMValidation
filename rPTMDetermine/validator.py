@@ -95,9 +95,14 @@ def get_fdr_threshold(
     raise RuntimeError(f"Failed to find score threshold at {fdr} FDR")
 
 
-def get_parallel_mods(psms: PSMContainer[PSM]) -> Set[str]:
+def get_parallel_mods(
+        psms: PSMContainer[PSM],
+        target_mod: str
+) -> Set[str]:
     """Finds all unique modifications present in `psms`."""
-    return {mod.mod for psm in psms for mod in psm.mods if mod.mod != 'Nitro'}
+    return {
+        mod.mod for psm in psms for mod in psm.mods if mod.mod != target_mod
+    }
 
 
 class Validator(validator_base.ValidateBase):
@@ -190,7 +195,7 @@ class Validator(validator_base.ValidateBase):
         logging.info("Reading database search identifications.")
         self._read_results()
         self._get_identifications()
-        allowed_mods = get_parallel_mods(self.psms)
+        allowed_mods = get_parallel_mods(self.psms, self.modification)
         self._get_unmod_identifications(allowed_mods)
 
         self._get_decoy_identifications(allowed_mods)
