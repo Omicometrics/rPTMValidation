@@ -51,11 +51,13 @@ class ProteinPilotSearchResult(_ProteinPilotSearchResult):
         "proteins",
         "itraq_ratios",
         "background",
+        "used_in_quantitation",
     )
 
     proteins: Optional[str]
     itraq_ratios: Optional[Dict[str, float]]
     background: float
+    used_in_quantitation: bool
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
@@ -188,7 +190,8 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
                 {k: float(row[k]) for k in itraq_cols if row[k]}
                 if itraq_cols else None
             ),
-            background=float(row["Background"])
+            background=float(row["Background"]),
+            used_in_quantitation=bool(int(row["Used"]))
         )
 
 
