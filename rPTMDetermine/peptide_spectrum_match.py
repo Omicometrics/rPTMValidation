@@ -273,6 +273,20 @@ class PSM:
 
         return ion_anns, denoised_spec
 
+    def is_localized(self) -> bool:
+        """
+        Determines whether the PSM has been successfully localized.
+
+        Returns:
+            Boolean indicating localization status.
+
+        """
+        return self.site_diff_score >= 0.1
+
+    #######################
+    # Feature Calculation #
+    #######################
+
     def extract_features(self, tol: float = 0.2) -> Features:
         """
         Extracts possible machine learning features from the peptide spectrum

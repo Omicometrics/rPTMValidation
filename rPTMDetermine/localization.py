@@ -226,17 +226,3 @@ def localize(
         ]
         alternatives.append((tuple(sites), scores[ii]))
     psm.alternative_localizations = alternatives
-
-
-def is_localized(psm: PSM) -> bool:
-    """
-    Determines whether `psm` has been successfully localized.
-
-    Args:
-        psm: The peptide spectrum match under consideration.
-
-    Returns:
-        Boolean indicating localization status.
-
-    """
-    return psm.site_diff_score >= 0.1

@@ -18,7 +18,6 @@ import numpy as np
 from pepfrag import ModSite, Peptide
 
 from . import (
-    localization,
     machinelearning
 )
 from .peptide_spectrum_match import PSM
@@ -211,7 +210,7 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
         return PSMContainer([
             psm for psm in self.data if
             pass_function(psm.ml_scores, score_threshold) and
-            localization.is_localized(psm)
+            psm.is_localized()
         ])
 
     def to_df(self) -> pd.DataFrame:
