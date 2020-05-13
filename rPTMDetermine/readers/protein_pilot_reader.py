@@ -15,8 +15,11 @@ import lxml.etree as etree
 
 from pepfrag import ModSite
 
+from . import (
+    modifications,
+    utilities
+)
 from .base_reader import Reader
-from . import modifications
 from .search_result import PeptideType, SearchResult
 from .ptmdb import PTMDB, ModificationNotFoundException
 
@@ -332,23 +335,25 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
             filename (str): The path to the ProteinPilot XML file.
 
         """
-        # The tag argument is not used here as it would prevent memory
-        # clearing during processing
-        context = etree.iterparse(filename, events=["end"], recover=True,
-                                  encoding="iso-8859-1")
         biases: Dict[Tuple[str, str], float] = {}
-        for event, element in context:
-            if element.tag == "BIAS":
-                nominator = element.get("nominator")
-                denominator = element.get("denominator")
-                biases[(nominator, denominator)] =\
-                    float(element.get("coefficient"))
-            element.clear()
-            # Also eliminate now-empty references from the root node to elem
-            for ancestor in element.xpath('ancestor-or-self::*'):
-                while ancestor.getprevious() is not None:
-                    del ancestor.getparent()[0]
+        found_bias = False
+        # Since the biases are found towards the end of the XML file and parsing
+        # the file to find them can be expensive, we reverse iterate over the
+        # lines of the file instead, stopping when there are no further BIAS
+        # elements
+        for line in utilities.reverse_readline(filename):
+            if '<BIAS' in line:
+                found_bias = True
+                attrs = utilities.xml_line_to_dict(line)
+                biases[(attrs['nominator'], attrs['denominator'])] =\
+                    float(attrs['coefficient'])
+            elif found_bias:
+                # We have finished processing the BIAS elements
+                break
+
         return biases
+
+
 
     @staticmethod
     def _get_itraq_peaks(element) -> Dict[int, Tuple[float, float]]:
