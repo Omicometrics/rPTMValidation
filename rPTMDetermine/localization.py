@@ -24,12 +24,12 @@ def generate_localization_candidates(
         mod: str,
         mod_mass: float,
         target_residues: Container[str]
-) -> PSMContainer:
+) -> PSMContainer[PSM]:
     """
     Generates alternative localization candidates for `mod` in `psm`.
 
     """
-    candidates = PSMContainer()
+    candidates: PSMContainer[PSM] = PSMContainer()
 
     mod_count = sum(ms.mod == mod for ms in psm.mods)
     if mod_count == 0:
@@ -67,8 +67,8 @@ def generate_alternative_nterm_candidates(
         validation_mod: str,
         alternative_mod: str,
         mod_mass: float
-) -> PSMContainer:
-    candidates = PSMContainer()
+) -> PSMContainer[PSM]:
+    candidates: PSMContainer[PSM] = PSMContainer()
 
     fixed_mods = [ms for ms in psm.mods if ms.mod != validation_mod]
 
@@ -86,7 +86,10 @@ def generate_alternative_nterm_candidates(
     return candidates
 
 
-def generate_deamidation_candidates(psm: PSM, ptmdb: PTMDB) -> PSMContainer:
+def generate_deamidation_candidates(
+        psm: PSM,
+        ptmdb: PTMDB
+) -> PSMContainer[PSM]:
     """
     Generates alternative deamidation candidates for the given `psm`.
 
@@ -120,7 +123,7 @@ def generate_localization_isoforms(
         target_residue: The amino acid residue targeted by `mod`.
 
     """
-    isoforms = PSMContainer()
+    isoforms: PSMContainer[PSM] = PSMContainer()
 
     mod_sites = [
         ms.site for ms in psm.mods

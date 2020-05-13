@@ -3,7 +3,7 @@
 """
 
 import dataclasses
-from typing import Iterator, List, Optional, Tuple
+from typing import Iterator, List, Optional, Sequence, Tuple
 
 
 @dataclasses.dataclass(init=False)
@@ -138,7 +138,7 @@ class Features:
         return not any(getattr(self, feature) is None
                        for feature in Features.__slots__)
 
-    def to_list(self, features: Optional[List[str]]) -> List[float]:
+    def to_list(self, features: Optional[Sequence[str]]) -> List[float]:
         """
         Converts the set features to a list, optionally limiting the `features`
         to be output.
@@ -160,4 +160,3 @@ class Features:
                 values.append(val)
 
         return values
-

@@ -216,7 +216,7 @@ class PSM:
 
     def annotate_spectrum(
         self, tol: float = 0.2,
-        ion_types: Optional[Dict[IonType, Dict[str, Any]]] = None)\
+        ion_types: Optional[Dict[int, List[str]]] = None)\
             -> Dict[str, mass_spectrum.Annotation]:
         """
         Annotates the mass spectrum using the theoretical ions of the peptide.

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import collections
 import random
-from typing import Optional, Protocol, Tuple
+from typing import List, Optional, Protocol, Tuple
 import warnings
 
 import numpy as np
@@ -234,7 +234,7 @@ class EnsembleClassifier:
             scaler=MaxAbsScaler,
             num_sub_samples: int = 1,
             sub_sample_fraction: Optional[float] = None,
-            num_features: Optional[float] = None):
+            num_features: Optional[int] = None):
         """
         under-sampling with cross validation
         """
@@ -243,9 +243,10 @@ class EnsembleClassifier:
         self.num_sub_samples = num_sub_samples
 
         # fraction of samples sampled for validation
-        self.sub_sample_fraction = sub_sample_fraction
-        if sub_sample_fraction is None or sub_sample_fraction >= 1:
-            self.sub_sample_fraction = 1
+        self.sub_sample_fraction = (
+            1. if sub_sample_fraction is None or sub_sample_fraction >= 1.
+            else sub_sample_fraction
+        )
 
         # number of features retained if not enough sample
         if num_features is None:
@@ -261,6 +262,8 @@ class EnsembleClassifier:
             num_features,
             self.scaler
         )
+
+        self.models: List[Model] = []
 
     def predict(self, x: np.ndarray, y: np.ndarray):
         """
@@ -325,7 +328,7 @@ class EnsembleClassifier:
         )
 
         sub_minor = None
-        if self.sub_sample_fraction < 1:
+        if self.sub_sample_fraction < 1.:
             sub_minor = subsample(
                 self._num_minor, num_sub_samples, self.num_sub_samples
             )
@@ -502,6 +505,11 @@ class Classifier:
         Prediction of additional data `x`.
 
         """
+        if self.ensemble is None:
+            raise RuntimeError(
+                'fit must be called on Classifier before predict'
+            )
+
         if not isinstance(x, np.ndarray):
             x = np.array(x)
 

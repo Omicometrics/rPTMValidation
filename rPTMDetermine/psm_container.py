@@ -10,7 +10,7 @@ import csv
 import operator
 import os
 import sys
-from typing import (Callable, Dict, Generic, Iterable, List, Optional,
+from typing import (Any, Callable, Dict, Generic, Iterable, List, Optional,
                     overload, Sequence, Set, Tuple, TypeVar, TYPE_CHECKING)
 
 import numpy as np
@@ -166,7 +166,7 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
 
     def get_unique_peptides(
             self, predicate: Optional[Callable[[PSM], bool]] = None)\
-            -> Set[Tuple[str, Tuple[ModSite]]]:
+            -> Set[Tuple[str, Tuple[ModSite, ...]]]:
         """
         Finds the unique peptides, by sequence and modifications.
 
@@ -180,12 +180,11 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
             Set of unique peptides as tuples of sequence and mods.
 
         """
-        peptides: Set[Tuple[str, Tuple[ModSite]]] = set()
+        peptides: Set[Tuple[str, Tuple[ModSite, ...]]] = set()
         for psm in self.data:
             if predicate is None or predicate(psm):
-                # TODO: typing ignore due to
-                # https://github.com/python/mypy/issues/5846
-                peptides.add((psm.seq, tuple(psm.mods)))  # type: ignore
+                peptides.add((psm.seq, tuple(psm.mods)))
+
         return peptides
 
     def get_validated(
@@ -226,8 +225,12 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
 
         rows = []
         for psm in self.data:
-            trow = {"data_id": psm.data_id, "spec_id": psm.spec_id,
-                    "seq": psm.seq, "uid": psm.uid}
+            trow: Dict[str, Any] = {
+                "data_id": psm.data_id,
+                "spec_id": psm.spec_id,
+                "seq": psm.seq,
+                "uid": psm.uid
+            }
             for feature, value in psm.features:
                 trow[feature] = value
             rows.append(trow)
@@ -281,11 +284,13 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
         with open(csv_file, newline="") as fh:
             reader = csv.DictReader(fh, delimiter=sep)
             for row in reader:
-                try:
-                    mods = parse_mods(
-                        row.get('Modifications', row.get('Mods')),
-                        ptmdb
+                mods_str = row.get('Modifications', row.get('Mods'))
+                if mods_str is None:
+                    raise KeyError(
+                        f'No Modifications/Mods found in {csv_file}'
                     )
+                try:
+                    mods = parse_mods(mods_str, ptmdb)
                 except UnknownModificationException:
                     continue
 
