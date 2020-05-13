@@ -22,37 +22,54 @@ from .ptmdb import PTMDB, ModificationNotFoundException
 
 
 ITRAQ_COL_REGEX = re.compile(r"(%Err )?\d{3}:\d{3}")
+ITRAQ_PEAK_COL_REGEX = re.compile(r'(?:Err|Area) \d{3}')
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
 class _ProteinPilotSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
 
-    __slots__ = ("time", "confidence", "prec_mz", "proteins", "accessions",)
+    __slots__ = (
+        "time",
+        "confidence",
+        "prec_mz",
+        "proteins",
+        "accessions",
+        "itraq_peaks",
+    )
 
     time: str
     confidence: float
     prec_mz: float
     accessions: Optional[Tuple[str, ...]]
+    itraq_peaks: Optional[Dict[int, Tuple[float, float]]]
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
 class ProteinPilotSearchResult(_ProteinPilotSearchResult):
 
-    __slots__ = ("proteins", "itraq_ratios",)
+    __slots__ = (
+        "proteins",
+        "itraq_ratios",
+        "background",
+    )
 
     proteins: Optional[str]
     itraq_ratios: Optional[Dict[str, float]]
+    background: float
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
 class ProteinPilotXMLSearchResult(_ProteinPilotSearchResult):
 
-    __slots__ = ("byscore", "eval", "mod_prob", "itraq_peaks",)
+    __slots__ = (
+        "byscore",
+        "eval",
+        "mod_prob",
+    )
 
     byscore: Optional[float]
     eval: Optional[float]
     mod_prob: Optional[float]
-    itraq_peaks: Optional[Dict[int, Tuple[float, float]]]
 
 
 class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
@@ -60,33 +77,44 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
     A class to read ProteinPilot PeptideSummary files.
 
     """
-    def read(self, filename: str,
-             predicate: Optional[Callable[[SearchResult], bool]] = None,
-             read_itraq_ratios: bool = False,
-             **kwargs) -> List[ProteinPilotSearchResult]:
+    def read(
+            self,
+            filename: str,
+            predicate: Optional[Callable[[SearchResult], bool]] = None,
+            read_itraq_ratios: bool = False,
+            read_itraq_peaks: bool = False,
+            **kwargs
+    ) -> List[ProteinPilotSearchResult]:
         """
         Reads the given ProteinPilot Peptide Summary file to extract useful
         information on sequence, modifications, m/z etc.
 
         Args:
-            filename (str): The path to the Peptide Summary file.
-            predicate (Callable, optional): An optional predicate to filter
-                                            results.
-            read_itraq_ratios (bool, optional): Whether to include the iTRAQ
-                quantitation ratios in the returned SearchResults.
+            filename: The path to the Peptide Summary file.
+            predicate: An optional predicate to filter results.
+            read_itraq_ratios: Whether to include the iTRAQ quantitation ratios
+                               in the returned results.
+            read_itraq_peaks: Whether to include the iTRAQ peak areas in the
+                              returned results. Note that these are returned as
+                              a tuple of (peak area, peak area error).
 
         Returns:
-            The read information as a list of SearchResults.
+            The read information as a list of ProteinPilotSearchResults.
 
         """
         with open(filename, newline='') as fh:
             reader = csv.DictReader(fh, delimiter='\t')
             results = []
             itraq_cols = []
+            itraq_peak_cols = []
             for row in reader:
                 if read_itraq_ratios and not itraq_cols:
                     itraq_cols = self._get_itraq_cols(row)
-                result = self._build_search_result(row, itraq_cols)
+                if read_itraq_peaks and not itraq_peak_cols:
+                    itraq_peak_cols = self._get_itraq_peak_cols(row)
+                result = self._build_search_result(
+                    row, itraq_cols, itraq_peak_cols
+                )
                 if result is None:
                     continue
                 if predicate is None or predicate(result):
@@ -102,12 +130,24 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
         """
         return [k for k in row.keys() if ITRAQ_COL_REGEX.match(k)]
 
-    def _build_search_result(self, row: Dict[str, Any],
-                             itraq_cols: List[str])\
-            -> Optional[ProteinPilotSearchResult]:
+    @staticmethod
+    def _get_itraq_peak_cols(row: Dict[str, Any]) -> List[str]:
+        """
+        Extracts the names of the iTRAQ peak area columns from a row of the
+        PeptideSummary file.
+
+        """
+        return [k for k in row.keys() if ITRAQ_PEAK_COL_REGEX.match(k)]
+
+    def _build_search_result(
+            self,
+            row: Dict[str, Any],
+            itraq_cols: List[str],
+            itraq_peak_cols: List[str]
+    ) -> Optional[ProteinPilotSearchResult]:
         """
         Processes the given row of a Peptide Summary file to produce a
-        SearchResult entry.
+        ProteinPilotSearchResult entry.
 
         Args:
             row (dict): A row dictionary from the Peptide Summary file.
@@ -138,10 +178,17 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
             time=row["Time"],
             confidence=float(row["Conf"]),
             prec_mz=float(row["Prec m/z"]),
+            itraq_peaks=(
+                {k: float(row[k]) for k in itraq_peak_cols if row[k]}
+                if itraq_peak_cols else None
+            ),
             proteins=row["Names"],
             accessions=row["Accessions"],
-            itraq_ratios=({k: float(row[k]) for k in itraq_cols if row[k]}
-                          if itraq_cols else None)
+            itraq_ratios=(
+                {k: float(row[k]) for k in itraq_cols if row[k]}
+                if itraq_cols else None
+            ),
+            background=float(row["Background"])
         )
 
 
@@ -178,14 +225,14 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
         information on sequence, modifications, m/z etc.
 
         Args:
-            filename (str): The path to the XML file.
-            predicate (Callable, optional): An optional predicate to filter
-                                            results.
-            read_itraq_peaks (bool, optional): Whether to extract the iTRAQ
-                                               peak information from the XML.
+            filename: The path to the XML file.
+            predicate: An optional predicate to filter results.
+            read_itraq_peaks: Whether to extract the iTRAQ peak information from
+                              the XML. Note that these are returned as a tuple
+                              of (peak area, peak area error).
 
         Returns:
-            The read information as a list of SearchResults.
+            The read information as a list of ProteinPilotXMLSearchResults.
 
         """
         res: Dict[str, TempResult] = {}
