@@ -33,7 +33,7 @@ setup(
             PACKAGE_DIR
         ],
         compiler_directives={
-            "language_level" : "3",
+            "language_level": "3",
         }
     ),
     include_dirs=[np.get_include()],
@@ -46,6 +46,10 @@ setup(
             "unimod.xml",
         ]
     },
+    scripts=[
+        "bin/rptmdetermine_validate.py",
+        "bin/rptmdetermine_retrieve.py"
+    ],
     include_package_data=True,
     language="c++"
 )
