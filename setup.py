@@ -47,6 +47,10 @@ setup(
             "unimod.xml",
         ]
     },
+    scripts=[
+        "bin/rptmdetermine_validate.py",
+        "bin/rptmdetermine_retrieve.py"
+    ],
     include_package_data=True,
     language="c++"
 )
