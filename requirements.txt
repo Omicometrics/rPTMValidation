@@ -1,5 +1,5 @@
 cython
-lxml.etree
+lxml
 matplotlib
 numpy
 overrides
