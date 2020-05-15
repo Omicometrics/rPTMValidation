@@ -304,7 +304,7 @@ def read_csv(csv_file: str, ptmdb, spectra=None, sep: str = "\t")\
                 Peptide(
                     row["Sequence"],
                     int(row["Charge"]),
-                    parse_mods(row["Modifications"], ptmdb)
+                    parse_mods(row.get("Modifications", row['Mods']), ptmdb)
                 )
             )
             psm.lda_score = float(row["rPTMDetermineScore"])

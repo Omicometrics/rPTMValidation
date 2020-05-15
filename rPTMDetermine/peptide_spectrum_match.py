@@ -7,8 +7,6 @@ import bisect
 import collections
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-import numpy as np
-
 from .constants import DEFAULT_FRAGMENT_IONS, FIXED_MASSES
 from .features import Features
 from . import ionscore
@@ -30,7 +28,7 @@ class SpectrumNotFoundError(Exception):
     pass
 
 
-class PSM():
+class PSM:
     """
     A class to represent a Peptide Spectrum Match, containing details of the
     peptide and the matched mass spectrum. The mass spectrum is a composed
@@ -289,7 +287,6 @@ class PSM():
         """
         Extracts possible machine learning features from the peptide spectrum
         match.
-
         Args:
             target_mod (str): The modification type under validation. If this,
                               is None, i.e. for unmodified analogues, then
@@ -298,63 +295,29 @@ class PSM():
             proteolyzer (proteolysis.Proteolyzer): The enzymatic proteolyzer
                                                    for calculating the number
                                                    of missed cleavages.
-
         Returns:
             Features.
-
         """
         self._check_spectrum_initialized()
 
         ions, denoised_spectrum = self.denoise_spectrum()
         self.spectrum.normalize()
         denoised_spectrum.normalize()
-        self._calculate_prop_features(denoised_spectrum)
-        if ions:
-            self._calculate_ion_features(ions,
-                                         denoised_spectrum,
-                                         target_mod,
-                                         tol)
-        else:
-            for feature in self.features.all_feature_names():
-                if self.features.get(feature) is None:
-                    self.features.set(feature, 0.)
+        self._calculate_features(ions, denoised_spectrum, target_mod, tol)
+
+        # Use the proteolyzer to determine the number of missed cleavages
+        self.features.MissedCleavages =\
+            proteolyzer.count_missed_cleavages(self.seq)
 
         return self.features
 
-    def _calculate_prop_features(
-            self, denoised_spectrum: mass_spectrum.Spectrum) -> Features:
-        """
-        Calculate statistics of the denoised mass spectrum
-        and the matched peptide
-        """
-        intensities = (denoised_spectrum.intensity)
-        # Number of peaks
-        npeak = denoised_spectrum.intensity.size
-        # The number of peaks, log transformed
-        self.features.NumPeaks = np.log(npeak)
-        totalint = intensities.sum()
-        self.features.TotInt = totalint
-
-        # The length of the peptide
-        self.features.PepLen = len(self.seq)
-
-        # Experimental m/z
-        pms = (denoised_spectrum.prec_mz - FIXED_MASSES["H"]) * self.charge
-        # Peptide related features
-        self.features.PepMass = np.log(pms)
-        self.features.Charge = self.charge
-        self.features.ErrPepMass = abs(self.peptide.mass - pms)
-
-        return self.features
-
-    def _calculate_ion_features(self, ions: dict,
-                                denoised_spectrum: mass_spectrum.Spectrum,
-                                target_mod: Optional[str],
-                                tol: float) -> Features:
+    def _calculate_features(self, ions: dict,
+                            denoised_spectrum: mass_spectrum.Spectrum,
+                            target_mod: Optional[str], tol: float)\
+            -> Features:
         """
         Calculates potential machine learning features from the peptide
         spectrum match.
-
         Args:
             ions (dict): The theoretical ion peak annotations.
             denoised_spectrum (Spectrum): The denoised mass spectrum.
@@ -363,141 +326,73 @@ class PSM():
                               modification-based features will not be
                               calculated.
             tol (float): The mass tolerance level to apply.
-
         """
         # The length of the peptide
         pep_len = len(self.seq)
-        len_normalizer = np.sqrt(pep_len)
-        intensities = (denoised_spectrum.intensity
-                       / denoised_spectrum.max_intensity())
+        self.features.PepLen = pep_len
 
-        # Number of peaks
-        npeak = denoised_spectrum.intensity.size
-        # The number of peaks, log transformed
-        totalint = intensities.sum()
+        self.features.PepMass = self.peptide.mass
+        self.features.Charge = self.charge
+        self.features.ErrPepMass = abs(
+            self.features.PepMass - denoised_spectrum.prec_mz * self.charge
+            + self.charge * FIXED_MASSES["H"])
+
+        # Intensities from the spectrum
+        intensities = list(denoised_spectrum.intensity)
 
         mod_ion_start: Dict[str, int] = {}
         if target_mod is not None:
             # The position from which b-/y-ions will contain the modified
             # residue
-            mod_ion_start = {"b": min(ms.site for ms in self.mods
+            mod_ion_start = {'b': min(ms.site for ms in self.mods
                                       if ms.mod == target_mod),
-                             "a": min(ms.site for ms in self.mods
-                                      if ms.mod == target_mod),
-                             "y": min(pep_len - ms.site + 1
+                             'y': min(pep_len - ms.site + 1
                                       for ms in self.mods
                                       if ms.mod == target_mod)}
 
             # The sum of the modified ion intensities
-            self.features.IntModyb = \
+            self.features.TotalIntMod = \
                 sum(intensities[ions[l][0]] for l in ions.keys()
-                    if (l[0] == "y" and "-" not in l and
-                        ions[l][1] >= mod_ion_start["y"])
-                    or (l[0] == "b" and "-" not in l and
-                        ions[l][1] >= mod_ion_start["b"]))
+                    if (l[0] == 'y' and '-' not in l and
+                        ions[l][1] >= mod_ion_start['y'])
+                    or (l[0] == 'b' and '-' not in l and
+                        ions[l][1] >= mod_ion_start['b']))
+
+        # The regular b-/y-ions annotated for the PSM
+        seq_ions = [l for l in ions.keys() if l[0] in 'yb' and '-' not in l]
+
+        # The peaks annotated by theoretical ions
+        ann_peaks = {v[0] for v in ions.values()}
+
+        # The number of annotated peaks divided by the total number of peaks
+        self.features.FracIon = len(ann_peaks) /\
+            float(len(denoised_spectrum))
+        self.features.FracIonInt =\
+            sum(intensities[idx] for idx in ann_peaks) / sum(intensities)
 
         # The intensity of the base peak
         max_int = denoised_spectrum.max_intensity()
+
         # The peaks with intensity >= 20% of the base peak intensity
-        peaks_20, = np.where((denoised_spectrum.mz >= 300)
-                             & (denoised_spectrum.intensity >= max_int * 0.2))
+        peaks_20 = {ii for ii, peak in enumerate(denoised_spectrum)
+                    if peak[1] >= max_int * 0.2 and peak[0] >= 300}
 
-        # indices of different types of ions
-        charged_ion_indices: Dict[str, Dict[int, List[str]]] = \
-            collections.defaultdict(lambda: collections.defaultdict(list))
-        ion_indices: Dict[str, List[str]] = collections.defaultdict(list)
-        seq_ions: List[str] = []
-        seq_mod_ions: List[str] = []
-        # get the indices
-        for ion, (peakj, _) in ions.items():
-            iontag = set(ion[:2]) & set("yba")
-            if not iontag:
-                continue
-            c = 1 if ion.endswith("[+]") else int(ion[ion.index("+]") - 1])
-            if ion[0] == "y":
-                if c <= 3:
-                    charged_ion_indices["y"][c].append(peakj)
-                seq_ions.append(ion)
-            elif ion[0] == "b":
-                if c <= 3:
-                    charged_ion_indices["b"][c].append(peakj)
-                seq_ions.append(ion)
-            elif ion[0] == "a":
-                ion_indices["a"].append(peakj)
-            elif "-" in ion and ion[1] == "y":
-                ion_indices["ynl"].append(peakj)
-            elif "-" in ion and ion[1] == "b":
-                ion_indices["bnl"].append(peakj)
-
-            if target_mod is not None and peakj >= mod_ion_start[list(iontag)[0]]:
-                seq_mod_ions.append(peakj)
-
-        # The total sum of the modified ion intensities
-        if target_mod is not None:
-            self.features.TotalIntMod = intensities[seq_mod_ions].sum()
-
-        # The peaks annotated by theoretical ions
-        ann_peaks = np.array(list({v for v, _ in ions.values()}))
-
-        # The number of annotated peaks divided by the total number of peaks
-        self.features.FracIon = ann_peaks.size / npeak
-        # The fraction of annotated peak intensities divided by
-        # The total intensity of the spectrum
-        self.features.FracIonInt = intensities[ann_peaks].sum() / totalint
+        # The fraction of peaks with intensities greater than 20% of the base
+        # peak annotated by the theoretical ions
+        ions_20 = {ions[l][0] for l in seq_ions if ions[l][0] in peaks_20}
+        self.features.FracIon20pc = \
+            (len(ions_20) / float(len(peaks_20)) if peaks_20 else 0)
 
         # Sequence coverage
         n_anns = self._calculate_sequence_coverage(target_mod, seq_ions,
                                                    mod_ion_start)
 
         # The fraction of b-ions annotated by theoretical ions
-        self.features.NumSeriesbm /= len_normalizer
+        if self.features.NumIonb is not None:
+            self.features.NumIonb2l = self.features.NumIonb / float(pep_len)
         # The fraction of y-ions annotated by theoretical ions
-        self.features.NumSeriesym /= len_normalizer
-        # The number of a ions
-        self.features.NumIona = len(ion_indices["a"])
-        # The number of neutral losses of a ions
-        self.features.NumIonynl = len(ion_indices["ynl"])
-        # The number of neutral losses of b ions
-        self.features.NumIonbnl = len(ion_indices["bnl"])
-        # The fraction of total intensities of different ion series
-        # NOTE: The charge state of each fragment ion series is up to 3
-        bion_ix: List[str] = []
-        yion_ix: List[str] = []
-        for c in [1, 2, 3]:
-            # b series
-            try:
-                ix = charged_ion_indices["b"][c]
-            except KeyError:
-                continue
-            bion_ix += ix
-            self.features.set(f"FracIonIntb_c{c}",
-                              intensities[ix].sum() / len_normalizer)
-
-            # y series
-            try:
-                ix = charged_ion_indices["y"][c]
-            except KeyError:
-                continue
-            yion_ix += ix
-            self.features.set(f"FracIonInty_c{c}",
-                              intensities[ix].sum() / len_normalizer)
-
-        # The fraction of peaks with intensities greater than 20% of the base
-        # peak annotated by the theoretical ions
-        ions_20 = set(bion_ix + yion_ix) & set(peaks_20)
-        self.features.FracIon20pc = len(ions_20) / peaks_20.size \
-            if peaks_20.size > 0 else 0
-
-        # The number of b ions
-        self.features.NumIonb = len(bion_ix) / len_normalizer
-        # The number of y ions
-        self.features.NumIony = len(yion_ix) / len_normalizer
-        # The fraction of total intensities of y ions
-        self.features.FracIonInty = intensities[yion_ix].sum() / totalint
-        # The fraction of total intensities of b ions
-        self.features.FracIonIntb = intensities[bion_ix].sum() / totalint
-        # The coverage of modified y and b ions
-        self.features.FracIonMod = n_anns["mod"] / pep_len
+        if self.features.NumIony is not None:
+            self.features.NumIony2l = self.features.NumIony / float(pep_len)
 
         # Ion score
         self._calculate_ion_scores(denoised_spectrum, n_anns, target_mod, tol)
@@ -510,17 +405,14 @@ class PSM():
                               tol: float):
         """
         Calculates the ion score features.
-
         """
         mzs = denoised_spectrum.mz
         mzrange = mzs[-1] - mzs[0]
         self.features.MatchScore = ionscore.ionscore(
             len(self.seq), len(mzs), n_anns["all"], mzrange, tol)
-        self.features.MatchScore *= np.sqrt(len(self.seq))
         if target_mod is not None:
             self.features.MatchScoreMod = ionscore.ionscore(
                 len(self.seq), len(mzs), n_anns["mod"], mzrange, tol)
-            self.features.MatchScoreMod *= np.sqrt(len(self.seq))
 
     def _calculate_sequence_coverage(self, target_mod: Optional[str],
                                      seq_ions: Iterable[str],
@@ -529,7 +421,6 @@ class PSM():
         """
         Calculates features related to the sequence coverage by the ion
         annotations.
-
         Args:
         """
         # The maximum number of fragments annotated by theoretical ions
@@ -541,14 +432,14 @@ class PSM():
         max_ion_seq_len = 0
         # Across the charge states, the maximum number of each ion type
         # annotated
-        max_ion_counts = {"b": -1, "y": -1}
+        max_ion_counts = {'b': -1, 'y': -1}
 
         for _charge in range(self.charge):
             c_str = '[+]' if _charge == 0 else f'[{_charge + 1}+]'
             # The number of annotated ions
             n_ions = {"all": 0, "mod": 0}
 
-            for ion_type in ["y", "b"]:
+            for ion_type in ['y', 'b']:
                 # A list of b-/y-ion numbers (e.g. 2 for b2[+])
                 ion_nums = sorted(
                     [int(l.split('[')[0][1:])
@@ -577,8 +468,8 @@ class PSM():
             if target_mod is not None and n_ions["mod"] > n_anns["mod"]:
                 n_anns["mod"] = n_ions["mod"]
 
-        self.features.NumSeriesbm = max_ion_counts["b"]
-        self.features.NumSeriesym = max_ion_counts["y"]
+        self.features.NumIonb = max_ion_counts['b']
+        self.features.NumIony = max_ion_counts['y']
 
         # The longest sequence tag found divided by the peptide length
         self.features.SeqTagm = max_ion_seq_len / float(len(self.seq))
@@ -593,18 +484,16 @@ class UnmodPSM(PSM):
 
     """
 
-    __slots__ = ("mod_psm_uid",)
+    __slots__ = ("_mod_psm_uids",)
 
-    def __init__(self, mod_psm_uid: str, *args, **kwargs) -> None:
+    def __init__(self, *args, **kwargs) -> None:
         """
-        Initialize the UnmodPSM object by storing the modified PSM ID and
-        passing the remaining arguments to the base class initializer.
-
-        Args:
-            mod_psm_uid (str): The modified counterpart identifier.
+        Initialize the UnmodPSM object by initializing the modified PSM ID
+        list and passing the remaining arguments to the base class
+        initializer.
 
         """
-        self.mod_psm_uid = mod_psm_uid
+        self._mod_psm_uids: List[str] = []
         super().__init__(*args, **kwargs)
 
     def __hash__(self):
@@ -612,18 +501,33 @@ class UnmodPSM(PSM):
         Implements the hash function for the object.
 
         """
-        return hash((self.mod_psm_uid, self.data_id, self.spec_id,
+        return hash((tuple(self._mod_psm_uids), self.data_id, self.spec_id,
                      self.peptide))
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> bool:
         """
         Implements the equality test for the object.
 
         """
-        return (self.mod_psm_uid, self.data_id, self.spec_id,
+        return (tuple(self._mod_psm_uids), self.data_id, self.spec_id,
                 self.peptide) == \
-               (other.mod_psm_uid, other.data_id, other.spec_id,
+               (tuple(other._mod_psm_uids), other.data_id, other.spec_id,
                 other.peptide)
+
+    def add_mod_id(self, mod_psm_uid: str):
+        """
+        Adds a new modified spectrum uid.
+
+        Args:
+            mod_psm_uid (str): The new modified spectrum uid.
+
+        """
+        self._mod_psm_uids.append(mod_psm_uid)
+
+    def get_mod_ids(self) -> List[str]:
+        """
+        """
+        return self._mod_psm_uids
 
 
 def unique_unmod_psms(psms: List[UnmodPSM]) -> List[UnmodPSM]:

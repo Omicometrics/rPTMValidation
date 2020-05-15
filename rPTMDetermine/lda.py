@@ -439,7 +439,7 @@ def _apply_deamidation_correction(
             cand_psm.mods.extend(deams)
 
             # Calculate new features
-            cand_psm.extract_features(target_mod, target_residues, proteolyzer)
+            cand_psm.extract_features(target_mod, proteolyzer)
 
             # Compare probabilities using the same model used for the deamidated
             # PSM
