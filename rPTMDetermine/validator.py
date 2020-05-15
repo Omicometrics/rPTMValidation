@@ -330,17 +330,8 @@ class Validator(validator_base.ValidateBase):
         # Process the input files to extract the modification identifications
         logging.info("Reading database search identifications.")
         self.psms = self._get_identifications()
-        print(len(self.psms))
 
-        #if self.checkpoint.is_after(ValidationSteps.ValidateModified, hash(self.config)):
-        # logging.info("Skipping modified PSM validation using checkpoint")
-        # with open(self.file_prefix + LDA_PSM_FILE, "rb") as fh:
-            # self.psms = pickle.load(fh)
-        #with open(self.file_prefix + DB_RES_FILE, "rb") as fh:
-        #    self.db_res = pickle.load(fh)
-        # else:
         self.psms = self._validate_modified()
-            # self.checkpoint.update(ValidationSteps.ValidateModified, hash(self.config))
 
         # Check whether any modified PSMs are identified
         if not self.psms:
@@ -382,13 +373,13 @@ class Validator(validator_base.ValidateBase):
                 lda.lda_validate(unmod_df, unmod_features, unmod_lda_threshold)
 
             self.unmod_psms =\
-               lda.merge_lda_results(self.unmod_psms, unmod_results)
+                lda.merge_lda_results(self.unmod_psms, unmod_results)
 
             if self.config.correct_deamidation:
                 logging.info(
                     "Applying deamidation correction for unmodified analogues.")
                 self.unmod_psms = lda.apply_deamidation_correction(
-                    unmod_models, self.unmod_psms, unmod_features, None,
+                    unmod_models, self.unmod_psms, unmod_features, None, None,
                     self.proteolyzer)
 
             unmod_df.to_csv(self.file_prefix + "unmod_model.csv")
@@ -416,9 +407,7 @@ class Validator(validator_base.ValidateBase):
         self.psms = self._process_mass_spectra()
 
         # Filter to those PSMs with assigned mass spectra
-        print(len(self.psms))
         self.psms = PSMContainer([p for p in self.psms if p.spectrum is not None])
-        print(len(self.psms))
 
         # Calculate the PSM quality features for each PSM
         logging.info("Calculating PSM features.")
@@ -459,7 +448,8 @@ class Validator(validator_base.ValidateBase):
             logging.info("Applying deamidation correction.")
             self.psms = lda.apply_deamidation_correction(
                 models, self.psms, self.mod_features, self.target_mod,
-                self.proteolyzer)
+                self.target_residues, self.proteolyzer
+            )
 
         # Identify the PSMs whose peptides are benchmarks
         if self.config.benchmark_file is not None:

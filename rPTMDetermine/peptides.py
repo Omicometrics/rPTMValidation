@@ -81,8 +81,8 @@ def get_by_ion_mzs(peptide: Peptide):
     Get the b/y-type fragment ions for the peptide.
 
     """
-    return [ion.mass for ion in peptide.fragment(
+    return [mass for mass, _, _ in peptide.fragment(
         ion_types={
-            IonType.b: {"neutral_losses": []},
-            IonType.y: {"neutral_losses": []},
+            IonType.b.value: [],
+            IonType.y.value: [],
         })]

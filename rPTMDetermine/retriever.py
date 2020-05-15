@@ -510,7 +510,7 @@ class Retriever(validator_base.ValidateBase):
 
         Args:
             model_file (str): The path to a CSV file containing feature
-                              data, as written during validate.py execution.
+                              data, as written during rptmdetermine_validate.py execution.
 
         Returns:
 
