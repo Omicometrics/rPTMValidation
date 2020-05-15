@@ -71,7 +71,8 @@ class MZMLReader:
             mzml_file: str,
             n: int,
             act_method: Optional[str] = None,
-            act_energy: Optional[int] = None
+            act_energy: Optional[int] = None,
+            encoding: str = 'iso-8859-1'
     ) -> SpectrumGenerator:
         """
         Extracts the MSn spectra from the input mzML file.
@@ -83,13 +84,17 @@ class MZMLReader:
                         activation method.
             act_energy: Optionally filter to spectra obtained using a specific
                         activation energy.
+            encoding: The mzML file encoding. Defaults to ISO-8859-1.
 
         """
         # Read from xml data
         context = etree.iterparse(
             mzml_file, events=("end",),
             tag=[self._fix_tag("referenceableParamGroup"),
-                 self._fix_tag("spectrum")])
+                 self._fix_tag("spectrum")],
+            recover=True,
+            encoding=encoding
+        )
         param_groups: Dict[str, Dict[str, Any]] = {}
         for event, element in context:
             if element.tag == self._fix_tag("referenceableParamGroup"):
