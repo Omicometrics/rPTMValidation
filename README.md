@@ -53,7 +53,7 @@ presence of a C++ 11 compatible compiler on your machine.
 ### Instructions
 
 1. Install Python 3 (>= version 3.6).
-2. [Download](https://github.com/ikcgroup/rPTMValidation/archive/v1.0.zip) and 
+2. [Get the latest release](https://github.com/ikcgroup/rPTMValidation/releases) and 
 unzip `rPTMDetermine` version 1.0.
 3. Install our accompanying library, [`pepfrag`](https://github.com/ikcgroup/pepfrag), 
 following the instructions provided.
