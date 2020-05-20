@@ -18,7 +18,7 @@ c_rptmdetermine = Extension(
 
 setup(
     name="rPTMDetermine",
-    version="2.0.0a",
+    version="1.0.0",
     packages=[
         "rPTMDetermine",
         "rPTMDetermine.readers",
@@ -33,7 +33,7 @@ setup(
             PACKAGE_DIR
         ],
         compiler_directives={
-            "language_level" : "3",
+            "language_level": "3",
         }
     ),
     include_dirs=[np.get_include()],
@@ -43,6 +43,7 @@ setup(
             "EnzymeRules.json",
         ],
         "rPTMDetermine.readers": [
+            "ptmlist.txt",
             "unimod.xml",
         ]
     },
