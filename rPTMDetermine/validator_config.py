@@ -49,7 +49,10 @@ class ValidatorConfig(BaseConfig):
             FileNotFoundError
 
         """
-        path = self.json_config.get("uniprot_ptm_file", "ptmlist.txt")
+        path = self.json_config.get(
+            "uniprot_ptm_file",
+            os.path.join(os.path.dirname(__file__), "readers", "ptmlist.txt")
+        )
         if not os.path.exists(path):
             raise FileNotFoundError(f"UniProt PTM file not found at {path}")
         return path

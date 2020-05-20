@@ -43,6 +43,7 @@ setup(
             "EnzymeRules.json",
         ],
         "rPTMDetermine.readers": [
+            "ptmlist.txt",
             "unimod.xml",
         ]
     },
