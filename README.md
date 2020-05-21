@@ -55,11 +55,9 @@ presence of a C++ 11 compatible compiler on your machine.
 1. Install Python 3 (>= version 3.6).
 2. [Get the latest release](https://github.com/ikcgroup/rPTMValidation/releases) and 
 unzip `rPTMDetermine` version 1.0.
-3. Install our accompanying library, [`pepfrag`](https://github.com/ikcgroup/pepfrag), 
-following the instructions provided.
-4. Navigate to the unzipped `rPTMValidation` directory and execute 
+3. Navigate to the unzipped `rPTMValidation` directory and execute 
 `pip install -r requirements.txt` to install dependency packages.
-5. From the `rPTMValidation` directory, execute `python setup.py install` to 
+4. From the `rPTMValidation` directory, execute `python setup.py install` to 
 compile the C/C++ extensions and install the `rPTMDetermine` library, along with 
 the scripts `rptmdetermine_validate.py` and `rptmdetermine_retrieve.py`.
 
