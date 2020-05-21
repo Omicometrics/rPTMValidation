@@ -8,4 +8,4 @@ scipy
 seaborn
 sklearn
 tqdm
-pepfrag==0.2
+pepfrag>=0.2
