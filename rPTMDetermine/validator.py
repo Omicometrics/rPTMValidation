@@ -376,7 +376,7 @@ class Validator(validator_base.ValidateBase):
                     ';'.join((f'{m.mod}@{m.site}' for m in psm.mods)),
                     machinelearning.passes_consensus(psm.ml_scores, threshold),
                     machinelearning.passes_majority(psm.ml_scores, threshold),
-                    localization.is_localized(psm),
+                    psm.is_localized(),
                     ';'.join(map(str, psm.ml_scores[0].tolist())),
                     psm.site_score,
                     psm.site_prob,
