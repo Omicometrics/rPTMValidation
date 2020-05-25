@@ -44,12 +44,18 @@ PyObject* python_annotate(PyObject* module, PyObject* args) {
 	PyObject* tol = NULL;
 	
 	if (!PyArg_UnpackTuple(args, "cpython_annotate", 3, 3, &mzList, &theorIons, &tol)) return NULL;
-	
-	return annotationMapToPyDict(
-		annotate(
-			listToDoubleVector(mzList),
-			tupleListToIonVector(theorIons),
-			PyFloat_AsDouble(tol)
-		)
-	);
+
+	try {
+	    return annotationMapToPyDict(
+            annotate(
+                listToDoubleVector(mzList),
+                tupleListToIonVector(theorIons),
+                PyFloat_AsDouble(tol)
+            )
+        );
+	}
+	catch (const std::exception& ex) {
+	    PyErr_SetString(PyExc_RuntimeError, ex.what());
+        return NULL;
+	}
 }
