@@ -6,6 +6,7 @@ spectra.
 """
 from bisect import bisect_left
 import csv
+import functools
 import itertools
 import logging
 import multiprocessing as mp
@@ -20,7 +21,8 @@ from typing import (
     Optional,
     Sequence,
     Set,
-    Tuple
+    Tuple,
+    Type
 )
 
 import numpy as np
@@ -122,7 +124,7 @@ class Validator(validator_base.ValidateBase):
         """
         super().__init__(config, "validate.log")
 
-        self.search_results: Dict[str, List[readers.SearchResult]] = {}
+        self.search_results: Dict[str, List[Type[readers.SearchResult]]] = {}
 
         # The PSMContainers are stored in this manner to make it easy to add
         # additional containers while working interactively.
@@ -131,6 +133,7 @@ class Validator(validator_base.ValidateBase):
             'neg_psms': PSMContainer(),
             'unmod_psms': PSMContainer(),
             'decoy_psms': PSMContainer(),
+            'neg_unmod_psms': PSMContainer()
         }
 
         # Used for multiprocessing throughout the class methods
@@ -170,6 +173,14 @@ class Validator(validator_base.ValidateBase):
     def decoy_psms(self, value: Iterable[PSM]):
         self.psm_containers['decoy_psms'] = PSMContainer(value)
 
+    @property
+    def neg_unmod_psms(self) -> PSMContainer[PSM]:
+        return self.psm_containers['neg_unmod_psms']
+
+    @neg_unmod_psms.setter
+    def neg_unmod_psms(self, value: Iterable[PSM]):
+        self.psm_containers['neg_unmod_psms'] = PSMContainer(value)
+
     ########################
     # Validation
     ########################
@@ -194,7 +205,7 @@ class Validator(validator_base.ValidateBase):
         # Process the input files to extract the modification identifications
         logging.info("Reading database search identifications.")
         self._read_results()
-        self._get_identifications()
+        self._get_mod_identifications()
         allowed_mods = get_parallel_mods(self.psms, self.modification)
         self._get_unmod_identifications(allowed_mods)
 
@@ -381,22 +392,59 @@ class Validator(validator_base.ValidateBase):
             res_path = os.path.join(set_info.data_dir, set_info.results)
             self.search_results[set_id] = self.reader.read(res_path)
 
-    def _get_identifications(self):
+    def _get_identifications(
+            self,
+            handler: Callable[[Sequence[readers.SearchResult], str],
+                              PSMContainer],
+            pos_container_name: str,
+            neg_container_name: str
+    ):
         """
+        Parses the database search results to extract identifications, filtered
+        using `handler`.
+
+        Args:
+            handler: A function to process the search results from each
+                     configured data set. This will be passed, in turn, the
+                     positive and negative identifications, as judged by FDR
+                     control.
+            pos_container_name: The name of the PSMContainer on this class to
+                                update with the positive identifications.
+            neg_container_name: The name of the PSMContainer on this class to
+                                update with the negative identifications.
 
         """
-        # Target modification identifications
         for set_id, set_info in tqdm.tqdm(self.config.data_sets.items()):
             # Apply database search FDR control to the results
             pos_idents, neg_idents = self._split_fdr(
                 self.search_results[set_id],
                 set_info
             )
-            self.psms.extend(self._results_to_mod_psms(pos_idents, set_id))
-            self.neg_psms.extend(self._results_to_mod_psms(neg_idents, set_id))
+            getattr(self, pos_container_name).extend(
+                handler(pos_idents, set_id)
+            )
+            getattr(self, neg_container_name).extend(
+                handler(neg_idents, set_id)
+            )
 
-        self.psms = utilities.deduplicate(self.psms)
-        self.neg_psms = utilities.deduplicate(self.neg_psms)
+        setattr(
+            self,
+            pos_container_name,
+            utilities.deduplicate(getattr(self, pos_container_name))
+        )
+        setattr(
+            self,
+            neg_container_name,
+            utilities.deduplicate(getattr(self, neg_container_name))
+        )
+
+    def _get_mod_identifications(self):
+        """
+
+        """
+        self._get_identifications(
+            self._results_to_mod_psms, 'psms', 'neg_psms'
+        )
 
     def _get_unmod_identifications(self, allowed_mods: Iterable[str]):
         """
@@ -409,29 +457,15 @@ class Validator(validator_base.ValidateBase):
                           peptides.
 
         """
-        for set_id, set_info in tqdm.tqdm(self.config.data_sets.items()):
-            idents, _ = self._split_fdr(self.search_results[set_id], set_info)
-
-            for ident in idents:
-                if not self._has_target_residue(ident.seq):
-                    continue
-                for mod in ident.mods:
-                    if (mod.mod not in allowed_mods or
-                            (isinstance(mod.site, int) and
-                             ident.seq[mod.site - 1] ==
-                             self.config.target_residue)):
-                        break
-                else:
-                    if self._valid_peptide_length(ident.seq):
-                        self.unmod_psms.append(
-                            PSM(
-                                set_id,
-                                ident.spectrum,
-                                Peptide(ident.seq, ident.charge, ident.mods)
-                            )
-                        )
-
-        self.unmod_psms = utilities.deduplicate(self.unmod_psms)
+        # noinspection PyTypeChecker
+        self._get_identifications(
+            functools.partial(
+                self._results_to_unmod_psms,
+                allowed_mods=allowed_mods
+            ),
+            'unmod_psms',
+            'neg_unmod_psms'
+        )
 
     def _get_decoy_identifications(self, allowed_mods: Iterable[str]):
         """
@@ -558,6 +592,51 @@ class Validator(validator_base.ValidateBase):
                         Peptide(ident.seq, ident.charge, ident.mods)
                     )
                 )
+
+        return psms
+
+    def _results_to_unmod_psms(
+        self,
+        search_res: Iterable[readers.SearchResult],
+        data_id: str,
+        allowed_mods: Iterable[str]
+    ) -> PSMContainer[PSM]:
+        """
+        Converts `SearchResult`s to `PSM`s after filtering for unmodified PSMs.
+
+        Filters are applied on peptide type (keep only target identifications),
+        identification rank (keep only top-ranking identification) and amino
+        acid residues (check all valid).
+
+        Args:
+            search_res: The database search results.
+            data_id: The ID of the data set.
+            allowed_mods: The modifications which may be included in
+                          "unmodified" peptide identifications.
+
+        Returns:
+            PSMContainer.
+
+        """
+        psms: PSMContainer[PSM] = PSMContainer()
+        for ident in search_res:
+            if not self._has_target_residue(ident.seq):
+                continue
+            for mod in ident.mods:
+                if (mod.mod not in allowed_mods or
+                        (isinstance(mod.site, int) and
+                         ident.seq[mod.site - 1] ==
+                         self.config.target_residue)):
+                    break
+            else:
+                if self._valid_peptide_length(ident.seq):
+                    psms.append(
+                        PSM(
+                            data_id,
+                            ident.spectrum,
+                            Peptide(ident.seq, ident.charge, ident.mods)
+                        )
+                    )
 
         return psms
 
