@@ -16,7 +16,7 @@ class DataSetConfig(Config):
         ConfigField('data_dir'),
         ConfigField('confidence', True, None),
         ConfigField('results'),
-        ConfigField('spectra_files'),
+        ConfigField('spectra_file'),
         ConfigField('decoy_results', True, None)
     ]
 
@@ -24,7 +24,7 @@ class DataSetConfig(Config):
     data_dir: str
     confidence: Optional[float]
     results: str
-    spectra_files: List[str]
+    spectra_file: str
     decoy_results: Optional[str]
 
 
