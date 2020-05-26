@@ -38,10 +38,20 @@ from . import (
     validator_base
 )
 from .constants import RESIDUES
+from .features import Features
 from .peptide_spectrum_match import PSM
 from .psm_container import PSMContainer
 from .readers import SearchEngine
 from .rptmdetermine_config import DataSetConfig, RPTMDetermineConfig
+
+try:
+    import pandas as pd
+    import openpyxl
+except ImportError:
+    HAS_PANDAS_EXCEL = False
+else:
+    HAS_PANDAS_EXCEL = True
+
 
 ScoreGetter = Callable[[readers.SearchResult], float]
 
@@ -118,8 +128,7 @@ class Validator(validator_base.ValidateBase):
         Initialize the Validate object.
 
         Args:
-            config (ValidatorConfig): The JSON configuration read from a
-                                           file.
+            config (ValidatorConfig): The JSON configuration read from a file.
 
         """
         super().__init__(config, "validate.log")
@@ -136,8 +145,16 @@ class Validator(validator_base.ValidateBase):
             'neg_unmod_psms': PSMContainer()
         }
 
+        self._container_output_names = {
+            'psms': 'Positives',
+            'neg_psms': 'Negatives',
+            'unmod_psms': 'UnmodifiedPositives',
+            'neg_unmod_psms': 'UnmodifiedNegatives',
+            'decoy_psms': 'Decoys'
+        }
+
         # Used for multiprocessing throughout the class methods
-        self.pool = mp.Pool()
+        #self.pool = mp.Pool()
 
         self.model: Optional[machinelearning.Classifier] = None
 
@@ -187,9 +204,7 @@ class Validator(validator_base.ValidateBase):
 
     def validate(
             self,
-            model_extra_psm_containers: Optional[Sequence[PSMContainer]] = None,
-            # TODO: put this into the configuration file?
-            model_features: Optional[Sequence[str]] = None
+            model_extra_psm_containers: Optional[Sequence[PSMContainer]] = None
     ):
         """
         Validates the identifications in the input data files.
@@ -197,11 +212,13 @@ class Validator(validator_base.ValidateBase):
         Args:
             model_extra_psm_containers: Additional PSMContainers containing
                                         modified identifications.
-            model_features: List of features to use in model construction. If
-                            None, all of the available features will be used
-                            (subject to data size requirements).
 
         """
+        model_features = [
+            f for f in Features.all_feature_names()
+            if f not in self.config.exclude_features
+        ]
+
         # Process the input files to extract the modification identifications
         logging.info("Reading database search identifications.")
         self._read_results()
@@ -266,8 +283,7 @@ class Validator(validator_base.ValidateBase):
         )
 
         self._output_results(
-            threshold,
-            extra_containers=model_extra_psm_containers
+            threshold
         )
 
     def _correct_and_localize(
@@ -326,62 +342,79 @@ class Validator(validator_base.ValidateBase):
 
     def _output_results(
             self,
-            threshold: float,
-            extra_containers: Optional[List[PSMContainer]] = None
+            threshold: float
     ):
         """
         Outputs the validation results to CSV format.
 
+        A combined Excel spreadsheet, with each category of PSM in a separate
+        sheet, is generated if pandas and openpyxl are available.
+
         Args:
              threshold: The classification score threshold.
-             extra_containers: Additional containers of PSMs to be written to
-                               file.
 
         """
-        if extra_containers is None:
-            extra_containers = []
-
-        output_file = os.path.join(
-            self.config.output_dir,
-            f'{self.modification}_{self.config.target_residue}.csv'
-        )
-
         if not os.path.isdir(self.config.output_dir):
             os.makedirs(self.config.output_dir)
 
-        with open(output_file, 'w', newline='') as fh:
-            writer = csv.writer(fh)
-            writer.writerow([
-                'DataID',
-                'SpectrumID',
-                'Sequence',
-                'Charge',
-                'Modifications',
-                'PassesConsensus',
-                'PassesMajority',
-                'Localized',
-                'Scores',
-                'SiteScore',
-                'SiteProbability',
-                'SiteDiffScore'
-            ])
-            for psm in itertools.chain(
-                    self.psms, self.neg_psms, *extra_containers
-            ):
+        output_file_base = os.path.join(
+            self.config.output_dir,
+            f'{self.modification}_{self.config.target_residue}'
+        )
+
+        for label, container in self.psm_containers.items():
+            # Replace the container label with a more human-readable name
+            # if it exists
+            label = self._container_output_names.get(label, label)
+
+            output_file = f'{output_file_base}_{label}.csv'
+
+            with open(output_file, 'w', newline='') as fh:
+                writer = csv.writer(fh)
                 writer.writerow([
-                    psm.data_id,
-                    psm.spec_id,
-                    psm.seq,
-                    psm.charge,
-                    ';'.join((f'{m.mod}@{m.site}' for m in psm.mods)),
-                    machinelearning.passes_consensus(psm.ml_scores, threshold),
-                    machinelearning.passes_majority(psm.ml_scores, threshold),
-                    psm.is_localized(),
-                    ';'.join(map(str, psm.ml_scores[0].tolist())),
-                    psm.site_score,
-                    psm.site_prob,
-                    psm.site_diff_score
+                    'DataID',
+                    'SpectrumID',
+                    'Sequence',
+                    'Charge',
+                    'Modifications',
+                    'PassesConsensus',
+                    'PassesMajority',
+                    'Localized',
+                    'Scores',
+                    'SiteScore',
+                    'SiteProbability',
+                    'SiteDiffScore'
                 ])
+                for psm in container:
+                    writer.writerow([
+                        psm.data_id,
+                        psm.spec_id,
+                        psm.seq,
+                        psm.charge,
+                        ';'.join((f'{m.mod}@{m.site}' for m in psm.mods)),
+                        machinelearning.passes_consensus(
+                            psm.ml_scores, threshold
+                        ),
+                        machinelearning.passes_majority(
+                            psm.ml_scores, threshold
+                        ),
+                        psm.is_localized(),
+                        ';'.join(map(str, psm.ml_scores[0].tolist())),
+                        psm.site_score,
+                        psm.site_prob,
+                        psm.site_diff_score
+                    ])
+
+        if HAS_PANDAS_EXCEL:
+            # Generate combined output file with each CSV as a separate sheet
+            with pd.ExcelWriter(f'{output_file_base}_All.xlsx') as writer:
+                for label, container in self.psm_containers.items():
+                    label = self._container_output_names.get(label, label)
+
+                    output_file = f'{output_file_base}_{label}.csv'
+
+                    df = pd.read_csv(output_file)
+                    df.to_excel(writer, sheet_name=label)
 
     def _read_results(self):
         """
@@ -666,10 +699,11 @@ class Validator(validator_base.ValidateBase):
             for container in self.psm_containers.values()
         ]
 
-        for data_id, spec_id, spectrum in self.read_mass_spectra():
+        for data_id, spectra in self.read_mass_spectra():
             for container, index in zip(self.psm_containers.values(), indices):
-                for psm_idx in index[(data_id, spec_id)]:
-                    container[psm_idx].spectrum = spectrum
+                for spec_id, spectrum in spectra.items():
+                    for psm_idx in index[(data_id, spec_id)]:
+                        container[psm_idx].spectrum = spectrum
 
     def _calculate_features(self):
         """Computes features for all PSMContainers."""

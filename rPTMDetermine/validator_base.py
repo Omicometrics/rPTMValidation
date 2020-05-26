@@ -5,12 +5,12 @@ retrieval pathways.
 
 """
 
-import collections
 import functools
 import logging
 import os
+import pickle
 import sys
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Generator, Iterable, List, Tuple
 
 from pepfrag import ModSite
 
@@ -82,6 +82,17 @@ class ValidateBase:
 
         logging.info(f"Using configuration: {str(self.config)}")
 
+        # Determine whether the configuration has changed since the last run and
+        # thus, whether cached files may be used
+        self.cache_dir = os.path.join(output_dir, '.cache')
+        if not os.path.isdir(self.cache_dir):
+            os.mkdir(self.cache_dir)
+        self.use_cache = self._valid_cache()
+        if self.use_cache:
+            logging.info(
+                f'Configuration unchanged since last run - using cached files'
+            )
+
         self.proteolyzer = proteolysis.Proteolyzer(self.config.enzyme)
 
         # The UniMod PTM DB
@@ -90,20 +101,40 @@ class ValidateBase:
 
         # The database search reader
         self.reader: readers.Reader = readers.get_reader(
-            self.config.search_engine, self.ptmdb)
+            self.config.search_engine, self.ptmdb
+        )
 
         self.decoy_reader: readers.Reader = readers.get_reader(
             self.config.decoy_search_engine, self.ptmdb
         )
 
-        # All database search results
-        self.db_res: Dict[str, Dict[str, List[readers.SearchResult]]] = \
-            collections.defaultdict(lambda: collections.defaultdict(list))
-
         # Get the mass change associated with the target modification
         self.mod_mass = self.ptmdb.get_mass(self.config.modification)
 
         self.file_prefix = f"{output_dir}/{path_str}_"
+
+    def _valid_cache(self) -> bool:
+        """
+        Determines whether any cached files may be used, based on the
+        configuration file hash.
+
+        Returns:
+            Boolean indicating whether the cache is valid.
+
+        """
+        config_hash_file = os.path.join(self.cache_dir, 'CONFIG_HASH')
+        if os.path.isdir(self.cache_dir) and os.path.exists(config_hash_file):
+            with open(config_hash_file) as fh:
+                prev_hash = fh.read()
+            if hash(self.config) == int(prev_hash):
+                # The configuration file is unchanged from the previous run
+                # and cached files may be safely used
+                return True
+
+        with open(config_hash_file, 'w') as fh:
+            fh.write(str(hash(self.config)))
+
+        return False
 
     def _filter_mods(self, mods: Iterable[ModSite], seq: str)\
             -> List[ModSite]:
@@ -133,27 +164,45 @@ class ValidateBase:
 
         return new_mods
 
-    def read_mass_spectra(self) -> \
-            Dict[str, Dict[str, mass_spectrum.Spectrum]]:
+    def read_mass_spectra(self) \
+            -> Generator[Tuple[str, Dict[str, mass_spectrum.Spectrum]], None,
+                         None]:
         """
         Reads the mass spectra from the configured spectra_files.
 
         Returns:
-            Dictionary mapping data set ID to spectra (dict).
+
 
         """
         for data_conf_id, data_conf in self.config.data_sets.items():
-            # TODO: only one spectra file per results file (data config section)
-            for spec_file in data_conf.spectra_files:
-                logging.info(f'Processing {data_conf_id}: {spec_file}')
-                spec_file_path = os.path.join(data_conf.data_dir, spec_file)
+            spectra_cache_file = os.path.join(
+                self.cache_dir, f'spectra_{data_conf_id}.pkl'
+            )
+            if self.use_cache and os.path.exists(spectra_cache_file):
+                logging.info(f'Using cached {data_conf_id} spectra')
+                with open(spectra_cache_file, 'rb') as fh:
+                    spectra = pickle.load(fh)
+                yield data_conf_id, spectra
+                continue
 
-                if not os.path.isfile(spec_file_path):
-                    raise FileNotFoundError(
-                        f"Spectra file {spec_file_path} not found"
-                    )
+            logging.info(f'Processing {data_conf_id}: {data_conf.spectra_file}')
+            spec_file_path = os.path.join(
+                data_conf.data_dir, data_conf.spectra_file
+            )
 
-                spectra = spectra_readers.read_spectra_file(spec_file_path)
-                for spec_id, spectrum in spectra:
-                    spectrum.centroid().remove_itraq()
-                    yield data_conf_id, spec_id, spectrum
+            if not os.path.isfile(spec_file_path):
+                raise FileNotFoundError(
+                    f"Spectra file {spec_file_path} not found"
+                )
+
+            spectra = {
+                spec_id: spectrum.centroid().remove_itraq()
+                for spec_id, spectrum in
+                spectra_readers.read_spectra_file(spec_file_path)
+            }
+
+            logging.info(f'Caching {data_conf_id} spectra')
+            with open(spectra_cache_file, 'wb') as fh:
+                pickle.dump(spectra, fh)
+
+            yield data_conf_id, spectra
