@@ -123,7 +123,15 @@ def plot_psm(
         psm: PSM,
         **kwargs
 ):
-    plot_psms([psm], **kwargs)
+    """
+    Plots the given `psm`, with optional annotations.
+
+    Args:
+        psm: The PSM whose spectrum should be plotted.
+        kwargs: Additional arguments for plot_psms.
+
+    """
+    return plot_psms([psm], **kwargs)
 
 
 def plot_psms(
@@ -136,6 +144,25 @@ def plot_psms(
         mz_range: Optional[Tuple[float, float]] = None
 ):
     """
+    Plots the given PSM spectra, with optional annotations.
+
+    Args:
+        psms: The PSMs whose spectra should be plotted.
+        denoise: Flag indicating whether the spectrum should be denoised before
+                 plotting. Defaults to False.
+        tol: The tolerance for denoising using theoretical fragment ions.
+        annotation: The spectrum annotation method. Options are:
+            1. 'sequence': Label the peptide sequence using matched fragments.
+            2. 'fragments': Label the spectrum with the fragment ion labels.
+        save_path: The path to which to save the resulting plot.
+        rel_intensity: Flag indicating whether the intensity scale should be
+                       relative. Defaults to True.
+        mz_range: An optional filter on the m/z range of the spectrum to plot.
+
+    Returns:
+        Annotations for the spectrum, including those not shown (e.g. higher
+        charge state).
+
     """
     all_anns = []
 
