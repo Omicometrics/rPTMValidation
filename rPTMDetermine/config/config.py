@@ -6,6 +6,8 @@ configuration classes.
 """
 import collections
 import enum
+import hashlib
+import json
 from typing import Any, Dict, List, Tuple
 
 
@@ -107,7 +109,15 @@ class Config(metaclass=ConfigMeta):
         Implements the hash special method for the class.
 
         """
-        return hash(self.__value_tuple())
+        attrs = []
+        for field in self.config_fields:
+            attr = getattr(self, field.name)
+            if isinstance(attr, dict):
+                attr = json.dumps(attr, sort_keys=True, default=str)
+            elif isinstance(attr, list):
+                attr = tuple(attr)
+            attrs.append(attr)
+        return int(hashlib.sha1(str(attrs).encode('utf8')).hexdigest(), 16)
 
     def __eq__(self, other):
         """

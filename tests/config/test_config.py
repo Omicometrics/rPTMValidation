@@ -1,9 +1,11 @@
 import unittest
 
-from rPTMDetermine.config import Config, ConfigField
+from rPTMDetermine.config import (
+    Config, ConfigField, MissingConfigOptionException
+)
 
 
-class TestConfigConstruction(unittest.TestCase):
+class TestConfigClass(unittest.TestCase):
     def test_config_class_constructed(self):
         class TestConfig(Config):
             _attr1_field = ConfigField('attr1')
@@ -144,6 +146,70 @@ class TestConfigConstruction(unittest.TestCase):
         })
 
         self.assertNotEqual(conf1, conf2)
+
+    def test_config_hash_dict(self):
+        """
+        Tests that a config with a dictionary field can be successfully hashed.
+
+        """
+        class TestConfig(Config):
+            config_fields = [ConfigField('d')]
+
+        conf1 = TestConfig({'d': {'key': 'value'}})
+        conf2 = TestConfig({'d': {'key': 'value'}})
+        conf3 = TestConfig({'d': {'key': 'value2'}})
+
+        self.assertIsInstance(hash(conf1), int)
+
+        self.assertEqual(hash(conf1), hash(conf2))
+        self.assertNotEqual(hash(conf1), hash(conf3))
+
+    def test_config_hash_dict_field(self):
+        """
+        Tests that a config with a dictionary field, mapping to Config,
+        can be successfully hashed
+
+        """
+        class InnerConfig(Config):
+            config_fields = [ConfigField('field')]
+
+        class TestConfig(Config):
+            config_fields = [ConfigField('d')]
+
+        conf1 = TestConfig({'d': {'key': InnerConfig({'field': 1})}})
+        conf2 = TestConfig({'d': {'key': InnerConfig({'field': 1})}})
+        conf3 = TestConfig({'d': {'key': InnerConfig({'field': 2})}})
+
+        self.assertEqual(hash(conf1), hash(conf2))
+        self.assertNotEqual(hash(conf1), hash(conf3))
+
+    def test_config_hash_list(self):
+        """
+        Tests that a config with a list field can be successfully hashed.
+
+        """
+        class TestConfig(Config):
+            config_fields = [ConfigField('l')]
+
+        conf1 = TestConfig({'l': ['one']})
+        conf2 = TestConfig({'l': ['one']})
+        conf3 = TestConfig({'l': ['two']})
+
+        self.assertIsInstance(hash(conf1), int)
+
+        self.assertEqual(hash(conf1), hash(conf2))
+        self.assertNotEqual(hash(conf1), hash(conf3))
+
+    def test_missing_required_option(self):
+        """
+        Tests that missing required options are detected.
+
+        """
+        class TestConfig(Config):
+            config_fields = [ConfigField('newfield')]
+
+        with self.assertRaises(MissingConfigOptionException):
+            TestConfig({})
 
 
 if __name__ == '__main__':
