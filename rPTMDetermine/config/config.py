@@ -6,7 +6,7 @@ configuration classes.
 """
 import collections
 import enum
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 
 class MissingConfigOptionException(Exception):
@@ -101,6 +101,32 @@ class Config(metaclass=ConfigMeta):
                 val = val.name
             string += f'{field.name} = {str(val)}\n'
         return string
+
+    def __hash__(self):
+        """
+        Implements the hash special method for the class.
+
+        """
+        return hash(self.__value_tuple())
+
+    def __eq__(self, other):
+        """
+        Implements the equality test for the class.
+
+        """
+        if isinstance(other, Config):
+            return self.__value_tuple() == other.__value_tuple()
+        return NotImplemented
+
+    def __value_tuple(self) -> Tuple:
+        """
+        Constructs a tuple of the ConfigField values for the class.
+
+        Returns:
+            Tuple of field values.
+
+        """
+        return tuple([getattr(self, f.name) for f in self.config_fields])
 
     def _check_required(self):
         """
