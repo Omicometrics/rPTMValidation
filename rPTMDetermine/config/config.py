@@ -5,10 +5,11 @@ configuration classes.
 
 """
 import collections
+import dataclasses
 import enum
 import hashlib
 import json
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 class MissingConfigOptionException(Exception):
@@ -18,16 +19,16 @@ class MissingConfigOptionException(Exception):
     """
 
 
-ConfigField = collections.namedtuple(
-    'ConfigField',
-    [
-        'name',
-        'has_default',
-        'default',
-        'caster',
-    ],
-    defaults=[None, False, lambda v: v]
-)
+def default_cast(value: Any) -> Any:
+    return value
+
+
+@dataclasses.dataclass
+class ConfigField:
+    name: str
+    has_default: bool = False
+    default: Optional[Any] = None
+    caster: Callable[[Any], Any] = default_cast
 
 
 def make_getter(field: ConfigField):
