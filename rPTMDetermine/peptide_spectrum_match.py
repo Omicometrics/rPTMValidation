@@ -277,11 +277,14 @@ class PSM:
         """
         Determines whether the PSM has been successfully localized.
 
+        Note that this will also be `True` in the case where `site_diff_score`
+        is `None`.
+
         Returns:
             Boolean indicating localization status.
 
         """
-        return self.site_diff_score >= 0.1
+        return self.site_diff_score is None or self.site_diff_score >= 0.1
 
     #######################
     # Feature Calculation #
