@@ -129,7 +129,7 @@ def count_consensus_votes(
 
     """
     return np.count_nonzero(
-        (x >= 0).sum(axis=1).all() | (x.sum(axis=1) >= threshold)
+        (x >= 0).all(axis=2) | (x.sum(axis=2) >= threshold)
     )
 
 
@@ -148,9 +148,9 @@ def count_majority_votes(
     """
     # Perform ceiling division to find the number of votes required for a
     # majority
-    required_votes = - (- x.shape[1] // 2)
+    required_votes = - (- x.shape[2] // 2)
     return np.count_nonzero(
-        (x >= 0).sum(axis=1) >= required_votes | (x.sum(axis=1) >= threshold)
+        ((x >= 0).sum(axis=2) >= required_votes) | (x.sum(axis=2) >= threshold)
     )
 
 
@@ -183,5 +183,5 @@ def passes_majority(
         threshold: The score threshold.
 
     """
-    required_votes = - (- x.shape[1] // 2)
+    required_votes = - (- x.shape[0] // 2)
     return (x >= 0).sum() >= required_votes or x.sum() >= threshold
