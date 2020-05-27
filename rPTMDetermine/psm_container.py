@@ -151,7 +151,7 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
 
     def get_best_psms(self) -> PSMContainer[PSMType]:
         """
-        Extracts only the PSM with the highest LDA score for each spectrum
+        Extracts only the PSM with the greatest score sum for each spectrum
         matched by any number of peptides.
 
         Returns:
@@ -161,7 +161,7 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
         index = self.get_index(("data_id", "spec_id"))
 
         return PSMContainer([max([self.data[i] for i in indices],
-                                 key=operator.attrgetter("lda_score"))
+                                 key=lambda p: p.ml_scores.sum())
                              for indices in index.values()])
 
     def get_unique_peptides(
@@ -306,6 +306,20 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
 
                 if spectra is not None:
                     psm.spectrum = spectra[psm.data_id][psm.spec_id]
+
+                psm.ml_scores = np.array(
+                    list(map(float, row['Scores'].split(';')))
+                )
+
+                def get_float_or_none(key):
+                    try:
+                        return float(row[key])
+                    except ValueError:
+                        return None
+
+                psm.site_score = get_float_or_none('SiteScore')
+                psm.site_prob = get_float_or_none('SiteProbability')
+                psm.site_diff_score = get_float_or_none('SiteDiffScore')
 
                 psms.append(psm)
 
