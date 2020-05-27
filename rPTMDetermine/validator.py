@@ -12,6 +12,7 @@ import logging
 import multiprocessing as mp
 import operator
 import os
+import pickle
 from typing import (
     Callable,
     cast,
@@ -26,7 +27,6 @@ from typing import (
 )
 
 import numpy as np
-import tqdm
 
 from pepfrag import Peptide
 
@@ -42,6 +42,7 @@ from .features import Features
 from .peptide_spectrum_match import PSM
 from .psm_container import PSMContainer
 from .readers import SearchEngine
+from .results import write_psm_results
 from .rptmdetermine_config import DataSetConfig, RPTMDetermineConfig
 
 try:
@@ -115,6 +116,32 @@ def get_parallel_mods(
     return {
         mod.mod for psm in psms for mod in psm.mods if mod.mod != target_mod
     }
+
+
+def construct_model(
+        x_pos: np.ndarray,
+        x_neg: np.ndarray
+) -> Tuple[machinelearning.Classifier, float]:
+    """
+    Constructs a machine learning model to classify `x_pos` from `x_neg`.
+
+    Args:
+        x_pos: Array of positive class features.
+        x_neg: Array of negative class features.
+
+    Returns:
+        Tuple of trained model and score threshold.
+
+    """
+    x_neg = machinelearning.subsample_negative(x_pos, x_neg)
+
+    model = machinelearning.construct_model(x_pos, x_neg)
+
+    threshold = machinelearning.calculate_score_threshold(
+        model, x_pos, x_neg
+    )
+
+    return model, threshold
 
 
 class Validator(validator_base.ValidateBase):
@@ -214,6 +241,12 @@ class Validator(validator_base.ValidateBase):
                                         modified identifications.
 
         """
+        if not HAS_PANDAS_EXCEL:
+            logging.warning(
+                'Optional requirements pandas/openpyxl are not installed; '
+                'combined Excel results will not be saved.'
+            )
+        
         model_features = [
             f for f in Features.all_feature_names()
             if f not in self.config.exclude_features
@@ -225,11 +258,10 @@ class Validator(validator_base.ValidateBase):
         self._get_mod_identifications()
         allowed_mods = get_parallel_mods(self.psms, self.modification)
         self._get_unmod_identifications(allowed_mods)
-
         self._get_decoy_identifications(allowed_mods)
-
         self._process_mass_spectra()
 
+        logging.info('Calculating PSM features')
         self._calculate_features()
 
         # TODO: how to handle different model configurations, mod vs. decoy etc.
@@ -238,16 +270,9 @@ class Validator(validator_base.ValidateBase):
             features=model_features
         )
 
-        x_decoy = machinelearning.subsample_negative(
-            x_pos,
-            self.decoy_psms.to_feature_array(model_features)
-        )
-
-        self.model = machinelearning.construct_model(x_pos, x_decoy)
-
-        threshold = machinelearning.calculate_score_threshold(
-            self.model, x_pos, x_decoy
-        )
+        x_decoy = self.decoy_psms.to_feature_array(model_features)
+        threshold = self._construct_model(x_pos, x_decoy)
+        logging.info(f'Validation score threshold = {threshold}')
 
         # Since only part of the positive and decoy identifications are used
         # for model construction, predict all identifications to check whether
@@ -264,27 +289,27 @@ class Validator(validator_base.ValidateBase):
 
         consensus_fdr = eval_fdr()
         majority_fdr = eval_fdr(use_consensus=False)
-        # TODO: log these
-        print(f'Consensus FDR: {consensus_fdr * 100}')
-        print(f'Majority FDR: {majority_fdr * 100}')
+        logging.info(f'Consensus FDR: {consensus_fdr * 100}')
+        logging.info(f'Majority FDR: {majority_fdr * 100}')
 
+        logging.info('Classifying identifications')
         validated_counts = self._classify_all(
             threshold, features=model_features
         )
         for label, container in self.psm_containers.items():
-            print(
+            logging.info(
                 f'{validated_counts[label]} out of {len(container)} {label} '
                 'identifications are validated'
             )
 
+        logging.info('Correcting and localizing modifications')
         self._correct_and_localize(
             features=model_features,
             extra_containers=model_extra_psm_containers
         )
 
-        self._output_results(
-            threshold
-        )
+        logging.info('Writing results to file')
+        self._output_results(threshold)
 
     def _correct_and_localize(
             self,
@@ -316,19 +341,20 @@ class Validator(validator_base.ValidateBase):
             for cand_psm in cand_psms:
                 cand_psm.extract_features()
 
-            # Perform correction by selecting the isoform with the highest
-            # score
-            feature_array = cand_psms.to_feature_array(features=features)
-            isoform_scores = self.model.predict(feature_array)
-            max_isoform_score_idx = np.argmax(isoform_scores)
-            validation_scores = self.model.predict(
-                feature_array[max_isoform_score_idx],
-                use_cv=True
-            )
+            if cand_psms:
+                # Perform correction by selecting the isoform with the highest
+                # score
+                feature_array = cand_psms.to_feature_array(features=features)
+                isoform_scores = self.model.predict(feature_array)
+                max_isoform_score_idx = np.argmax(isoform_scores)
+                validation_scores = self.model.predict(
+                    feature_array[max_isoform_score_idx],
+                    use_cv=True
+                )[0]
 
-            # Replace the modifications with the corrected ones
-            psm.mods = cand_psms[max_isoform_score_idx].mods
-            psm.ml_scores = validation_scores
+                # Replace the modifications with the corrected ones
+                psm.mods = cand_psms[max_isoform_score_idx].mods
+                psm.ml_scores = validation_scores
 
             if any(ms.mod == self.modification for ms in psm.mods):
                 localization.localize(
@@ -339,6 +365,34 @@ class Validator(validator_base.ValidateBase):
                     self.model,
                     features=features
                 )
+
+    def _construct_model(self, x_pos: np.ndarray, x_decoy: np.ndarray) -> float:
+        """
+        Constructs the machine learning model to classify `x_pos` from
+        `x_decoy`.
+
+        Args:
+            x_pos: The positive class feature array.
+            x_decoy: The decoy class feature array.
+
+        Returns:
+            Score threshold for validation.
+
+        """
+        model_cache = os.path.join(self.cache_dir, 'model.pkl')
+        if self.use_cache and os.path.exists(model_cache):
+            logging.info('Using cached machine learning model')
+            with open(model_cache, 'rb') as fh:
+                self.model, threshold = pickle.load(fh)
+            return threshold
+
+        logging.info('Training machine learning model')
+        self.model, threshold = construct_model(x_pos, x_decoy)
+
+        with open(model_cache, 'wb') as fh:
+            pickle.dump((self.model, threshold), fh)
+
+        return threshold
 
     def _output_results(
             self,
@@ -362,6 +416,11 @@ class Validator(validator_base.ValidateBase):
             f'{self.modification}_{self.config.target_residue}'
         )
 
+        # Write important, but not PSM, data to file
+        with open(f'{output_file_base}_Properties.csv', 'w', newline='') as fh:
+            writer = csv.writer(fh)
+            writer.writerow(['ScoreThreshold', threshold])
+
         for label, container in self.psm_containers.items():
             # Replace the container label with a more human-readable name
             # if it exists
@@ -369,41 +428,7 @@ class Validator(validator_base.ValidateBase):
 
             output_file = f'{output_file_base}_{label}.csv'
 
-            with open(output_file, 'w', newline='') as fh:
-                writer = csv.writer(fh)
-                writer.writerow([
-                    'DataID',
-                    'SpectrumID',
-                    'Sequence',
-                    'Charge',
-                    'Modifications',
-                    'PassesConsensus',
-                    'PassesMajority',
-                    'Localized',
-                    'Scores',
-                    'SiteScore',
-                    'SiteProbability',
-                    'SiteDiffScore'
-                ])
-                for psm in container:
-                    writer.writerow([
-                        psm.data_id,
-                        psm.spec_id,
-                        psm.seq,
-                        psm.charge,
-                        ';'.join((f'{m.mod}@{m.site}' for m in psm.mods)),
-                        machinelearning.passes_consensus(
-                            psm.ml_scores, threshold
-                        ),
-                        machinelearning.passes_majority(
-                            psm.ml_scores, threshold
-                        ),
-                        psm.is_localized(),
-                        ';'.join(map(str, psm.ml_scores[0].tolist())),
-                        psm.site_score,
-                        psm.site_prob,
-                        psm.site_diff_score
-                    ])
+            write_psm_results(container, output_file, threshold)
 
         if HAS_PANDAS_EXCEL:
             # Generate combined output file with each CSV as a separate sheet
@@ -414,16 +439,30 @@ class Validator(validator_base.ValidateBase):
                     output_file = f'{output_file_base}_{label}.csv'
 
                     df = pd.read_csv(output_file)
-                    df.to_excel(writer, sheet_name=label)
+                    df.to_excel(writer, sheet_name=label, index=False)
 
     def _read_results(self):
         """
         Retrieves the search results from the set of input files.
 
         """
+        search_results_cache = os.path.join(
+            self.cache_dir, 'search_results.pkl'
+        )
+
+        if self.use_cache and os.path.exists(search_results_cache):
+            logging.info('Using cached search results')
+            with open(search_results_cache, 'rb') as fh:
+                self.search_results = pickle.load(fh)
+            return
+
         for set_id, set_info in self.config.data_sets.items():
             res_path = os.path.join(set_info.data_dir, set_info.results)
             self.search_results[set_id] = self.reader.read(res_path)
+
+        logging.info('Caching search results')
+        with open(search_results_cache, 'wb') as fh:
+            pickle.dump(self.search_results, fh)
 
     def _get_identifications(
             self,
@@ -447,7 +486,7 @@ class Validator(validator_base.ValidateBase):
                                 update with the negative identifications.
 
         """
-        for set_id, set_info in tqdm.tqdm(self.config.data_sets.items()):
+        for set_id, set_info in self.config.data_sets.items():
             # Apply database search FDR control to the results
             pos_idents, neg_idents = self._split_fdr(
                 self.search_results[set_id],
@@ -504,15 +543,32 @@ class Validator(validator_base.ValidateBase):
         """
 
         """
+        decoy_psm_cache = os.path.join(
+            self.cache_dir, 'decoy_identifications.pkl'
+        )
+        if self.use_cache and os.path.exists(decoy_psm_cache):
+            logging.info('Using cached decoy identifications')
+            with open(decoy_psm_cache, 'rb') as fh:
+                self.decoy_psms = pickle.load(fh)
+                return
+
         self.decoy_psms = PSMContainer()
         for set_id, set_info in self.config.data_sets.items():
             if set_info.decoy_results is not None:
+                logging.info(
+                    'Reading decoy identifications from '
+                    f'{set_info.decoy_results}'
+                )
                 self.decoy_psms.extend(
                     self._get_decoys_from_file(set_id, set_info, allowed_mods)
                 )
             else:
                 # TODO: decoys from self.search_results
-                pass
+                raise NotImplementedError()
+
+        logging.info('Caching decoy identifications')
+        with open(decoy_psm_cache, 'wb') as fh:
+            pickle.dump(self.decoy_psms, fh)
 
     def _get_decoys_from_file(
         self,
