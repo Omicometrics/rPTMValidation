@@ -43,10 +43,10 @@ class TestConsensusScoring(unittest.TestCase):
 
         """
         scores = np.array([
-            [[0.1, 0.1, 0.2]],  # pass
-            [[-0.2, -0.1, 0.]],  # fail
-            [[-0.2, 0.1, 0.2]],  # fail
-            [[-0.4, 0.5, 0.6]],  # pass
+            [0.1, 0.1, 0.2],  # pass
+            [-0.2, -0.1, 0.],  # fail
+            [-0.2, 0.1, 0.2],  # fail
+            [-0.4, 0.5, 0.6],  # pass
         ])
         self.assertEqual(2, count_consensus_votes(scores, 0.5))
 
@@ -92,11 +92,11 @@ class TestMajorityScoring(unittest.TestCase):
 
         """
         scores = np.array([
-            [[0.1, 0.2, 0.3]],  # pass
-            [[-0.2, -0.1, 0.]],  # fail
-            [[-0.2, 0.1, 0.2]],  # pass
-            [[-0.4, 0.5, 0.6]],  # pass
-            [[-0.2, -0.1, 1.]],  # pass
+            [0.1, 0.2, 0.3],  # pass
+            [-0.2, -0.1, 0.],  # fail
+            [-0.2, 0.1, 0.2],  # pass
+            [-0.4, 0.5, 0.6],  # pass
+            [-0.2, -0.1, 1.],  # pass
         ])
         self.assertEqual(4, count_majority_votes(scores, 0.5))
 
