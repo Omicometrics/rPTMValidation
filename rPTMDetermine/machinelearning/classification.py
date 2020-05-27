@@ -56,11 +56,6 @@ def construct_model(x_pos: np.ndarray, x_neg: np.ndarray) -> Classifier:
     Constructs validation model.
 
     """
-    print(
-        f'No. of positives: {x_pos.shape[0]}\n'
-        f'No. of decoys: {x_neg.shape[0]}'
-    )
-
     x = np.concatenate((x_pos, x_neg), axis=0)
     y = np.concatenate(
         (np.ones(x_pos.shape[0]), np.zeros(x_neg.shape[0])),
