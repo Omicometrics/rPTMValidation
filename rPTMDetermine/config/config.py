@@ -92,17 +92,25 @@ class Config(metaclass=ConfigMeta):
                          if not f.has_default]
         self._check_required()
 
+    def __repr__(self) -> str:
+        """
+        Implements the repr conversion for the class.
+
+        """
+        return str(self)
+
     def __str__(self) -> str:
         """
         Implements the string conversion for the class.
 
         """
-        string = ''
+        string = f'<{self.__class__.__name__} '
         for field in self.config_fields:
             val = getattr(self, field.name)
             if isinstance(val, enum.Enum):
                 val = val.name
             string += f'{field.name} = {str(val)}\n'
+        string = string.strip() + '>'
         return string
 
     def __hash__(self):
