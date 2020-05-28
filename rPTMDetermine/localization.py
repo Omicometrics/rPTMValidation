@@ -28,6 +28,15 @@ def generate_localization_candidates(
     """
     Generates alternative localization candidates for `mod` in `psm`.
 
+    Args:
+        psm: The peptide spectrum match.
+        mod: Target modification to be permuted.
+        mod_mass: The mass of `mod`.
+        target_residues: The amino acid residues targeted by `mod`.
+
+    Returns:
+        PSM candidates.
+
     """
     candidates: PSMContainer[PSM] = PSMContainer()
 
@@ -68,6 +77,20 @@ def generate_alternative_nterm_candidates(
         alternative_mod: str,
         mod_mass: float
 ) -> PSMContainer[PSM]:
+    """
+    Generates a candidate PSM with `alternative_mod` at the N-terminus.
+
+    Args:
+        psm: The peptide spectrum match.
+        validation_mod: The modification under validation.
+        alternative_mod: The alternative modification to consider at the
+                         N-terminus.
+        mod_mass: The mass of `mod`.
+
+    Returns:
+        PSM candidates.
+
+    """
     candidates: PSMContainer[PSM] = PSMContainer()
 
     fixed_mods = [ms for ms in psm.mods if ms.mod != validation_mod]
@@ -92,6 +115,13 @@ def generate_deamidation_candidates(
 ) -> PSMContainer[PSM]:
     """
     Generates alternative deamidation candidates for the given `psm`.
+
+    Args:
+        psm: The peptide spectrum match.
+        ptmdb: The unimod modification database.
+
+    Returns:
+        PSM candidates.
 
     """
     return generate_localization_candidates(
@@ -121,6 +151,9 @@ def generate_localization_isoforms(
         mod: Target modification to be permuted.
         mod_mass: The mass of `mod`.
         target_residue: The amino acid residue targeted by `mod`.
+
+    Returns:
+        PSM localization isoforms.
 
     """
     isoforms: PSMContainer[PSM] = PSMContainer()

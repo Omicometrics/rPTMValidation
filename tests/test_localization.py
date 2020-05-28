@@ -5,6 +5,7 @@ from pepfrag import ModSite, Peptide
 
 from rPTMDetermine import PSM
 from rPTMDetermine.localization import (
+    generate_alternative_nterm_candidates,
     generate_deamidation_candidates,
     generate_localization_isoforms
 )
@@ -155,6 +156,48 @@ class TestGenerateLocalizationIsoforms(unittest.TestCase):
                 make_nitro_psm([5, 6]),
             ],
             generate_localization_isoforms(psm, 'Nitro', nitro_mass, 'Y')
+        )
+
+
+class TestGenerateNTermCandidates(unittest.TestCase):
+    def test_site_occupied(self):
+        """
+        Tests that no candidates are generated when the N-terminus is
+        already modified.
+
+        """
+        psm = make_modified_psm(
+            'AYAAK', 2, [ModSite(304.20536, 'nterm', 'iTRAQ8plex')],
+            'Nitro', 44.985078, [2]
+        )
+
+        self.assertEqual(
+            [],
+            generate_alternative_nterm_candidates(
+                psm, 'Nitro', 'Carbamyl', 43.005814
+            )
+        )
+
+    def test_site_unoccupied(self):
+        """
+        Tests that a candidate is generated when the N-terminus is not modified.
+
+        """
+        psm = make_modified_psm(
+            'AYAAK', 2, [],
+            'Nitro', 44.985078, [2]
+        )
+
+        expected_psm = PSM(
+            None, None,
+            Peptide('AYAAK', 2, [ModSite(43.005814, 'nterm', 'Carbamyl')])
+        )
+
+        self.assertEqual(
+            [expected_psm],
+            generate_alternative_nterm_candidates(
+                psm, 'Nitro', 'Carbamyl', 43.005814
+            )
         )
 
 
