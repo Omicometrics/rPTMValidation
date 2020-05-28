@@ -129,16 +129,7 @@ class Features:
         """
         setattr(self, feature, value)
 
-    def isvalid(self):
-        """
-        Check whether the feature is a valid feature
-        set by identifying NoneType
-
-        """
-        return not any(getattr(self, feature) is None
-                       for feature in Features.__slots__)
-
-    def to_list(self, features: Optional[Sequence[str]]) -> List[float]:
+    def to_list(self, features: Optional[Sequence[str]] = None) -> List[float]:
         """
         Converts the set features to a list, optionally limiting the `features`
         to be output.
