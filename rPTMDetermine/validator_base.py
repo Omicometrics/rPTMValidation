@@ -69,9 +69,7 @@ class ValidateBase:
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
 
-        # Configure logging to go to a file and STDERR
-        # TODO: define a logger on the class and use calls to this to log
-        # messages using the appropriate logger
+        # Configure logging to go to a file and STDOUT
         logging.basicConfig(
             level=self.config.log_level,
             format="%(asctime)s [%(levelname)s]  %(message)s",
@@ -111,7 +109,7 @@ class ValidateBase:
         # Get the mass change associated with the target modification
         self.mod_mass = self.ptmdb.get_mass(self.config.modification)
 
-        self.file_prefix = f"{output_dir}/{path_str}_"
+        self.file_prefix = os.path.join(output_dir, f'{path_str}_')
 
     def _valid_cache(self) -> bool:
         """
