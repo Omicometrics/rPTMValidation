@@ -1,6 +1,7 @@
 import copy
 import os
 import tempfile
+from typing import Optional
 import unittest
 
 import numpy as np
@@ -9,6 +10,23 @@ from pepfrag import ModSite, Peptide
 from rPTMDetermine import PSM, PSMContainer
 from rPTMDetermine.readers import PTMDB
 from rPTMDetermine.results import write_psm_results
+
+
+DEFAULT_PEPTIDE = Peptide('AAA', 2, [])
+
+
+def make_psm(
+        data_id: str,
+        spec_id: str,
+        ml_scores: np.ndarray,
+        peptide: Optional[Peptide] = None
+) -> PSM:
+    if peptide is None:
+        peptide = copy.deepcopy(DEFAULT_PEPTIDE)
+
+    psm = PSM(data_id, spec_id, peptide)
+    psm.ml_scores = ml_scores
+    return psm
 
 
 class TestPSMContainerFromCSV(unittest.TestCase):
@@ -46,6 +64,41 @@ class TestPSMContainerFromCSV(unittest.TestCase):
         """
         container = PSMContainer.from_csv(self.temp_file.name, PTMDB())
         self.assertEqual(self.container, container)
+
+
+class TestPSMContainer(unittest.TestCase):
+    def test_get_best_psms(self):
+        """
+        Tests that the PSMContainer.get_best_psms method behaves as expected.
+
+        """
+        container = PSMContainer([
+            # Data1, Spec1 - both pass consensus, second has higher score
+            make_psm('Data1', 'Spec1', np.array([0.1, 0.2, 0.3]),
+                     peptide=Peptide('ACK', 2, [])),
+            make_psm('Data1', 'Spec1', np.array([0.2, 0.3, 0.4])),  # keep
+            # Data1, Spec2 - second PSM passes consensus, first has higher score
+            make_psm('Data1', 'Spec2', np.array([-0.1, 0.1, 0.5]),
+                     peptide=Peptide('ACK', 2, [])),
+            make_psm('Data1', 'Spec2', np.array([0.1, 0.1, 0.1])),  # keep
+            # Data1, Spec3 - both fail consensus, second has higher score
+            make_psm('Data1', 'Spec3', np.array([-0.3, -0.2, -0.1]),
+                     peptide=Peptide('ACK', 2, [])),
+            make_psm('Data1', 'Spec3', np.array([-0.2, -0.1, -0.1])),  # keep
+            # Data1, Spec4 - only one PSM
+            make_psm('Data1', 'Spec4', np.array([-0.3, 0.4, 0.5])),  # keep
+        ])
+
+        best_container = container.get_best_psms(1.)
+
+        expected_container = PSMContainer([
+            make_psm('Data1', 'Spec1', np.array([0.2, 0.3, 0.4])),
+            make_psm('Data1', 'Spec2', np.array([0.1, 0.1, 0.1])),
+            make_psm('Data1', 'Spec3', np.array([-0.2, -0.1, -0.1])),
+            make_psm('Data1', 'Spec4', np.array([-0.3, 0.4, 0.5])),
+        ])
+
+        self.assertEqual(expected_container, best_container)
 
 
 if __name__ == '__main__':

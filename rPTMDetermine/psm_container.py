@@ -113,7 +113,7 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
             p for p in self.data if p.site_prob is None or
             p.site_prob >= threshold])
 
-    def ids_not_in(self, exclude_ids: Sequence[Tuple[str, str]])\
+    def ids_not_in(self, exclude_ids: Iterable[Tuple[str, str]])\
             -> PSMContainer[PSMType]:
         """
         Filters the PSMs to those whose (data_id, spec_id) pair is not in the
@@ -149,7 +149,7 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
 
         return index
 
-    def get_best_psms(self) -> PSMContainer[PSMType]:
+    def get_best_psms(self, threshold: float) -> PSMContainer[PSMType]:
         """
         Extracts only the PSM with the greatest score sum for each spectrum
         matched by any number of peptides.
@@ -160,9 +160,31 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
         """
         index = self.get_index(("data_id", "spec_id"))
 
-        return PSMContainer([max([self.data[i] for i in indices],
-                                 key=lambda p: p.ml_scores.sum())
-                             for indices in index.values()])
+        best_psms: PSMContainer[PSMType] = PSMContainer()
+        for indices in index.values():
+            best = self.data[indices[0]]
+            if len(indices) < 2:
+                best_psms.append(best)
+                continue
+
+            best_score_sum = best.ml_scores.sum()
+            best_passes = machinelearning.passes_consensus(
+                best.ml_scores, threshold
+            )
+            for index in indices[1:]:
+                psm = self.data[index]
+                score_sum = psm.ml_scores.sum()
+                current_passes = machinelearning.passes_consensus(
+                    psm.ml_scores, threshold
+                )
+                if ((current_passes and not best_passes) or
+                        (score_sum >= best_score_sum and current_passes) or
+                        (score_sum >= best_score_sum and not current_passes and
+                         not best_passes)):
+                    best = psm
+            best_psms.append(best)
+
+        return best_psms
 
     def get_unique_peptides(
             self, predicate: Optional[Callable[[PSM], bool]] = None)\
