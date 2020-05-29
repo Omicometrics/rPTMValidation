@@ -262,3 +262,65 @@ def localize(
         ]
         alternatives.append((tuple(sites), scores[ii]))
     psm.alternative_localizations = alternatives
+
+
+def correct_and_localize(
+        psm: PSM,
+        target_mod: str,
+        target_mod_mass: float,
+        target_residue: str,
+        model: machinelearning.Classifier,
+        features: List[str],
+        ptmdb: PTMDB
+):
+    """
+    Corrects isobaric PTMs and localizes `target_mod` in `PSM`.
+
+    Args:
+        psm: The peptide spectrum match.
+        target_mod: The modification to localize.
+        target_mod_mass: The mass change associated with `target_mod`.
+        target_residue: The residue targeted by `target_mod`.
+        model: The trained machine learning classifier.
+        features: The list of features used in validated.
+        ptmdb: The unimod PTM database.
+
+    """
+    cand_psms = generate_deamidation_candidates(
+        psm, ptmdb
+    )
+    cand_psms.extend(
+        generate_alternative_nterm_candidates(
+            psm,
+            target_mod,
+            'Carbamyl',
+            ptmdb.get_mass('Carbamyl')
+        )
+    )
+    for cand_psm in cand_psms:
+        cand_psm.extract_features()
+
+    if cand_psms:
+        # Perform correction by selecting the isoform with the highest
+        # score
+        feature_array = cand_psms.to_feature_array(features=features)
+        isoform_scores = model.predict(feature_array)
+        max_isoform_score_idx = np.argmax(isoform_scores)
+        validation_scores = model.predict(
+            feature_array[max_isoform_score_idx],
+            use_cv=True
+        )[0]
+
+        # Replace the modifications with the corrected ones
+        psm.mods = cand_psms[max_isoform_score_idx].mods
+        psm.ml_scores = validation_scores
+
+    if any(ms.mod == target_mod for ms in psm.mods):
+        localize(
+            psm,
+            target_mod,
+            target_mod_mass,
+            target_residue,
+            model,
+            features=features
+        )
