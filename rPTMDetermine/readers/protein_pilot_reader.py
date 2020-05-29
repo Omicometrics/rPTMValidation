@@ -59,8 +59,8 @@ class ProteinPilotSearchResult(_ProteinPilotSearchResult):
 
     proteins: Optional[str]
     itraq_ratios: Optional[Dict[str, float]]
-    background: float
-    used_in_quantitation: bool
+    background: Optional[float]
+    used_in_quantitation: Optional[bool]
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
@@ -170,6 +170,11 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
             logging.warning(ex)
             return None
 
+        try:
+            used = bool(int(row['Used']))
+        except ValueError:
+            used = None
+
         return ProteinPilotSearchResult(
             seq=row["Sequence"],
             mods=tuple(parsed_mods),
@@ -193,8 +198,10 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
                 {k: float(row[k]) for k in itraq_cols if row[k]}
                 if itraq_cols else None
             ),
-            background=float(row["Background"]),
-            used_in_quantitation=bool(int(row["Used"]))
+            background=(
+                float(row["Background"]) if 'Background' in row else None
+            ),
+            used_in_quantitation=used
         )
 
 
@@ -352,8 +359,6 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
                 break
 
         return biases
-
-
 
     @staticmethod
     def _get_itraq_peaks(element) -> Dict[int, Tuple[float, float]]:
