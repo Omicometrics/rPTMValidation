@@ -324,3 +324,61 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
                 psms.append(psm)
 
         return psms
+
+    @classmethod
+    def from_csv_v1(
+            cls,
+            csv_file: str,
+            ptmdb: PTMDB,
+            spectra=None,
+            sep: str = ','
+    ) -> PSMContainer[PSM]:
+        """
+        Converts the contents of a CSV file to a PSMContainer. Each row of the
+        file should contain the details of a single PSM. This function is
+        designed to be used to read CSV files output by this program.
+
+        Args:
+            csv_file (str): The path to the CSV file.
+            ptmdb:
+            spectra:
+            sep:
+
+        Returns:
+            PSMContainer.
+
+        """
+        if not os.path.exists(csv_file):
+            print(f"CSV file {csv_file} does not exist - exiting")
+            sys.exit(1)
+
+        psms: PSMContainer[PSM] = PSMContainer()
+        with open(csv_file, newline="") as fh:
+            reader = csv.DictReader(fh, delimiter=sep)
+            for row in reader:
+                mods_str = row.get('Modifications', row.get('Mods'))
+                if mods_str is None:
+                    raise KeyError(
+                        f'No Modifications/Mods found in {csv_file}'
+                    )
+                try:
+                    mods = parse_mods(mods_str, ptmdb)
+                except UnknownModificationException:
+                    continue
+
+                psm = PSM(
+                    row['DataID'],
+                    row['SpectrumID'],
+                    Peptide(
+                        row['Sequence'],
+                        int(row['Charge']),
+                        mods
+                    )
+                )
+
+                if spectra is not None:
+                    psm.spectrum = spectra[psm.data_id][psm.spec_id]
+
+                psms.append(psm)
+
+        return psms
