@@ -145,17 +145,9 @@ class Spectrum:
 
         """
         if not isinstance(other, Spectrum):
-            raise NotImplementedError()
+            return NotImplemented
         return (np.array_equal(self._peaks, other._peaks) and
                 (self.prec_mz, self.charge) == (other.prec_mz, other.charge))
-
-    def __nonzero__(self) -> bool:
-        """
-        Implements the __nonzero__ method for the Spectrum class, testing
-        whether the underlying numpy array has been populated.
-
-        """
-        return self._peaks.size > 0
 
     def _mz_sort(self):
         """
