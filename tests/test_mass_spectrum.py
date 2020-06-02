@@ -18,12 +18,22 @@ class TestMassSpectrum(unittest.TestCase):
         np.testing.assert_equal(spectrum._peaks, peaks)
         self.assertTrue(spectrum)
 
+    def test_spectrum_construction_from_2by2(self):
+        peaks = np.array([
+            [10., 10.],
+            [20., 20.]
+        ])
+        spectrum = Spectrum(peaks, 543., 3)
+
+        np.testing.assert_equal(spectrum._peaks, peaks)
+        self.assertTrue(spectrum)
+
     def test_spectrum_construction_from_array_transpose(self):
         peaks = np.array([
                 [100., 123., 407., 413.],
                 [12., 23., 103., 104.]
             ])
-        spectrum = Spectrum(peaks, 609., 2)
+        spectrum = Spectrum(peaks.T, 609., 2)
 
         expected = np.array([
             [100., 12.],

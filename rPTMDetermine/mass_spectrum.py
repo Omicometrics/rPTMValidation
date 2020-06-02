@@ -63,8 +63,6 @@ class Spectrum:
         """
         self._peaks = (peak_list if isinstance(peak_list, np.ndarray)
                        else np.array(peak_list))
-        if self._peaks.shape[0] == 2:
-            self._peaks = self._peaks.T
         self.prec_mz = prec_mz
         self.charge = charge
         self.retention_time = retention_time
