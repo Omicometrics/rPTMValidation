@@ -5,7 +5,7 @@ Module contains a class to define a Peptide Spectrum Match (PSM).
 """
 import bisect
 import collections
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 
@@ -76,7 +76,7 @@ class PSM:
         self.features: Features = Features()
 
         # The results of validation
-        self.ml_scores: Optional[List[float]] = None
+        self.ml_scores: Optional[np.ndarray] = None
 
         # Localization attributes
         self.site_score: Optional[float] = None
@@ -198,6 +198,8 @@ class PSM:
         Implements the equality test for the object.
 
         """
+        if not isinstance(other, PSM):
+            return NotImplemented
         return (self.data_id, self.spec_id, self.peptide) == \
                (other.data_id, other.spec_id, other.peptide)
 
@@ -212,7 +214,8 @@ class PSM:
         """
         if self.spectrum is None:
             raise SpectrumNotFoundError(
-                f"PSM ({self.uid}) has not been assigned a Spectrum")
+                f"PSM ({self.uid}) has not been assigned a Spectrum"
+            )
 
     def annotate_spectrum(
         self, tol: float = 0.2,
