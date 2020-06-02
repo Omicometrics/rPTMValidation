@@ -52,8 +52,7 @@ setup(
         ]
     },
     scripts=[
-        "bin/rptmdetermine_validate.py",
-        "bin/rptmdetermine_retrieve.py"
+        "bin/rptmdetermine.py",
     ],
     include_package_data=True,
     language="c++"
