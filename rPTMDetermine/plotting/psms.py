@@ -7,7 +7,7 @@ identification validation results.
 import collections
 import operator
 import re
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from matplotlib.axes import Axes
 import matplotlib.lines as mlines
@@ -28,6 +28,22 @@ STANDARD_ION_REGEX = re.compile(r"([a-zA-Z]+)(\d+)\[(.*)\]")
 ION_CHARGE_REGEX = re.compile(r'[a-zA-Z]\d+\[(\d*)\+\]')
 
 
+def sort_ion_labels(ions: Sequence[str]) -> List[str]:
+    """
+    Sorts ion labels according to their ion number.
+
+    In the example of b2[+], the ion number would be 2.
+
+    Args:
+        ions: Ion labels to sort.
+
+    Returns:
+        Sorted list of string ion labels.
+
+    """
+    return sorted(ions, key=lambda s: STANDARD_ION_REGEX.match(s).group(2))
+
+
 def _add_sequence(
         ax: Axes,
         ions: Sequence[str],
@@ -43,7 +59,7 @@ def _add_sequence(
     """
     """
     color = "blue" if b_type else "red"
-    sorted_ions = sorted(ions, key=lambda s: int(s[1:-3]))
+    sorted_ions = sort_ion_labels(ions)
     for ii, ion in enumerate(sorted_ions):
         ann1 = anns[ion]
         x1 = mzs[ann1.peak_num]
@@ -185,6 +201,7 @@ def plot_psms(
         max_int = max(spec[:, 1])
         if rel_intensity:
             spec[:, 1] /= max_int
+            max_int = 1.
 
         psm.peptide.clean_fragment_ions()
 
