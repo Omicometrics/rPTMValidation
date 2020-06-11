@@ -17,6 +17,7 @@ from . import (
     PSMContainer
 )
 from .readers import PTMDB
+from .validation_model import ValidationModel
 
 
 def generate_localization_candidates(
@@ -200,7 +201,7 @@ def localize(
         target_mod: str,
         mod_mass: float,
         target_residue: str,
-        model: machinelearning.Classifier,
+        model: ValidationModel,
         features: Optional[List[str]] = None
 ):
     """
@@ -269,7 +270,7 @@ def correct_and_localize(
         target_mod: str,
         target_mod_mass: float,
         target_residue: str,
-        model: machinelearning.Classifier,
+        model: ValidationModel,
         features: List[str],
         ptmdb: PTMDB
 ):
@@ -304,7 +305,7 @@ def correct_and_localize(
         # Perform correction by selecting the isoform with the highest
         # score
         feature_array = cand_psms.to_feature_array(features=features)
-        isoform_scores = model.predict(feature_array)
+        isoform_scores = model.predict(feature_array, use_cv=False)
         max_isoform_score_idx = np.argmax(isoform_scores)
         validation_scores = model.predict(
             feature_array[max_isoform_score_idx],

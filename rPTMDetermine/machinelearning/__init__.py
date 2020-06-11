@@ -1,6 +1,6 @@
 from .classification import (
     Classifier,
-    construct_model
+    SKEstimator
 )
 from .sampling import subsample_negative
 from .scoring import (
@@ -15,8 +15,8 @@ from .scoring import (
 
 __all__ = [
     'Classifier',
+    'SKEstimator',
     'calculate_score_threshold',
-    'construct_model',
     'count_consensus_votes',
     'count_majority_votes',
     'evaluate_fdr',
