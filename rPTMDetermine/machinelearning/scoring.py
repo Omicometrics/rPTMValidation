@@ -125,7 +125,6 @@ def count_consensus_votes(
 
     Args:
         x: An array with rows of scores.
-        threshold: The score threshold.
 
     """
     return np.count_nonzero(
@@ -143,7 +142,6 @@ def count_majority_votes(
 
     Args:
         x: An array with rows of scores.
-        threshold: The score threshold.
 
     """
     # Perform ceiling division to find the number of votes required for a
@@ -180,7 +178,6 @@ def passes_majority(
 
     Args:
         x: An array with a single row of scores.
-        threshold: The score threshold.
 
     """
     required_votes = - (- x.shape[0] // 2)

@@ -297,6 +297,9 @@ class Stacking:
         """
         y = self._check_y(y)
 
+        if x.shape[1] == 1:
+            return x, None
+
         # do model selection and parameter selection using double
         # cross validation
         _n = y.size

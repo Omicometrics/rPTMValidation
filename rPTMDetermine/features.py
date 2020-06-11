@@ -19,8 +19,6 @@ class Features:
         "PepMass",
         "Charge",
         "ErrPepMass",
-        "IntModyb",
-        "TotalIntMod",
         "FracIon",
         "FracIonInt",
         "NumSeriesbm",
@@ -30,18 +28,14 @@ class Features:
         "NumIonbnl",
         "FracIonIntb_c1",
         "FracIonIntb_c2",
-        "FracIonIntb_c3",
         "FracIonInty_c1",
         "FracIonInty_c2",
-        "FracIonInty_c3",
         "FracIon20pc",
         "NumIonb",
         "NumIony",
         "FracIonInty",
         "FracIonIntb",
-        "FracIonMod",
         "MatchScore",
-        "MatchScoreMod",
         "SeqTagm",
     )
 
@@ -51,8 +45,6 @@ class Features:
     PepMass: Optional[float]
     Charge: Optional[float]
     ErrPepMass: Optional[float]
-    IntModyb: Optional[float]
-    TotalIntMod: Optional[float]
     FracIon: Optional[float]
     FracIonInt: Optional[float]
     NumSeriesbm: Optional[float]
@@ -62,18 +54,14 @@ class Features:
     NumIonbnl: Optional[float]
     FracIonIntb_c1: Optional[float]
     FracIonIntb_c2: Optional[float]
-    FracIonIntb_c3: Optional[float]
     FracIonInty_c1: Optional[float]
     FracIonInty_c2: Optional[float]
-    FracIonInty_c3: Optional[float]
     FracIon20pc: Optional[float]
     NumIonb: Optional[float]
     NumIony: Optional[float]
     FracIonInty: Optional[float]
     FracIonIntb: Optional[float]
-    FracIonMod: Optional[float]
     MatchScore: Optional[float]
-    MatchScoreMod: Optional[float]
     SeqTagm: Optional[float]
 
     @staticmethod

@@ -168,6 +168,7 @@ class PSM:
             "peptide": self.peptide,
             "spectrum": self.spectrum,
             "features": self.features,
+            "ml_scores": self.ml_scores,
             "site_prob": self.site_prob,
             "site_diff_score": self.site_diff_score,
             "alternative_localizations": self.alternative_localizations,
@@ -293,10 +294,19 @@ class PSM:
     # Feature Calculation #
     #######################
 
-    def extract_features(self, tol: float = 0.2) -> Features:
+    def extract_features(
+            self,
+            tol: float = 0.2,
+            required_features: Optional[Sequence[str]] = None
+    ) -> Features:
         """
         Extracts possible machine learning features from the peptide spectrum
         match.
+
+        Args:
+            tol: Mass tolerance level.
+            required_features: The features which should be set to 0. if their
+                               values are not otherwise calculated.
 
         Returns:
             Features.
@@ -310,10 +320,12 @@ class PSM:
         self._calculate_prop_features(denoised_spectrum)
         if ions:
             self._calculate_ion_features(self.seq, ions, denoised_spectrum, tol)
-        else:
-            for feature in self.features.all_feature_names():
-                if self.features.get(feature) is None:
-                    self.features.set(feature, 0.)
+
+        if required_features is None:
+            required_features = self.features.all_feature_names()
+        for feature in required_features:
+            if self.features.get(feature) is None:
+                self.features.set(feature, 0.)
 
         return self.features
 

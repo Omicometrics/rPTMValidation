@@ -231,7 +231,7 @@ def localize(
         isoform.extract_features()
 
     feature_array = isoforms.to_feature_array(features=features)
-    scores = model.predict(feature_array)
+    scores = model.predict(feature_array, use_cv=False)
 
     sorted_score_indices = scores.argsort()[::-1]
 

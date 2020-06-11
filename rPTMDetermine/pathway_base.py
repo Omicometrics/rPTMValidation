@@ -10,18 +10,24 @@ import logging
 import os
 import pickle
 import sys
-from typing import Dict, Generator, Iterable, List, Tuple
+from typing import Dict, Generator, Iterable, List, Optional, Tuple, Type
 
 from pepfrag import ModSite
 
 from . import (
+    PSMContainer,
+    machinelearning,
     mass_spectrum,
     peptides,
     proteolysis,
     readers,
     spectra_readers
 )
+from .features import Features
 from .rptmdetermine_config import RPTMDetermineConfig
+
+
+MODEL_CACHE_FILE = 'model.pkl'
 
 
 @functools.lru_cache(maxsize=1024)
@@ -40,7 +46,7 @@ def merge_peptide_sequence(seq: str, mods: Tuple[ModSite, ...]) -> str:
     return peptides.merge_seq_mods(seq, mods)
 
 
-class ValidateBase:
+class PathwayBase:
     """
     A base class to contain common attributes and methods for validation and
     retrieval pathways for the program.
@@ -111,6 +117,16 @@ class ValidateBase:
 
         self.file_prefix = os.path.join(output_dir, f'{path_str}_')
 
+        self.search_results: Dict[str, List[Type[readers.SearchResult]]] = {}
+
+        self.model_features = [
+            f for f in Features.all_feature_names()
+            if f not in self.config.exclude_features
+        ]
+
+        self.model: Optional[machinelearning.Classifier] = None
+        self.score_threshold: Optional[float] = None
+
     def _valid_cache(self) -> bool:
         """
         Determines whether any cached files may be used, based on the
@@ -156,11 +172,34 @@ class ValidateBase:
                 new_mods.append(mod_site)
                 continue
 
-            if (mod_site.mod != self.config.target_mod and
+            if (mod_site.mod != self.modification and
                     seq[site - 1] != self.config.target_residue):
                 new_mods.append(mod_site)
 
         return new_mods
+
+    def _read_results(self):
+        """
+        Retrieves the search results from the set of input files.
+
+        """
+        search_results_cache = os.path.join(
+            self.cache_dir, 'search_results.pkl'
+        )
+
+        if self.use_cache and os.path.exists(search_results_cache):
+            logging.info('Using cached search results')
+            with open(search_results_cache, 'rb') as fh:
+                self.search_results = pickle.load(fh)
+            return
+
+        for set_id, set_info in self.config.data_sets.items():
+            res_path = os.path.join(set_info.data_dir, set_info.results)
+            self.search_results[set_id] = self.reader.read(res_path)
+
+        logging.info('Caching search results')
+        with open(search_results_cache, 'wb') as fh:
+            pickle.dump(self.search_results, fh)
 
     def read_mass_spectra(self) \
             -> Generator[Tuple[str, Dict[str, mass_spectrum.Spectrum]], None,
@@ -204,3 +243,41 @@ class ValidateBase:
                 pickle.dump(spectra, fh)
 
             yield data_conf_id, spectra
+
+    def _classify(self, container: PSMContainer) -> int:
+        """
+        Classifies all PSMs in `container`.
+
+        Args:
+            container: The PSMContainer containing PSMs to classify.
+
+        Returns:
+            The number of PSMs validated.
+
+        """
+        x = container.to_feature_array(self.model_features)
+        scores = self.model.predict(x, use_cv=True)
+        for psm, _scores in zip(container, scores):
+            psm.ml_scores = _scores
+        return machinelearning.count_consensus_votes(scores)
+
+    def _has_target_residue(self, seq: str) -> bool:
+        """
+        Determines whether the given peptide `seq` contains the
+        configured `target_residue`.
+
+        Args:
+            seq: The peptide sequence.
+
+        Returns:
+            Boolean indicating whether the configured residue was found in
+            `seq`.
+
+        """
+        return self.config.target_residue in seq
+
+    def _valid_peptide_length(self, seq: str) -> bool:
+        """Evaluates whether the peptide `seq` is within the required length
+        range."""
+        return self.config.min_peptide_length <= len(seq) \
+            <= self.config.max_peptide_length

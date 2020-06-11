@@ -7,7 +7,6 @@ from __future__ import annotations  # Imported for lazy evaluation of types
 
 import collections
 import csv
-import operator
 import os
 import sys
 from typing import (Any, Callable, Dict, Generic, Iterable, List, Optional,
@@ -168,15 +167,11 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
                 continue
 
             best_score_sum = best.ml_scores.sum()
-            best_passes = machinelearning.passes_consensus(
-                best.ml_scores, threshold
-            )
+            best_passes = machinelearning.passes_consensus(best.ml_scores)
             for index in indices[1:]:
                 psm = self.data[index]
                 score_sum = psm.ml_scores.sum()
-                current_passes = machinelearning.passes_consensus(
-                    psm.ml_scores, threshold
-                )
+                current_passes = machinelearning.passes_consensus(psm.ml_scores)
                 if ((current_passes and not best_passes) or
                         (score_sum >= best_score_sum and current_passes) or
                         (score_sum >= best_score_sum and not current_passes and
@@ -226,11 +221,13 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
             A PSMContainer containing only validated PSMs.
 
         """
-        pass_function = (machinelearning.passes_consensus if use_consensus
-                         else machinelearning.passes_majority)
+        pass_function = (
+            machinelearning.scoring.passes_consensus if use_consensus
+            else machinelearning.passes_majority
+        )
         return PSMContainer([
             psm for psm in self.data if
-            pass_function(psm.ml_scores, score_threshold) and
+            pass_function(psm.ml_scores) and
             psm.is_localized()
         ])
 
