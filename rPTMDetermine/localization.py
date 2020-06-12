@@ -241,7 +241,7 @@ def localize(
     max_score = scores[max_score_idx]
     site_prob = 1. / np.exp(scores - max_score).sum()
     diff_score = min(
-        abs(max_score - scores[sorted_score_indices[1]] / max_score),
+        abs((max_score - scores[sorted_score_indices[1]]) / max_score),
         1.
     )
 
@@ -304,6 +304,7 @@ def correct_and_localize(
     if cand_psms:
         # Perform correction by selecting the isoform with the highest
         # score
+        cand_psms.append(psm)
         feature_array = cand_psms.to_feature_array(features=features)
         isoform_scores = model.predict(feature_array, use_cv=False)
         max_isoform_score_idx = np.argmax(isoform_scores)
