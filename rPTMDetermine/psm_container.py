@@ -148,7 +148,7 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
 
         return index
 
-    def get_best_psms(self, threshold: float) -> PSMContainer[PSMType]:
+    def get_best_psms(self) -> PSMContainer[PSMType]:
         """
         Extracts only the PSM with the greatest score sum for each spectrum
         matched by any number of peptides.
@@ -206,14 +206,12 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
 
     def get_validated(
         self,
-        score_threshold: float,
         use_consensus: bool = True
     ) -> PSMContainer[PSMType]:
         """
         Extracts the validated identifications from the full set of PSMs.
 
         Args:
-            score_threshold: The classification score threshold.
             use_consensus: If True, strict score consensus is required. If
                            False, majority voting will be used instead.
 
