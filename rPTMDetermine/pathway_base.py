@@ -4,13 +4,25 @@ This module provides a base class to be inherited for validation and
 retrieval pathways.
 
 """
-
+from bisect import bisect_left
 import functools
 import logging
+import operator
 import os
 import pickle
 import sys
-from typing import Dict, Generator, Iterable, List, Optional, Tuple, Type
+from typing import (
+    cast,
+    Callable,
+    Dict,
+    Generator,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+)
 
 from pepfrag import ModSite
 
@@ -24,10 +36,65 @@ from . import (
     spectra_readers
 )
 from .features import Features
-from .rptmdetermine_config import RPTMDetermineConfig
+from .readers import SearchEngine
+from .rptmdetermine_config import DataSetConfig, RPTMDetermineConfig
 
 
 MODEL_CACHE_FILE = 'model.pkl'
+
+
+ScoreGetter = Callable[[readers.SearchResult], float]
+
+ENGINE_SCORE_GETTER_MAP: Dict[SearchEngine, ScoreGetter] = {
+    SearchEngine.Mascot: operator.attrgetter("ionscore"),
+    SearchEngine.Comet: lambda r: r.scores["xcorr"]
+}
+
+
+def get_fdr_threshold(
+    search_results: Iterable[readers.SearchResult],
+    score_getter: ScoreGetter,
+    fdr: float
+) -> float:
+    """
+    Calculates the score threshold with the given FDR.
+
+    Returns:
+        The ion score threshold as a float.
+
+    """
+    topranking = {}
+    for res in [r for r in search_results if r.rank == 1]:
+        if res.spectrum in topranking:
+            if score_getter(res) >= score_getter(topranking[res.spectrum]):
+                topranking[res.spectrum] = res
+        else:
+            topranking[res.spectrum] = res
+
+    scores = {
+        readers.PeptideType.normal: [],
+        readers.PeptideType.decoy: []
+    }
+    for res in topranking.values():
+        scores[res.pep_type].append(score_getter(res))
+    tscores = sorted(scores[readers.PeptideType.normal])
+    dscores = sorted(scores[readers.PeptideType.decoy])
+
+    threshold = None
+    for idx, score in enumerate(tscores[::-1]):
+        didx = bisect_left(dscores, score)
+        dpassed = len(dscores) - didx
+        if idx + dpassed == 0:
+            continue
+        est_fdr = dpassed / (idx + dpassed)
+        if est_fdr < fdr:
+            threshold = score
+        if est_fdr > fdr:
+            break
+
+    if threshold is not None:
+        return threshold
+    raise RuntimeError(f"Failed to find score threshold at {fdr} FDR")
 
 
 @functools.lru_cache(maxsize=1024)
@@ -125,7 +192,6 @@ class PathwayBase:
         ]
 
         self.model: Optional[machinelearning.Classifier] = None
-        self.score_threshold: Optional[float] = None
 
     def _valid_cache(self) -> bool:
         """
@@ -200,6 +266,44 @@ class PathwayBase:
         logging.info('Caching search results')
         with open(search_results_cache, 'wb') as fh:
             pickle.dump(self.search_results, fh)
+
+    def _split_fdr(
+            self,
+            search_results: Sequence[readers.SearchResult],
+            data_config: DataSetConfig,
+    ) -> Tuple[Sequence[readers.SearchResult], Sequence[readers.SearchResult]]:
+        """
+        Splits the `search_results` into two lists according to the configured
+        FDR confidence (for ProteinPilot) or calculated FDR threshold for other
+        search engines.
+
+        """
+        positive: List[readers.SearchResult] = []
+        negative: List[readers.SearchResult] = []
+        if self.config.search_engine is SearchEngine.ProteinPilot:
+            for res in search_results:
+                (positive
+                 if cast(readers.ProteinPilotSearchResult, res).confidence
+                    >= data_config.confidence else negative).append(res)
+            return positive, negative
+
+        score_getter: Optional[ScoreGetter] = \
+            ENGINE_SCORE_GETTER_MAP.get(self.config.search_engine)
+
+        if score_getter is not None:
+            score = get_fdr_threshold(
+                search_results, score_getter, self.config.fdr)
+            logging.info(f"Calculated score threshold to be {score} "
+                         f"at {self.config.fdr} FDR")
+            for res in search_results:
+                (positive if score_getter(res) >= score
+                 else negative).append(res)
+            return positive, negative
+
+        raise NotImplementedError(
+            'No score getter configured for search engine '
+            f'{self.config.search_engine}'
+        )
 
     def read_mass_spectra(self) \
             -> Generator[Tuple[str, Dict[str, mass_spectrum.Spectrum]], None,
