@@ -23,6 +23,7 @@ def write_psm_results(
             'Sequence',
             'Charge',
             'Modifications',
+            'Target',
             'PassesConsensus',
             'PassesMajority',
             'Localized',
@@ -39,6 +40,7 @@ def write_psm_results(
                 psm.seq,
                 psm.charge,
                 ';'.join((f'{m.mod}@{m.site}' for m in psm.mods)),
+                psm.target,
                 machinelearning.passes_consensus(psm.ml_scores),
                 machinelearning.passes_majority(psm.ml_scores),
                 psm.is_localized(),
@@ -47,7 +49,7 @@ def write_psm_results(
                 psm.site_prob,
                 psm.site_diff_score,
                 ','.join([
-                    ';'.join(alt[0]) + f';{alt[1]}'
+                    ';'.join(map(str, alt[0])) + f';{alt[1]}'
                     for alt in psm.alternative_localizations
                 ]) if psm.alternative_localizations is not None else ''
             ])
