@@ -37,7 +37,7 @@ class TestPSMResultsWriter(unittest.TestCase):
             psm2,  # Not validated and not localized
         ])
 
-        write_psm_results(container, self.temp_file.name, 1.)
+        write_psm_results(container, self.temp_file.name)
 
         df = pd.read_csv(self.temp_file.name)
         expected = pd.DataFrame(
@@ -48,13 +48,15 @@ class TestPSMResultsWriter(unittest.TestCase):
                 'Charge': [2, 2],
                 'Modifications': ['testmod1@1;testmod2@2',
                                   'testmod1@1;testmod2@2'],
+                'Target': True,
                 'PassesConsensus': [True, False],
                 'PassesMajority': [True, True],
                 'Localized': [True, False],
                 'Scores': ['0.1;0.2;0.3', '-0.1;0.1;0.1'],
                 'SiteScore': [np.NaN, np.NaN],
                 'SiteProbability': [np.NaN, np.NaN],
-                'SiteDiffScore': [np.NaN, 0.01]
+                'SiteDiffScore': [np.NaN, 0.01],
+                'AlternativeSites': np.NaN
             }
         )
 

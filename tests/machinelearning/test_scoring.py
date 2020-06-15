@@ -17,16 +17,7 @@ class TestConsensusScoring(unittest.TestCase):
 
         """
         scores = np.array([0.1, 0.2, 0.3])
-        self.assertEqual(True, passes_consensus(scores, 1.))
-
-    def test_passes_consensus_on_threshold(self):
-        """
-        Tests that scores which are not all positive pass consensus voting on
-        the required threshold.
-
-        """
-        scores = np.array([-0.3, 0.2, 0.4])
-        self.assertEqual(True, passes_consensus(scores, 0.2))
+        self.assertEqual(True, passes_consensus(scores))
 
     def test_fails_consensus(self):
         """
@@ -34,8 +25,8 @@ class TestConsensusScoring(unittest.TestCase):
         the consensus vote.
 
         """
-        scores = np.array([-0.4, -0.1, 0.1])
-        self.assertEqual(False, passes_consensus(scores, 0.))
+        scores = np.array([-0.4, 0.1, 0.1])
+        self.assertEqual(False, passes_consensus(scores))
 
     def test_count_votes(self):
         """
@@ -46,9 +37,8 @@ class TestConsensusScoring(unittest.TestCase):
             [0.1, 0.1, 0.2],  # pass
             [-0.2, -0.1, 0.],  # fail
             [-0.2, 0.1, 0.2],  # fail
-            [-0.4, 0.5, 0.6],  # pass
         ])
-        self.assertEqual(2, count_consensus_votes(scores, 0.5))
+        self.assertEqual(1, count_consensus_votes(scores))
 
 
 class TestMajorityScoring(unittest.TestCase):
@@ -58,7 +48,7 @@ class TestMajorityScoring(unittest.TestCase):
 
         """
         scores = np.array([0.1, 0.2, 0.3])
-        self.assertEqual(True, passes_majority(scores, 1.))
+        self.assertEqual(True, passes_majority(scores))
 
     def test_passes_majority(self):
         """
@@ -66,16 +56,7 @@ class TestMajorityScoring(unittest.TestCase):
 
         """
         scores = np.array([-0.1, 0.2, 0.3])
-        self.assertEqual(True, passes_majority(scores, 1.))
-
-    def test_passes_majority_on_threshold(self):
-        """
-        Tests that scores which would not pass standard majority voting do pass
-        based on threshold.
-
-        """
-        scores = np.array([-0.2, -0.2, 0.5])
-        self.assertEqual(True, passes_consensus(scores, 0.))
+        self.assertEqual(True, passes_majority(scores))
 
     def test_fails_majority(self):
         """
@@ -84,7 +65,7 @@ class TestMajorityScoring(unittest.TestCase):
 
         """
         scores = np.array([-0.4, -0.1, 0.1])
-        self.assertEqual(False, passes_consensus(scores, 0.))
+        self.assertEqual(False, passes_consensus(scores))
 
     def test_count_votes(self):
         """
@@ -96,9 +77,8 @@ class TestMajorityScoring(unittest.TestCase):
             [-0.2, -0.1, 0.],  # fail
             [-0.2, 0.1, 0.2],  # pass
             [-0.4, 0.5, 0.6],  # pass
-            [-0.2, -0.1, 1.],  # pass
         ])
-        self.assertEqual(4, count_majority_votes(scores, 0.5))
+        self.assertEqual(3, count_majority_votes(scores))
 
 
 if __name__ == '__main__':

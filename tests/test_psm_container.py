@@ -50,7 +50,7 @@ class TestPSMContainerFromCSV(unittest.TestCase):
 
         self.temp_file = tempfile.NamedTemporaryFile(delete=False)
 
-        write_psm_results(self.container, self.temp_file.name, 1.)
+        write_psm_results(self.container, self.temp_file.name)
 
     def tearDown(self):
         self.temp_file.close()
@@ -89,7 +89,7 @@ class TestPSMContainer(unittest.TestCase):
             make_psm('Data1', 'Spec4', np.array([-0.3, 0.4, 0.5])),  # keep
         ])
 
-        best_container = container.get_best_psms(1.)
+        best_container = container.get_best_psms()
 
         expected_container = PSMContainer([
             make_psm('Data1', 'Spec1', np.array([0.2, 0.3, 0.4])),
