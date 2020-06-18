@@ -28,6 +28,11 @@ STANDARD_ION_REGEX = re.compile(r"([a-zA-Z]+)(\d+)\[(.*)\]")
 ION_CHARGE_REGEX = re.compile(r'[a-zA-Z]\d+\[(\d*)\+\]')
 
 
+Y_COLOR = '#ae1616'
+B_COLOR = '#6094be'
+UNANNOTATED_COLOR = '#a8a8a8'
+
+
 def sort_ion_labels(ions: Sequence[str]) -> List[str]:
     """
     Sorts ion labels according to their ion number.
@@ -58,7 +63,7 @@ def _add_sequence(
 ):
     """
     """
-    color = "blue" if b_type else "red"
+    color = B_COLOR if b_type else Y_COLOR
     sorted_ions = sort_ion_labels(ions)
     for ii, ion in enumerate(sorted_ions):
         ann1 = anns[ion]
@@ -157,7 +162,8 @@ def plot_psms(
         annotation: Optional[str] = None,
         save_path: Optional[str] = None,
         rel_intensity: bool = True,
-        mz_range: Optional[Tuple[float, float]] = None
+        mz_range: Optional[Tuple[float, float]] = None,
+        color_peaks: bool = False
 ):
     """
     Plots the given PSM spectra, with optional annotations.
@@ -174,6 +180,8 @@ def plot_psms(
         rel_intensity: Flag indicating whether the intensity scale should be
                        relative. Defaults to True.
         mz_range: An optional filter on the m/z range of the spectrum to plot.
+        color_peaks: A flag indicating that peaks should be coloured according
+                     to their annotations.
 
     Returns:
         Annotations for the spectrum, including those not shown (e.g. higher
@@ -210,15 +218,47 @@ def plot_psms(
                 (spec[:, 0] >= mz_range[0]) & (spec[:, 0] <= mz_range[1])
             ]
 
-        ax.stem(
-            spec[:, 0],
-            spec[:, 1],
-            "black",
-            basefmt=' ',
-            markerfmt=' ',
-            label=None,
-            use_line_collection=True
+        # Find the charge state with the greatest number of b/y ions for
+        # annotation
+        ion_counts = collections.Counter(
+            [m.group(1) for a in anns.keys()
+             if (m := ION_CHARGE_REGEX.match(a)) is not None]
         )
+        top_charge = ion_counts.most_common(1)[0][0]
+
+        if color_peaks:
+            b_peaks, y_peaks = [], []
+            for label, ann in anns.items():
+                if f'[{top_charge}+]' in label:
+                    if label[0] == 'b':
+                        b_peaks.append(ann.peak_num)
+                    elif label[0] == 'y':
+                        y_peaks.append(ann.peak_num)
+
+            def _stem(sel, color):
+                ax.stem(
+                    spec[sel, 0],
+                    spec[sel, 1],
+                    color,
+                    basefmt=' ',
+                    markerfmt=' ',
+                    label=None,
+                    use_line_collection=True
+                )
+
+            _stem(~np.array(b_peaks + y_peaks), UNANNOTATED_COLOR)
+            _stem(b_peaks, B_COLOR)
+            _stem(y_peaks, Y_COLOR)
+        else:
+            ax.stem(
+                spec[:, 0],
+                spec[:, 1],
+                "black",
+                basefmt=' ',
+                markerfmt=' ',
+                label=None,
+                use_line_collection=True
+            )
 
         ax.set_ylim(bottom=0)
         for spine in ["top", "right"]:
@@ -229,16 +269,6 @@ def plot_psms(
         )
 
         max_mz = max(spec[:, 0])
-
-        # Find the charge state with the greatest number of b/y ions for
-        # annotation
-        top_charge: Optional[str] = None
-        if annotation is not None:
-            ion_counts = collections.Counter(
-                [m.group(1) for a in anns.keys()
-                 if (m := ION_CHARGE_REGEX.match(a)) is not None]
-            )
-            top_charge = ion_counts.most_common(1)[0][0]
 
         if annotation == "sequence":
             def add_sequence(ions: Sequence[str], height: float, b_type: bool):
@@ -274,14 +304,14 @@ def plot_psms(
             b_line = mlines.Line2D(
                 [],
                 [],
-                color="blue",
+                color=B_COLOR,
                 marker="",
                 label="$\\it{b}$-ions"
             )
             y_line = mlines.Line2D(
                 [],
                 [],
-                color="red",
+                color=Y_COLOR,
                 marker="",
                 label="$\\it{y}$-ions"
             )
@@ -311,10 +341,10 @@ def plot_psms(
                         if a[0] == char and (f"[{top_charge}+]" in a)]
 
             # Annotate b-ions
-            add_ions(get_ions("b"), 1.01 * max_int, "blue")
+            add_ions(get_ions("b"), 1.01 * max_int, B_COLOR)
 
             # Annotate y-ions
-            add_ions(get_ions("y"), 1.04 * max_int, "red")
+            add_ions(get_ions("y"), 1.04 * max_int, Y_COLOR)
 
             # Annotate a-ions
             add_ions(get_ions("a"), 1.07 * max_int, "green")
