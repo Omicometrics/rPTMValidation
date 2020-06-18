@@ -9,7 +9,6 @@ import functools
 import logging
 import operator
 import os
-import pickle
 import sys
 from typing import (
     cast,
@@ -30,6 +29,7 @@ from . import (
     PSMContainer,
     machinelearning,
     mass_spectrum,
+    packing,
     peptides,
     proteolysis,
     readers,
@@ -38,9 +38,10 @@ from . import (
 from .features import Features
 from .readers import SearchEngine
 from .rptmdetermine_config import DataSetConfig, RPTMDetermineConfig
+from .validation_model import ValidationModel
 
 
-MODEL_CACHE_FILE = 'model.pkl'
+MODEL_CACHE_FILE = 'model'
 
 
 ScoreGetter = Callable[[readers.SearchResult], float]
@@ -191,7 +192,7 @@ class PathwayBase:
             if f not in self.config.exclude_features
         ]
 
-        self.model: Optional[machinelearning.Classifier] = None
+        self.model: Optional[ValidationModel] = None
 
     def _valid_cache(self) -> bool:
         """
@@ -250,22 +251,20 @@ class PathwayBase:
 
         """
         search_results_cache = os.path.join(
-            self.cache_dir, 'search_results.pkl'
+            self.cache_dir, 'search_results'
         )
 
         if self.use_cache and os.path.exists(search_results_cache):
-            logging.info('Using cached search results')
-            with open(search_results_cache, 'rb') as fh:
-                self.search_results = pickle.load(fh)
+            logging.info('Using cached search results...')
+            self.search_results = packing.load_from_file(search_results_cache)
             return
 
         for set_id, set_info in self.config.data_sets.items():
             res_path = os.path.join(set_info.data_dir, set_info.results)
             self.search_results[set_id] = self.reader.read(res_path)
 
-        logging.info('Caching search results')
-        with open(search_results_cache, 'wb') as fh:
-            pickle.dump(self.search_results, fh)
+        logging.info('Caching search results...')
+        packing.save_to_file(self.search_results, search_results_cache)
 
     def _split_fdr(
             self,
@@ -317,16 +316,17 @@ class PathwayBase:
         """
         for data_conf_id, data_conf in self.config.data_sets.items():
             spectra_cache_file = os.path.join(
-                self.cache_dir, f'spectra_{data_conf_id}.pkl'
+                self.cache_dir, f'spectra_{data_conf_id}'
             )
             if self.use_cache and os.path.exists(spectra_cache_file):
-                logging.info(f'Using cached {data_conf_id} spectra')
-                with open(spectra_cache_file, 'rb') as fh:
-                    spectra = pickle.load(fh)
+                logging.info(f'Using cached {data_conf_id} spectra...')
+                spectra = packing.load_from_file(spectra_cache_file)
                 yield data_conf_id, spectra
                 continue
 
-            logging.info(f'Processing {data_conf_id}: {data_conf.spectra_file}')
+            logging.info(
+                f'Processing {data_conf_id}: {data_conf.spectra_file}...'
+            )
             spec_file_path = os.path.join(
                 data_conf.data_dir, data_conf.spectra_file
             )
@@ -342,9 +342,8 @@ class PathwayBase:
                 spectra_readers.read_spectra_file(spec_file_path)
             }
 
-            logging.info(f'Caching {data_conf_id} spectra')
-            with open(spectra_cache_file, 'wb') as fh:
-                pickle.dump(spectra, fh)
+            logging.info(f'Caching {data_conf_id} spectra...')
+            packing.save_to_file(spectra, spectra_cache_file)
 
             yield data_conf_id, spectra
 

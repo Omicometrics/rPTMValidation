@@ -4,20 +4,21 @@ Peptide validation using ensemble SVM.
 """
 import bisect
 import collections
+import dataclasses
 import itertools
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Tuple
 
 import numpy as np
-from sklearn.model_selection import GridSearchCV
-from sklearn.svm import LinearSVC
 
 from .machinelearning import Classifier, SKEstimator, subsample_negative
 from .psm_container import PSMContainer
 
 
-Scaler = collections.namedtuple(
-    "Scaler", ["centers", "normalizer"], defaults=[None, None]
-)
+@dataclasses.dataclass
+class Scaler:
+    centers: np.ndarray
+    normalizer: np.ndarray
+
 
 # Fraction for subsampling from minority class.
 # NOTE: these fractions are set empirically.
@@ -127,9 +128,6 @@ class ValidationModel:
     """
     def __init__(
             self,
-            pos_psms: PSMContainer,
-            decoy_psms: PSMContainer,
-            neg_psms: PSMContainer,
             estimator: SKEstimator,
             model_features: Optional[Sequence[str]] = None,
             **kwargs
@@ -138,9 +136,6 @@ class ValidationModel:
         Initializes the class.
 
         Args:
-            pos_psms: Positive peptide spectrum matches.
-            decoy_psms: Decoy peptide spectrum matches.
-            neg_psms: Negative peptide spectrum matches.
             estimator: Scikit-learn classifier.
             model_features: Features to be used in model construction and
                             prediction.
@@ -148,19 +143,36 @@ class ValidationModel:
 
         """
         self.classifier = Classifier(estimator, **kwargs)
-        self.pos_psms = pos_psms
-        self.decoy_psms = decoy_psms
-        self.neg_psms = neg_psms
         self.model_features = model_features
 
         self._scaler: Optional[Scaler] = None
         self._decoy_train_index: Optional[np.ndarray] = None
 
-    def fit(self):
+    def fit_and_normalize(
+            self,
+            pos_psms: PSMContainer,
+            decoy_psms: PSMContainer,
+            neg_psms: PSMContainer,
+            **kwargs
+    ) -> Tuple[PSMContainer, PSMContainer, PSMContainer]:
+        """
+        Fits and normalizes the validation model.
+
+        Args:
+            pos_psms: Positive (passed FDR) peptide spectrum matches.
+            decoy_psms: Decoy peptide spectrum matches.
+            neg_psms: Negative (failed FDR) peptide spectrum matches.
+
+        """
+        self.fit(pos_psms, decoy_psms)
+        decoy_psms = self.normalize(pos_psms, decoy_psms, neg_psms, **kwargs)
+        return pos_psms, decoy_psms, neg_psms
+
+    def fit(self, pos_psms: PSMContainer, decoy_psms: PSMContainer):
         """ Construct validation model. """
         # data matrices
-        x_pos = self.pos_psms.to_feature_array(features=self.model_features)
-        x_decoy = self.decoy_psms.to_feature_array(features=self.model_features)
+        x_pos = pos_psms.to_feature_array(features=self.model_features)
+        x_decoy = decoy_psms.to_feature_array(features=self.model_features)
 
         # Subsampling to reduce the number of decoys for training
         dists = subsample_negative(x_pos, x_decoy)
@@ -184,34 +196,43 @@ class ValidationModel:
         # train the model.
         self.classifier.fit(x, y)
 
-    def normalize(self, q_threshold: float = 0.01):
+    def normalize(
+            self,
+            pos_psms: PSMContainer,
+            decoy_psms: PSMContainer,
+            neg_psms: PSMContainer,
+            q_threshold: float = 0.01
+    ) -> PSMContainer:
         """
         Normalize scores so that the score at `q_threshold` is 0 and median of
         decoy scores is -1.
 
         Args:
+            pos_psms: Positive (passed FDR) peptide spectrum matches.
+            decoy_psms: Decoy peptide spectrum matches.
+            neg_psms: Negative (failed FDR) peptide spectrum matches.
             q_threshold: q value threshold for scaling. Default is 0.01.
 
         """
         # update PSMs with scores
-        self._update_training_psms()
+        self._update_training_psms(pos_psms, decoy_psms)
 
         # predict rest decoys not used in training.
-        decoy_index = np.arange(len(self.decoy_psms), dtype=int)
+        decoy_index = np.arange(len(decoy_psms), dtype=int)
         decoy_index = np.delete(decoy_index, self._decoy_train_index)
         train_decoys = PSMContainer(
-            [self.decoy_psms[i] for i in self._decoy_train_index]
+            [decoy_psms[i] for i in self._decoy_train_index]
         )
-        rest_decoys = PSMContainer([self.decoy_psms[i] for i in decoy_index])
+        rest_decoys = PSMContainer([decoy_psms[i] for i in decoy_index])
         if decoy_index.size > 0:
-            rest_decoys = self.validate_psms(rest_decoys)
+            self.validate_psms(rest_decoys)
 
         # validate negatives
-        self.neg_psms = self.validate_psms(self.neg_psms)
+        self.validate_psms(neg_psms)
 
         # validation scores of additional identifications
-        train_psms = PSMContainer(self.pos_psms + train_decoys)
-        extra_psms = PSMContainer(self.neg_psms + rest_decoys)
+        train_psms = PSMContainer(pos_psms + train_decoys)
+        extra_psms = PSMContainer(neg_psms + rest_decoys)
         extra_scores = np.array([psm.ml_scores for psm in extra_psms])
         train_scores = np.array([psm.ml_scores for psm in train_psms])
 
@@ -237,24 +258,26 @@ class ValidationModel:
             nx.append(m - md)
 
         mx, nx = np.array(mx), np.array(nx)
-        self._scaler = Scaler(centers=mx, normalizer=nx)
+        self._scaler = Scaler(mx, nx)
 
         # normalize training scores
-        self._normalize_training_scores()
+        self._normalize_training_scores(pos_psms, decoy_psms)
 
         # normalize extra identifications
-        for psm in itertools.chain(self.neg_psms, rest_decoys):
+        for psm in itertools.chain(neg_psms, rest_decoys):
             psm.ml_scores = (psm.ml_scores - mx) / nx
 
-        self.decoy_psms = train_decoys + rest_decoys
+        decoy_psms = train_decoys + rest_decoys
+
+        return decoy_psms
 
     def validate_psms(
             self,
             psms: PSMContainer,
             use_cv: bool = True
-    ) -> PSMContainer:
+    ):
         """
-        Validates unknown PSMs.
+        Validates unknown PSMs in-place.
 
         Args:
             psms: PSM objects to validate.
@@ -262,9 +285,6 @@ class ValidationModel:
                     cross validated scores with size of n samples by k fold
                     cross validations, otherwise singe score for each PSM
                     is returned. Default is `True`.
-
-        Returns:
-            PSMContainer with updated `ml_scores`.
 
         """
         if len(psms) == 0:
@@ -275,8 +295,6 @@ class ValidationModel:
         scores = self.predict(x, use_cv=use_cv)
         for psm, _scores in zip(psms, scores):
             psm.ml_scores = _scores
-
-        return psms
 
     def predict(self, x: np.ndarray, use_cv: bool = True) -> np.ndarray:
         """
@@ -309,7 +327,11 @@ class ValidationModel:
         """
         return (scores - self._scaler.centers) / self._scaler.normalizer
 
-    def _normalize_training_scores(self):
+    def _normalize_training_scores(
+            self,
+            pos_psms: PSMContainer,
+            decoy_psms: PSMContainer
+    ):
         """
         Normalizes training scores.
 
@@ -323,7 +345,7 @@ class ValidationModel:
             self.classifier.train_scores[
                 self.classifier.stacking_test_index == i
             ] = (scores - c) / n
-        self._update_training_psms()
+        self._update_training_psms(pos_psms, decoy_psms)
 
     @staticmethod
     def _reconstruct_psms(
@@ -344,58 +366,22 @@ class ValidationModel:
         score_info = np.array(list(score_rec.values()))
         return score_info[:, 0], score_info[:, 1]
 
-    def _update_training_psms(self):
+    def _update_training_psms(
+            self,
+            pos_psms: PSMContainer,
+            decoy_psms: PSMContainer
+    ):
         """
         Updates PSM scores in training.
 
         """
-        num_pos = len(self.pos_psms)
+        num_pos = len(pos_psms)
         # Update positive PSMs
-        for i, psm in enumerate(self.pos_psms):
+        for i, psm in enumerate(pos_psms):
             psm.ml_scores = self.classifier.train_scores[i]
 
         # Update decoy PSMs for training
         for i, scores in zip(
                 self._decoy_train_index, self.classifier.train_scores[num_pos:]
         ):
-            self.decoy_psms[i].ml_scores = scores
-
-
-def construct_model(
-        pos_psms: PSMContainer,
-        decoy_psms: PSMContainer,
-        neg_psms: PSMContainer,
-        model_features: Optional[Sequence[str]],
-        parallel_jobs: int = 4,
-        q_threshold: float = 0.01
-) -> ValidationModel:
-    """
-    Constructs a machine learning ValidationModel using a LinearSVC classifier.
-
-    Args:
-        pos_psms: Positive peptide spectrum matches.
-        decoy_psms: Decoy peptide spectrum matches.
-        neg_psms: Negative peptide spectrum matches.
-        model_features: Features to use in model construction and prediction.
-        parallel_jobs: Number of parallel jobs to execute in GridSearchCV.
-        q_threshold: q-value threshold to apply.
-
-    Returns:
-        Trained ValidationModel.
-
-    """
-    model = ValidationModel(
-        pos_psms, decoy_psms, neg_psms,
-        GridSearchCV(
-            LinearSVC(dual=False),
-            {'C': [2 ** i for i in range(-12, 4)]},
-            cv=5,
-            n_jobs=parallel_jobs
-        ),
-        model_features=model_features
-    )
-
-    model.fit()
-    model.normalize(q_threshold)
-
-    return model
+            decoy_psms[i].ml_scores = scores

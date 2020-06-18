@@ -8,7 +8,6 @@ import functools
 import itertools
 import logging
 import os
-import pickle
 from typing import (
     Callable,
     Dict,
@@ -19,11 +18,14 @@ from typing import (
 )
 
 from pepfrag import Peptide
+from sklearn.model_selection import GridSearchCV
+from sklearn.svm import LinearSVC
 
 from . import (
     localization,
     readers,
     utilities,
+    packing,
     pathway_base
 )
 from .constants import RESIDUES
@@ -31,7 +33,7 @@ from .peptide_spectrum_match import PSM
 from .psm_container import PSMContainer
 from .results import write_psm_results
 from .rptmdetermine_config import DataSetConfig, RPTMDetermineConfig
-from .validation_model import construct_model
+from .validation_model import ValidationModel
 
 
 def get_parallel_mods(
@@ -181,13 +183,33 @@ class Validator(pathway_base.PathwayBase):
         Constructs the machine learning model to classify target from decoy.
 
         """
-        logging.info('Training machine learning model...')
-        self.model = construct_model(
-            self.unmod_psms,
-            self.decoy_psms,
-            self.neg_unmod_psms,
-            self.model_features
+        model_cache = os.path.join(
+            self.cache_dir, pathway_base.MODEL_CACHE_FILE
         )
+
+        if self.use_cache and os.path.exists(model_cache):
+            logging.info('Using cached model...')
+            self.model = packing.load_from_file(model_cache)
+            return
+
+        logging.info('Training machine learning model...')
+
+        self.model = ValidationModel(
+            GridSearchCV(
+                LinearSVC(dual=False),
+                {'C': [2 ** i for i in range(-12, 4)]},
+                cv=5,
+                n_jobs=self.config.num_cores
+            ),
+            model_features=self.model_features
+        )
+
+        self.model.fit_and_normalize(
+            self.unmod_psms, self.decoy_psms, self.neg_unmod_psms
+        )
+
+        logging.info('Caching trained model...')
+        packing.save_to_file(self.model, model_cache)
 
     def _output_results(self):
         """
@@ -289,13 +311,12 @@ class Validator(pathway_base.PathwayBase):
 
         """
         decoy_psm_cache = os.path.join(
-            self.cache_dir, 'decoy_identifications.pkl'
+            self.cache_dir, 'decoy_identifications'
         )
         if self.use_cache and os.path.exists(decoy_psm_cache):
             logging.info('Using cached decoy identifications')
-            with open(decoy_psm_cache, 'rb') as fh:
-                self.decoy_psms = pickle.load(fh)
-                return
+            self.decoy_psms = packing.load_from_file(decoy_psm_cache)
+            return
 
         self.decoy_psms = PSMContainer()
         for set_id, set_info in self.config.data_sets.items():
@@ -312,8 +333,7 @@ class Validator(pathway_base.PathwayBase):
                 raise NotImplementedError()
 
         logging.info('Caching decoy identifications')
-        with open(decoy_psm_cache, 'wb') as fh:
-            pickle.dump(self.decoy_psms, fh)
+        packing.save_to_file(self.decoy_psms, decoy_psm_cache)
 
     def _get_decoys_from_file(
         self,

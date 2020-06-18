@@ -50,12 +50,7 @@ def generate_localization_candidates(
     ]
     fixed_mods = [ms for ms in psm.mods if ms.mod != mod]
 
-    temp_psm = PSM(
-        psm.data_id,
-        psm.spec_id,
-        copy.deepcopy(psm.peptide),
-        spectrum=psm.spectrum
-    )
+    temp_psm = copy.deepcopy(psm)
     temp_psm.mods = fixed_mods
     candidates.append(copy.deepcopy(temp_psm))
 
@@ -99,12 +94,9 @@ def generate_alternative_nterm_candidates(
     if not any(ms.site == 'nterm' for ms in psm.mods):
         mods = fixed_mods + [ModSite(mod_mass, 'nterm', alternative_mod)]
 
-        temp_psm = PSM(
-            psm.data_id,
-            psm.spec_id,
-            Peptide(psm.seq, psm.charge, mods),
-            spectrum=psm.spectrum
-        )
+        temp_psm = copy.deepcopy(psm)
+        temp_psm.mods = mods
+
         candidates.append(temp_psm)
 
     return candidates
@@ -179,12 +171,7 @@ def generate_localization_isoforms(
         (isinstance(ms.site, int) and psm.seq[ms.site - 1] == target_residue)
     ]
 
-    temp_psm = PSM(
-        psm.data_id,
-        psm.spec_id,
-        copy.deepcopy(psm.peptide),
-        spectrum=copy.deepcopy(psm.spectrum)
-    )
+    temp_psm = copy.deepcopy(psm)
 
     for sites in itertools.combinations(possible_sites, mod_count):
         mods = fixed_mods + [ModSite(mod_mass, site, mod) for site in sites]
@@ -258,8 +245,9 @@ def localize(
     for ii in sorted_score_indices[1:]:
         isoform = isoforms[ii]
         sites = [
-            site for _, site, mod in isoform.mods if mod == target_mod
-            and isinstance(site, int) and psm.seq[site - 1] == target_residue
+            ms.site for ms in isoform.mods if ms.mod == target_mod
+            and isinstance(ms.site, int)
+            and psm.seq[ms.site - 1] == target_residue
         ]
         alternatives.append((tuple(sites), scores[ii]))
     psm.alternative_localizations = alternatives

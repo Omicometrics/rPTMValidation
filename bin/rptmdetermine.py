@@ -45,11 +45,12 @@ def main():
     with open(args.config) as handle:
         conf = RPTMDetermineConfig(json.load(handle))
 
+    model = None
     if not args.skip_validate:
         validator = Validator(conf)
-        validator.validate()
+        model = validator.validate()
 
-    retriever = Retriever(conf)
+    retriever = Retriever(conf, model=model)
     retriever.retrieve()
 
 

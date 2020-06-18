@@ -12,16 +12,23 @@ References:
 
 """
 import collections
+import dataclasses
 from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
 
 
-# weights
-Weight = collections.namedtuple("Weight", ["w", "c"])
-# Models from cross validation
-Model = collections.namedtuple("Model", ["weights", "combination"])
+@dataclasses.dataclass
+class Weight:
+    w: np.ndarray
+    c: np.ndarray
+
+
+@dataclasses.dataclass
+class Model:
+    weights: Dict[int, Weight]
+    combination: np.ndarray
 
 
 class Stacking:

@@ -319,7 +319,7 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
                         int(row['Charge']),
                         mods
                     ),
-                    target=row['Target']
+                    target=(row['Target'] == 'True')
                 )
 
                 if spectra is not None:

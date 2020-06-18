@@ -4,7 +4,7 @@ learning.
 """
 from __future__ import annotations
 
-import collections
+import dataclasses
 import random
 from typing import Generator, List, Optional, Protocol, Sequence, Tuple, Union
 import warnings
@@ -35,7 +35,12 @@ def _warn(*args, **kwargs):
 warnings.warn = _warn
 np.seterr(divide="ignore", invalid="ignore", over="ignore")
 
-Model = collections.namedtuple("Model", ["estimator", "scaler"])
+
+@dataclasses.dataclass
+class Model:
+    estimator: SKEstimator
+    # TODO: type hint for this
+    scaler: Optional
 
 
 class ModelMetrics:

@@ -1,11 +1,11 @@
 cython
 lxml
-matplotlib
+msgpack
 numpy
+openpyxl
 overrides
 pandas
 scipy
-seaborn
 sklearn
 tqdm
 pepfrag==0.2

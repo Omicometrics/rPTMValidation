@@ -1,5 +1,5 @@
 #! /usr/bin/env python3
-
+import os
 from typing import Dict, List, Optional
 
 from .config import Config, ConfigField
@@ -67,6 +67,8 @@ class RPTMDetermineConfig(Config):
         ConfigField('log_level', True, 'INFO'),
         ConfigField('min_peptide_length', True, 7),
         ConfigField('max_peptide_length', True, 30),
+        ConfigField('retrieval_tolerance', True, 0.05),
+        ConfigField('num_cores', True, os.cpu_count())
     ]
 
     # Type hints for dynamic fields
@@ -82,3 +84,5 @@ class RPTMDetermineConfig(Config):
     log_level: str
     min_peptide_length: int
     max_peptide_length: int
+    retrieval_tolerance: float
+    num_cores: int
