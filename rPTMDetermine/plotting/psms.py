@@ -30,6 +30,7 @@ ION_CHARGE_REGEX = re.compile(r'[a-zA-Z]\d+\[(\d*)\+\]')
 
 Y_COLOR = '#ae1616'
 B_COLOR = '#6094be'
+A_COLOR = '#079d70'
 UNANNOTATED_COLOR = '#a8a8a8'
 
 
@@ -227,18 +228,20 @@ def plot_psms(
         top_charge = ion_counts.most_common(1)[0][0]
 
         if color_peaks:
-            b_peaks, y_peaks = [], []
+            label_peaks = {
+                'a': [],
+                'b': [],
+                'y': []
+            }
             for label, ann in anns.items():
                 if f'[{top_charge}+]' in label:
-                    if label[0] == 'b':
-                        b_peaks.append(ann.peak_num)
-                    elif label[0] == 'y':
-                        y_peaks.append(ann.peak_num)
+                    if label[0] in label_peaks:
+                        label_peaks[label[0]].append(ann.peak_num)
 
             def _stem(sel, color):
                 ax.stem(
-                    spec[sel, 0],
-                    spec[sel, 1],
+                    spec[sel, 0] if sel is not None else spec[:, 0],
+                    spec[sel, 1] if sel is not None else spec[:, 1],
                     color,
                     basefmt=' ',
                     markerfmt=' ',
@@ -246,9 +249,10 @@ def plot_psms(
                     use_line_collection=True
                 )
 
-            _stem(~np.array(b_peaks + y_peaks), UNANNOTATED_COLOR)
-            _stem(b_peaks, B_COLOR)
-            _stem(y_peaks, Y_COLOR)
+            _stem(None, UNANNOTATED_COLOR)
+            _stem(label_peaks['b'], B_COLOR)
+            _stem(label_peaks['y'], Y_COLOR)
+            # _stem(label_peaks['a'], A_COLOR)
         else:
             ax.stem(
                 spec[:, 0],
@@ -347,7 +351,7 @@ def plot_psms(
             add_ions(get_ions("y"), 1.04 * max_int, Y_COLOR)
 
             # Annotate a-ions
-            add_ions(get_ions("a"), 1.07 * max_int, "green")
+            add_ions(get_ions("a"), 1.07 * max_int, A_COLOR)
 
             # Annotate precursor ions
             add_ions(
