@@ -31,6 +31,7 @@ from . import (
 from .constants import RESIDUES
 from .peptide_spectrum_match import PSM
 from .psm_container import PSMContainer
+from .readers import PeptideType
 from .results import write_psm_results
 from .rptmdetermine_config import DataSetConfig, RPTMDetermineConfig
 from .validation_model import ValidationModel
@@ -453,7 +454,8 @@ class Validator(pathway_base.PathwayBase):
                         PSM(
                             data_id,
                             ident.spectrum,
-                            Peptide(ident.seq, ident.charge, ident.mods)
+                            Peptide(ident.seq, ident.charge, ident.mods),
+                            target=(ident.pep_type == PeptideType.normal)
                         )
                     )
 
