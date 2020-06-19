@@ -8,12 +8,12 @@ from typing import Dict, List, Set
 
 from pepfrag import IonType, Mass
 
-DEFAULT_FRAGMENT_IONS: Dict[int, List[str]] = {
-    IonType.precursor.value: ["H2O", "NH3"],
-    IonType.imm.value: [],
-    IonType.b.value: ["H2O", "NH3"],
-    IonType.y.value: ["H2O", "NH3"],
-    IonType.a.value: []
+DEFAULT_FRAGMENT_IONS: Dict[IonType, List[str]] = {
+    IonType.precursor: ["H2O", "NH3"],
+    IonType.imm: [],
+    IonType.b: ["H2O", "NH3"],
+    IonType.y: ["H2O", "NH3"],
+    IonType.a: []
 }
 
 AA_SYMBOLS: Dict[str, str] = {

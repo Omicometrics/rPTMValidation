@@ -43,8 +43,8 @@ def merge_seq_mods(
     seqlen = len(seq)
     positions = {"nterm": 0, "n-term": 0, "N-term": 0,
                  "cterm": seqlen, "c-term": seqlen, "C-term": seqlen}
-    mod_sites = [(name, int(positions.get(site, site)))
-                 for _, site, name in mods]
+    mod_sites = [(mod.mod, int(positions.get(mod.site, mod.site)))
+                 for mod in mods]
 
     # Sort the modifications by site index
     mod_sites.sort(key=operator.itemgetter(1), reverse=True)

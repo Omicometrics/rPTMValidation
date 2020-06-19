@@ -237,11 +237,11 @@ class PSM:
 
         if ion_types is None:
             ion_types = {
-                IonType.precursor.value: ["H2O", "NH3"],
-                IonType.imm.value: [],
-                IonType.b.value: ["H2O", "NH3"],
-                IonType.y.value: ["H2O", "NH3"],
-                IonType.a.value: []
+                IonType.precursor: ["H2O", "NH3"],
+                IonType.imm: [],
+                IonType.b: ["H2O", "NH3"],
+                IonType.y: ["H2O", "NH3"],
+                IonType.a: []
             }
 
         # Get the theoretical ions for the peptide
