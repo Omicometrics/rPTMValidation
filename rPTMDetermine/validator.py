@@ -356,7 +356,8 @@ class Validator(pathway_base.PathwayBase):
             if (ident.pep_type is readers.PeptideType.decoy and
                     self._has_target_residue(ident.seq) and
                     all(mod.mod in allowed_mods for mod in ident.mods) and
-                    self._valid_peptide_length(ident.seq)):
+                    self._valid_peptide_length(ident.seq) and
+                    RESIDUES.issuperset(ident.seq)):
                 decoy_psms.append(
                     PSM(
                         data_id,
@@ -437,7 +438,8 @@ class Validator(pathway_base.PathwayBase):
         """
         psms: PSMContainer[PSM] = PSMContainer()
         for ident in search_res:
-            if not self._has_target_residue(ident.seq):
+            if (not self._has_target_residue(ident.seq) or
+                    not RESIDUES.issuperset(ident.seq)):
                 continue
             for mod in ident.mods:
                 if (mod.mod not in allowed_mods or
