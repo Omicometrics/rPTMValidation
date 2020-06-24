@@ -353,9 +353,11 @@ class Validator(pathway_base.PathwayBase):
         """
         decoy_psms = PSMContainer()
         res_file = os.path.join(data_config.data_dir, data_config.decoy_results)
-        for ident in self.decoy_reader.read(res_file):
-            if (ident.pep_type is readers.PeptideType.decoy and
-                    self._has_target_residue(ident.seq) and
+        for ident in self.decoy_reader.read(
+                res_file,
+                predicate=lambda r: r.pep_type is readers.PeptideType.decoy
+        ):
+            if (self._has_target_residue(ident.seq) and
                     all(mod.mod in allowed_mods for mod in ident.mods) and
                     self._valid_peptide_length(ident.seq) and
                     RESIDUES.issuperset(ident.seq)):
