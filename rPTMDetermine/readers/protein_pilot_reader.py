@@ -211,6 +211,27 @@ TempResult = collections.namedtuple(
      "score", "eval", "mod_prob", "pep_type", "rt", "itraq_peaks"))
 
 
+@dataclasses.dataclass(eq=True, frozen=True)
+class _ProteinPilotXMLTempResult(SearchResult):
+    __slots__ = (
+        "confidence",
+        "prec_mz",
+        "byscore",
+        "eval",
+        "mod_prob",
+        "time",
+        "itraq_peaks",
+    )
+
+    confidence: float
+    prec_mz: float
+    byscore: Optional[float]
+    eval: Optional[float]
+    mod_prob: Optional[float]
+    time: str
+    itraq_peaks: Optional[Dict[int, Tuple[float, float]]]
+
+
 class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
     """
     A class to read ProteinPilot XML files.
@@ -248,7 +269,7 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
             The read information as a list of ProteinPilotXMLSearchResults.
 
         """
-        res: Dict[str, TempResult] = {}
+        res: Dict[str, _ProteinPilotXMLTempResult] = {}
         match_protein_map: Dict[str, List[str]] = {}
         context = etree.iterparse(filename, events=["end"], recover=True,
                                   encoding="iso-8859-1")
@@ -265,7 +286,7 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
 
                 rank = 0
                 for match_element in element.findall("MATCH"):
-                    rank = rank + 1
+                    rank += 1
                     pep_type = (PeptideType.normal
                                 if int(match_element.get("type")) == 0
                                 else PeptideType.decoy)
@@ -280,18 +301,26 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
                     except ModificationNotFoundException:
                         continue
 
-                    res[match_id] = TempResult(
-                        spec_id, prec_mz, rank,
-                        match_element.get("seq"),
-                        int(match_element.get("charge")),
-                        mods,
-                        float(match_element.get("confidence")),
-                        float(match_element.get("score")),
-                        float(match_element.get("eval")),
-                        float(match_element.get("mod_prob")),
-                        pep_type,
-                        retention_time,
-                        itraq_peaks)
+                    temp_result = _ProteinPilotXMLTempResult(
+                        seq=match_element.get("seq"),
+                        mods=tuple(mods),
+                        charge=int(match_element.get("charge")),
+                        spectrum=spec_id,
+                        dataset=None,
+                        rank=rank,
+                        pep_type=pep_type,
+                        theor_mz=None,
+                        confidence=float(match_element.get("confidence")),
+                        prec_mz=prec_mz,
+                        byscore=float(match_element.get("score")),
+                        eval=float(match_element.get("eval")),
+                        mod_prob=float(match_element.get("mod_prob")),
+                        time=str(retention_time),
+                        itraq_peaks=itraq_peaks
+                    )
+
+                    if predicate(temp_result):
+                        res[match_id] = temp_result
 
                 element.clear()
                 for ancestor in element.xpath('ancestor-or-self::*'):
@@ -315,18 +344,18 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
         for match_id, r in res.items():
             yield ProteinPilotXMLSearchResult(
                     seq=r.seq,
-                    mods=tuple(r.mods),
+                    mods=r.mods,
                     charge=r.charge,
-                    spectrum=r.spec_id,
+                    spectrum=r.spectrum,
                     dataset=None,
                     rank=r.rank,
                     theor_mz=None,
                     pep_type=r.pep_type,
-                    time=r.rt,
-                    confidence=r.conf,
+                    time=r.time,
+                    confidence=r.confidence,
                     prec_mz=r.prec_mz,
                     accessions=tuple(match_protein_map.get(match_id, [])),
-                    byscore=r.score,
+                    byscore=r.byscore,
                     eval=r.eval,
                     mod_prob=r.mod_prob,
                     itraq_peaks=r.itraq_peaks
