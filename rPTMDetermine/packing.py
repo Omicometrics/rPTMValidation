@@ -13,77 +13,14 @@ http://www.opensource.org/licenses/bsd-license
 """
 import dataclasses
 import enum
-import functools
 import inspect
+import importlib
 import sys
 from types import FunctionType, MappingProxyType
-from typing import Any, Dict, Optional, Type, Union
+from typing import Any, Union
 
 import msgpack
 import numpy as np
-from pepfrag import MassType, ModSite, Peptide
-from sklearn.metrics._scorer import _passthrough_scorer
-from sklearn.model_selection import GridSearchCV
-from sklearn.preprocessing import MaxAbsScaler
-from sklearn.svm import LinearSVC
-
-from .features import Features
-from .machinelearning import classification, stacking
-from .mass_spectrum import Spectrum
-from .readers import (
-    MascotSearchResult,
-    MSGFPlusSearchResult,
-    MZIdentMLSearchResult,
-    PeptideType,
-    PercolatorSearchResult,
-    ProteinPilotSearchResult,
-    ProteinPilotXMLSearchResult,
-    SearchResult,
-    TPPSearchResult
-)
-from .peptide_spectrum_match import PSM
-from .psm_container import PSMContainer
-from .validation_model import Scaler, ValidationModel
-
-
-SUPPORTED_CLASSES: Dict[str, Type[object]] = {
-    'pepfrag.constants.MassType': MassType,
-    'pepfrag.pepfrag.ModSite': ModSite,
-    'pepfrag.pepfrag.Peptide': Peptide,
-    'rPTMDetermine.features.Features': Features,
-    'rPTMDetermine.readers.search_result.PeptideType': PeptideType,
-    'rPTMDetermine.peptide_spectrum_match.PSM': PSM,
-    'rPTMDetermine.psm_container.PSMContainer': PSMContainer,
-    'rPTMDetermine.mass_spectrum.Spectrum': Spectrum,
-    # Machine Learning
-    'rPTMDetermine.validation_model.Scaler': Scaler,
-    'rPTMDetermine.validation_model.ValidationModel': ValidationModel,
-    'rPTMDetermine.machinelearning.classification.Classifier': classification.Classifier,
-    'rPTMDetermine.machinelearning.classification.CrossValidationClassifier': classification.CrossValidationClassifier,
-    'rPTMDetermine.machinelearning.classification.EnsembleClassifier': classification.EnsembleClassifier,
-    'rPTMDetermine.machinelearning.classification.Model': classification.Model,
-    'rPTMDetermine.machinelearning.classification.ModelMetrics': classification.ModelMetrics,
-    'rPTMDetermine.machinelearning.stacking.Model': stacking.Model,
-    'rPTMDetermine.machinelearning.stacking.Stacking': stacking.Stacking,
-    'rPTMDetermine.machinelearning.stacking.Weight': stacking.Weight,
-    'sklearn.model_selection._search.GridSearchCV': GridSearchCV,
-    'sklearn.svm._classes.LinearSVC': LinearSVC,
-    'sklearn.preprocessing._data.MaxAbsScaler': MaxAbsScaler,
-    # SearchResults
-    'rPTMDetermine.readers.mascot_reader.MascotSearchResult': MascotSearchResult,
-    'rPTMDetermine.readers.msgfplus_reader.MSGFPlusSearchResult': MSGFPlusSearchResult,
-    'rPTMDetermine.readers.mzidentml_reader.MZIdentMLSearchResult': MZIdentMLSearchResult,
-    'rPTMDetermine.readers.percolator_reader.PercolatorSearchResult': PercolatorSearchResult,
-    'rPTMDetermine.readers.protein_pilot_reader.ProteinPilotSearchResult': ProteinPilotSearchResult,
-    'rPTMDetermine.readers.protein_pilot_reader.ProteinPilotXMLSearchResult': ProteinPilotXMLSearchResult,
-    'rPTMDetermine.readers.search_result.SearchResult': SearchResult,
-    'rPTMDetermine.readers.tpp_reader.TPPSearchResult': TPPSearchResult
-}
-
-
-SUPPORTED_FUNCTIONS: Dict[str, Any] = {
-    'sklearn.metrics._scorer._passthrough_scorer': _passthrough_scorer,
-}
 
 
 def fullname(obj):
@@ -206,18 +143,10 @@ def _encode(obj):
     return obj
 
 
-def _decode(
-        obj,
-        extra_classes: Optional[Dict[str, Type[object]]],
-        extra_functions: Optional[Dict[str, FunctionType]]
-):
+def _decode(obj):
     if b'function' in obj:
-        func = {
-            **SUPPORTED_FUNCTIONS, **(extra_functions or {})
-        }.get(obj[b'function'])
-        if func is not None:
-            return func
-        raise TypeError(f'Function {obj[b"function"]} is not supported')
+        module, func_name = obj[b'function'].rsplit('.', maxsplit=1)
+        return getattr(importlib.import_module(module), func_name)
 
     if b'nd' in obj:
         if obj[b'nd'] is True:
@@ -253,25 +182,20 @@ def _decode(
         if obj[b'class'] == b'set':
             return set(obj[b'data'])
 
-        supported_classes = {**SUPPORTED_CLASSES, **(extra_classes or {})}
-
         if obj[b'class'] == b'type':
-            cls = supported_classes.get(obj[b'typename'])
-            if cls is not None:
-                return cls
-            raise TypeError(f'Class {obj[b"typename"]} is not supported')
+            module, type_name = obj[b'typename'].rsplit('.', maxsplit=1)
+            return getattr(importlib.import_module(module), type_name)
 
         if obj[b'class'] == b'Enum':
-            cls = supported_classes.get(obj[b'subclass'])
-            if cls is not None:
-                # Re-construct Enum by initialization
-                return cls(obj[b'value'])
-            raise TypeError(f'Class {obj[b"subclass"]} is not supported')
+            module, type_name = obj[b'subclass'].rsplit('.', maxsplit=1)
+            cls = getattr(importlib.import_module(module), type_name)
+            return cls(obj[b'value'])
 
         if obj[b'class'] == b'MappingProxyType':
             return MappingProxyType(obj[b'data'])
 
-        cls = supported_classes.get(obj[b'class'])
+        module, type_name = obj[b'class'].rsplit('.', maxsplit=1)
+        cls = getattr(importlib.import_module(module), type_name)
         if cls is not None:
             if dataclasses.is_dataclass(cls):
                 try:
@@ -296,28 +220,16 @@ def _decode(
     return obj
 
 
-def save_to_file(
-        obj: Any,
-        file_path: str
-):
+def save_to_file(obj: Any, file_path: str):
     with open(file_path, 'wb') as fh:
         fh.write(msgpack.packb(obj, default=_encode))
 
 
-def load_from_file(
-        file_path: str,
-        extra_classes: Optional[Dict[str, Type[object]]] = None,
-        extra_functions: Optional[Dict[str, FunctionType]] = None,
-        use_list: bool = False
-) -> Any:
+def load_from_file(file_path: str, use_list: bool = False) -> Any:
     with open(file_path, 'rb') as fh:
         return msgpack.unpackb(
             fh.read(),
-            object_hook=functools.partial(
-                _decode,
-                extra_classes=extra_classes,
-                extra_functions=extra_functions
-            ),
+            object_hook=_decode,
             use_list=use_list,
             strict_map_key=False
         )

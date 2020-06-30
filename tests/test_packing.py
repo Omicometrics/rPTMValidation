@@ -23,6 +23,10 @@ from rPTMDetermine.results import write_psm_results
 from rPTMDetermine.validation_model import ValidationModel
 
 
+def my_function(a):
+    return a * 2
+
+
 class TestFullname(unittest.TestCase):
     def test_classes(self):
         classes = {
@@ -96,7 +100,7 @@ class TestPacking(unittest.TestCase):
 
         obj = MyClass()
         save_to_file(obj, self.temp_file.name)
-        with self.assertRaises(TypeError):
+        with self.assertRaises(AttributeError):
             load_from_file(self.temp_file.name)
 
     def test_pack_numpy_array(self):
@@ -194,15 +198,7 @@ class TestPacking(unittest.TestCase):
         Tests that a function can be packed and unpacked.
 
         """
-        def my_function(a):
-            return a * 2
-
-        loaded = self._test_basic(
-            my_function,
-            extra_functions={
-                'test_packing.my_function': my_function
-            }
-        )
+        loaded = self._test_basic(my_function)
         self.assertEqual(my_function, loaded)
         self.assertEqual(my_function(4), loaded(4))
 
@@ -328,10 +324,7 @@ class TestPacking(unittest.TestCase):
         )
 
         save_to_file(search, self.temp_file.name)
-        loaded = load_from_file(
-            self.temp_file.name,
-            extra_classes={'sklearn.linear_model._logistic.LogisticRegression': LogisticRegression}
-        )
+        loaded = load_from_file(self.temp_file.name)
         self.assertEqual(
             search.predict([[1.4, 2.3, 1.0]]),
             loaded.predict([[1.4, 2.3, 1.0]])
@@ -339,12 +332,7 @@ class TestPacking(unittest.TestCase):
 
     def test_pack_rptmdetermine_function(self):
         save_to_file(write_psm_results, self.temp_file.name)
-        loaded = load_from_file(
-            self.temp_file.name,
-            extra_functions={
-                'rPTMDetermine.results.write_psm_results': write_psm_results
-            }
-        )
+        loaded = load_from_file(self.temp_file.name)
         self.assertEqual(write_psm_results, loaded)
 
 
