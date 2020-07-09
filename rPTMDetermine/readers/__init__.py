@@ -10,6 +10,7 @@ from .modifications import (
     preparse_mod_string,
     UnknownModificationException
 )
+from .msfragger_reader import MSFraggerReader, MSFraggerSearchResult
 from .msgfplus_reader import MSGFPlusReader, MSGFPlusSearchResult
 from .mzidentml_reader import MZIdentMLReader, MZIdentMLSearchResult
 from .percolator_reader import (
@@ -37,6 +38,8 @@ __all__ = [
     "parse_mods",
     "preparse_mod_string",
     "UnknownModificationException",
+    "MSFraggerReader",
+    "MSFraggerSearchResult",
     "MSGFPlusReader",
     "MSGFPlusSearchResult",
     "MZIdentMLReader",
