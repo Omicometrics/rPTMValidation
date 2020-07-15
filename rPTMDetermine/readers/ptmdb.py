@@ -13,7 +13,6 @@ from typing import Dict, List, Optional, Tuple
 import lxml.etree as etree
 
 from pepfrag import MassType
-from ..constants import ELEMENT_MASSES
 
 
 MOD_FORMULA_REGEX = re.compile(r"(\w+)\(([0-9]+)\)")
@@ -289,7 +288,8 @@ class PTMDB:
         return self.get_mods(mass_type=mass_type,
                              filter_class="Post-translational")
 
-    def _get_mass_col(self, mass_type: MassType) -> str:
+    @staticmethod
+    def _get_mass_col(mass_type: MassType) -> str:
         """
         Returns the database column for the corresponding mass type.
 
@@ -301,20 +301,3 @@ class PTMDB:
 
         """
         return "mono_mass" if mass_type is MassType.mono else "avg_mass"
-
-
-def parse_mod_formula(formula: str, mass_type: MassType) -> float:
-    """
-    Parses the given modification chemical formula to determine the
-    associated mass change.
-
-    Args:
-        formula (str): The modification chemical formula.
-        mass_type (MassType): The mass type to calculate.
-
-    Returns:
-        The mass of the modification as a float.
-
-    """
-    return sum([getattr(ELEMENT_MASSES[e], mass_type.name) * int(c)
-                for e, c in MOD_FORMULA_REGEX.findall(formula)])
