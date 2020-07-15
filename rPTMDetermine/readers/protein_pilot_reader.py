@@ -319,7 +319,7 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
                         itraq_peaks=itraq_peaks
                     )
 
-                    if predicate(temp_result):
+                    if predicate is None or predicate(temp_result):
                         res[match_id] = temp_result
 
                 element.clear()
