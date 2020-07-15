@@ -250,8 +250,10 @@ def plot_psms(
                 )
 
             _stem(None, UNANNOTATED_COLOR)
-            _stem(label_peaks['b'], B_COLOR)
-            _stem(label_peaks['y'], Y_COLOR)
+            if label_peaks['b']:
+                _stem(label_peaks['b'], B_COLOR)
+            if label_peaks['y']:
+                _stem(label_peaks['y'], Y_COLOR)
             # _stem(label_peaks['a'], A_COLOR)
         else:
             ax.stem(
