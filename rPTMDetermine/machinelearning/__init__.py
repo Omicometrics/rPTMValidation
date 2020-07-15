@@ -2,6 +2,7 @@ from .classification import (
     Classifier,
     SKEstimator
 )
+from .randomforest import RandomForest
 from .sampling import subsample_negative
 from .scoring import (
     calculate_score_threshold,
@@ -15,6 +16,7 @@ from .scoring import (
 
 __all__ = [
     'Classifier',
+    'RandomForest',
     'SKEstimator',
     'calculate_score_threshold',
     'count_consensus_votes',
