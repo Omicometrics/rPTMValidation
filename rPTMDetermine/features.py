@@ -15,10 +15,8 @@ class Features:
     __slots__ = (
         "NumPeaks",
         "TotInt",
-        "PepLen",
         "PepMass",
         "Charge",
-        "ErrPepMass",
         "FracIon",
         "FracIonInt",
         "NumSeriesbm",
@@ -41,10 +39,8 @@ class Features:
 
     NumPeaks: Optional[float]
     TotInt: Optional[float]
-    PepLen: Optional[float]
     PepMass: Optional[float]
     Charge: Optional[float]
-    ErrPepMass: Optional[float]
     FracIon: Optional[float]
     FracIonInt: Optional[float]
     NumSeriesbm: Optional[float]
