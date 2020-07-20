@@ -342,20 +342,11 @@ class PSM:
         totalint = intensities.sum()
         self.features.TotInt = totalint
 
-        # The length of the peptide
-        self.features.PepLen = np.sqrt(len(self.seq))
-
         # Experimental m/z
         pms = (denoised_spectrum.prec_mz - FIXED_MASSES["H"]) * self.charge
         # Peptide related features
         self.features.PepMass = np.log(pms)
         self.features.Charge = self.charge
-        cterm_mass = 0
-        for ms in self.mods:
-            if ms.site == "cterm":
-                cterm_mass = ms.mass
-                break
-        self.features.ErrPepMass = abs(self.peptide.mass - pms + cterm_mass)
 
         return self.features
 
