@@ -10,23 +10,21 @@ import logging
 import os
 from typing import (
     Callable,
-    Dict,
     Iterable,
     Optional,
     Sequence,
     Set,
 )
 
+import cloudpickle
 from pepfrag import Peptide
-from sklearn.model_selection import GridSearchCV
-from sklearn.svm import LinearSVC
 
 from . import (
     localization,
     readers,
     utilities,
     packing,
-    pathway_base
+    pathway_base,
 )
 from .constants import RESIDUES
 from .peptide_spectrum_match import PSM
@@ -149,15 +147,17 @@ class Validator(pathway_base.PathwayBase):
         logging.info('Calculating PSM features...')
         self._calculate_features()
 
-        self._construct_model()
+        self._construct_cv_model()
 
         logging.info('Classifying identifications...')
-        validated_counts = self._classify_all()
-        for label, container in self.psm_containers.items():
+        for label, psm_container in self.psm_containers.items():
+            self._classify(psm_container)
             logging.info(
-                f'{validated_counts[label]} out of {len(container)} {label} '
-                'identifications are validated'
+                f'{len(psm_container.get_validated())} out of '
+                f'{len(psm_container)} {label} identifications are validated'
             )
+
+        self._construct_loc_model()
 
         logging.info('Correcting and localizing modifications...')
         for psm in itertools.chain(
@@ -168,6 +168,7 @@ class Validator(pathway_base.PathwayBase):
                 self.modification,
                 self.mod_mass,
                 self.config.target_residue,
+                self.loc_model,
                 self.model,
                 self.model_features,
                 self.ptmdb
@@ -177,11 +178,11 @@ class Validator(pathway_base.PathwayBase):
         self._output_results()
 
         logging.info('Finished validation.')
-        return self.model
+        return self.model, self.loc_model
 
-    def _construct_model(self):
+    def _construct_cv_model(self):
         """
-        Constructs the machine learning model to classify target from decoy.
+        Constructs the machine learning model using cross validation.
 
         """
         model_cache = os.path.join(
@@ -190,27 +191,49 @@ class Validator(pathway_base.PathwayBase):
 
         if self.use_cache and os.path.exists(model_cache):
             logging.info('Using cached model...')
-            self.model = packing.load_from_file(model_cache)
+            with open(model_cache, 'rb') as fh:
+                self.model = cloudpickle.load(fh)
             return
 
         logging.info('Training machine learning model...')
-
         self.model = ValidationModel(
-            GridSearchCV(
-                LinearSVC(dual=False),
-                {'C': [2 ** i for i in range(-12, 4)]},
-                cv=5,
-                n_jobs=self.config.num_cores
-            ),
-            model_features=self.model_features
+            model_features=self.model_features, cv=3,
+            n_jobs=self.config.num_cores
+        )
+        self.model.fit(self.unmod_psms, self.decoy_psms, self.neg_unmod_psms)
+
+        logging.info('Caching trained model...')
+        with open(model_cache, 'wb') as fh:
+            cloudpickle.dump(self.model, fh)
+
+    def _construct_loc_model(self):
+        """
+        Constructs the machine learning model without cross validation for
+        localization.
+
+        """
+        model_cache = os.path.join(
+            self.cache_dir, pathway_base.LOCALIZATION_MODEL_CACHE_FILE
         )
 
-        self.model.fit_and_normalize(
+        if self.use_cache and os.path.exists(model_cache):
+            logging.info('Using cached localization model...')
+            with open(model_cache, 'rb') as fh:
+                self.loc_model = cloudpickle.load(fh)
+            return
+
+        logging.info('Training machine learning model for localization...')
+        self.loc_model = ValidationModel(
+            model_features=self.model_features, cv=None,
+            n_jobs=self.config.num_cores
+        )
+        self.loc_model.fit(
             self.unmod_psms, self.decoy_psms, self.neg_unmod_psms
         )
 
-        logging.info('Caching trained model...')
-        packing.save_to_file(self.model, model_cache)
+        logging.info('Caching trained localization model...')
+        with open(model_cache, 'wb') as fh:
+            cloudpickle.dump(self.loc_model, fh)
 
     def _output_results(self):
         """
@@ -394,7 +417,7 @@ class Validator(pathway_base.PathwayBase):
         """
         psms: PSMContainer[PSM] = PSMContainer()
         for ident in search_res:
-            if (ident.pep_type == readers.PeptideType.decoy or
+            if (ident.pep_type is readers.PeptideType.decoy or
                     ident.rank != 1 or not RESIDUES.issuperset(ident.seq)):
                 # Filter to rank 1, target identifications for validation
                 # and ignore placeholder amino acid residue identifications
@@ -425,9 +448,8 @@ class Validator(pathway_base.PathwayBase):
         """
         Converts `SearchResult`s to `PSM`s after filtering for unmodified PSMs.
 
-        Filters are applied on peptide type (keep only target identifications),
-        identification rank (keep only top-ranking identification) and amino
-        acid residues (check all valid).
+        Filters are applied on peptide type (keep only target identifications)
+        and amino acid residues (check all valid).
 
         Args:
             search_res: The database search results.
@@ -485,6 +507,15 @@ class Validator(pathway_base.PathwayBase):
 
     def _calculate_features(self):
         """Computes features for all PSMContainers."""
+        # def _calculate(psm):
+        #     psm.extract_features()
+        #     psm.peptide.clean_fragment_ions()
+        #
+        # Parallel(n_jobs=self.config.num_cores)(
+        #     delayed(_calculate)(psm)
+        #     for container in self.psm_containers.values() for psm in container
+        # )
+
         for psm_container in self.psm_containers.values():
             for psm in psm_container:
                 psm.extract_features()
@@ -499,18 +530,3 @@ class Validator(pathway_base.PathwayBase):
         """
         for psm_container in self.psm_containers.values():
             psm_container[:] = [p for p in psm_container if predicate(p)]
-
-    def _classify_all(self) -> Dict[str, int]:
-        """
-        Classifies all PSMs held by the Validator using `model`.
-
-        Returns:
-            Dictionary of PSMContainer label to the number of contained PSMs
-            validated.
-
-        """
-        val_counts: Dict[str, int] = {}
-        for label, psm_container in self.psm_containers.items():
-            val_counts[label] = self._classify(psm_container)
-
-        return val_counts

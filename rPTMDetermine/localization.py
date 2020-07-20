@@ -9,10 +9,9 @@ from typing import Container, List, Optional
 
 import numpy as np
 
-from pepfrag import ModSite, Peptide
+from pepfrag import ModSite
 
 from . import (
-    machinelearning,
     PSM,
     PSMContainer
 )
@@ -199,7 +198,7 @@ def localize(
         target_mod: The modification to localize.
         mod_mass: The mass of `target_mod`.
         target_residue: The amino acid residue targeted by `target_mod`.
-        model: The trained PSM classifier.
+        model: The PSM classifier trained without cross validation.
         features: An optional subset of features to use in prediction.
 
     """
@@ -219,7 +218,7 @@ def localize(
         isoform.extract_features()
 
     feature_array = isoforms.to_feature_array(features=features)
-    scores = model.predict(feature_array, use_cv=False)
+    scores = model.decision_function(feature_array)
 
     sorted_score_indices = scores.argsort()[::-1]
 
@@ -258,7 +257,8 @@ def correct_and_localize(
         target_mod: str,
         target_mod_mass: float,
         target_residue: str,
-        model: ValidationModel,
+        loc_model: ValidationModel,
+        cv_model: ValidationModel,
         features: List[str],
         ptmdb: PTMDB
 ):
@@ -270,7 +270,9 @@ def correct_and_localize(
         target_mod: The modification to localize.
         target_mod_mass: The mass change associated with `target_mod`.
         target_residue: The residue targeted by `target_mod`.
-        model: The trained machine learning classifier.
+        loc_model: The machine learning classifier trained without cross
+                   validation for localization purposes.
+        cv_model: The machine learning classifier trained with cross validation.
         features: The list of features used in validated.
         ptmdb: The unimod PTM database.
 
@@ -294,16 +296,15 @@ def correct_and_localize(
         # score
         cand_psms.append(psm)
         feature_array = cand_psms.to_feature_array(features=features)
-        isoform_scores = model.predict(feature_array, use_cv=False)
+        isoform_scores = loc_model.decision_function(feature_array)
         max_isoform_score_idx = np.argmax(isoform_scores)
-        validation_scores = model.predict(
-            feature_array[max_isoform_score_idx],
-            use_cv=True
+        val_score = cv_model.decision_function(
+            feature_array[max_isoform_score_idx].reshape(1, -1)
         )[0]
 
         # Replace the modifications with the corrected ones
         psm.mods = cand_psms[max_isoform_score_idx].mods
-        psm.ml_scores = validation_scores
+        psm.ml_scores = val_score
 
     if any(ms.mod == target_mod for ms in psm.mods):
         localize(
@@ -311,6 +312,6 @@ def correct_and_localize(
             target_mod,
             target_mod_mass,
             target_residue,
-            model,
+            loc_model,
             features=features
         )

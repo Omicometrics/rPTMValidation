@@ -41,7 +41,32 @@ from .rptmdetermine_config import DataSetConfig, RPTMDetermineConfig
 from .validation_model import ValidationModel
 
 
-MODEL_CACHE_FILE = 'model'
+MODEL_CACHE_FILE = 'model.pkl'
+LOCALIZATION_MODEL_CACHE_FILE = 'model_loc.pkl'
+
+
+FDRSplitter = Callable[
+    [Sequence[readers.SearchResult], float],
+    Tuple[List[readers.SearchResult], List[readers.SearchResult]]
+]
+
+
+def split_proteinpilot_fdr(
+        results: Sequence[readers.SearchResult], conf: float
+):
+    positive: List[readers.SearchResult] = []
+    negative: List[readers.SearchResult] = []
+    for res in results:
+        (positive
+         if cast(readers.ProteinPilotSearchResult, res).confidence
+            >= conf else negative).append(res)
+    return positive, negative
+
+
+ENGINE_FDR_SPLITTER_MAP: Dict[SearchEngine, FDRSplitter] = {
+    SearchEngine.ProteinPilot: split_proteinpilot_fdr,
+    SearchEngine.ProteinPilotXML: split_proteinpilot_fdr
+}
 
 
 ScoreGetter = Callable[[readers.SearchResult], float]
@@ -193,6 +218,7 @@ class PathwayBase:
         ]
 
         self.model: Optional[ValidationModel] = None
+        self.loc_model: Optional[ValidationModel] = None
 
     def _valid_cache(self) -> bool:
         """
@@ -261,7 +287,7 @@ class PathwayBase:
 
         for set_id, set_info in self.config.data_sets.items():
             res_path = os.path.join(set_info.data_dir, set_info.results)
-            self.search_results[set_id] = self.reader.read(res_path)
+            self.search_results[set_id] = list(self.reader.read(res_path))
 
         logging.info('Caching search results...')
         packing.save_to_file(self.search_results, search_results_cache)
@@ -277,18 +303,17 @@ class PathwayBase:
         search engines.
 
         """
-        positive: List[readers.SearchResult] = []
-        negative: List[readers.SearchResult] = []
-        if self.config.search_engine is SearchEngine.ProteinPilot:
-            for res in search_results:
-                (positive
-                 if cast(readers.ProteinPilotSearchResult, res).confidence
-                    >= data_config.confidence else negative).append(res)
-            return positive, negative
+        fdr_splitter: Optional[FDRSplitter] = \
+            ENGINE_FDR_SPLITTER_MAP.get(self.config.search_engine)
+
+        if fdr_splitter is not None:
+            return fdr_splitter(search_results, data_config.confidence)
 
         score_getter: Optional[ScoreGetter] = \
             ENGINE_SCORE_GETTER_MAP.get(self.config.search_engine)
 
+        positive: List[readers.SearchResult] = []
+        negative: List[readers.SearchResult] = []
         if score_getter is not None:
             score = get_fdr_threshold(
                 search_results, score_getter, self.config.fdr)
@@ -347,22 +372,18 @@ class PathwayBase:
 
             yield data_conf_id, spectra
 
-    def _classify(self, container: PSMContainer) -> int:
+    def _classify(self, container: PSMContainer):
         """
         Classifies all PSMs in `container`.
 
         Args:
             container: The PSMContainer containing PSMs to classify.
 
-        Returns:
-            The number of PSMs validated.
-
         """
         x = container.to_feature_array(self.model_features)
-        scores = self.model.predict(x, use_cv=True)
+        scores = self.model.decision_function(x)
         for psm, _scores in zip(container, scores):
             psm.ml_scores = _scores
-        return machinelearning.count_consensus_votes(scores)
 
     def _has_target_residue(self, seq: str) -> bool:
         """

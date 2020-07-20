@@ -68,7 +68,7 @@ class RPTMDetermineConfig(Config):
         ConfigField('min_peptide_length', True, 7),
         ConfigField('max_peptide_length', True, 30),
         ConfigField('retrieval_tolerance', True, 0.05),
-        ConfigField('num_cores', True, os.cpu_count())
+        ConfigField('num_cores', True, int(os.cpu_count() / 2))
     ]
 
     # Type hints for dynamic fields

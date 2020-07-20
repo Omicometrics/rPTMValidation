@@ -1,19 +1,27 @@
 import dataclasses
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
+from joblib import Parallel, delayed
 import numba
 import numpy as np
+from scipy.stats import ks_2samp
 from sklearn.ensemble import RandomForestClassifier
 from statsmodels.sandbox.nonparametric.kernels import Gaussian
 from statsmodels.nonparametric.kde import KDEUnivariate, kernel_switch
 
 
 @dataclasses.dataclass()
-class Leaf:
+class Node:
     feature_idx: int
     class_sizes: np.ndarray
+    used: bool
     bin_edges: Optional[np.ndarray]
-    kde_evals: Optional[List[np.ndarray]]
+    kde_evals: List[np.ndarray]
+    gofs: List[Tuple[float, float]]
+
+
+def iqr(arr):
+    return np.subtract(*np.percentile(arr, (75, 25)))
 
 
 @numba.njit(fastmath=True, parallel=True)
@@ -32,6 +40,117 @@ class CustomGaussianKernel(Gaussian):
     def __init__(self, h=1.0):
         super().__init__(h=h)
         self._shape = gau
+
+
+def _gaussian_kde(
+        data, random_state, max_samples, bw_method='normal_reference'
+):
+    """
+    Fits a Gaussian KDE to `data`.
+
+    """
+    # This overrides the 'gau' entry of the kernel_switch dictionary
+    # defined in statsmodels in order to use our accelerated implementation
+    kernel_switch['gau'] = CustomGaussianKernel
+    np.random.seed(random_state)
+    sample = np.random.choice(
+        data, size=min(max_samples, data.size), replace=False
+    )
+    try:
+        kde = KDEUnivariate(sample)
+        kde.fit(bw=bw_method)
+    except RuntimeError:
+        raise ValueError(
+            'Failed to establish bandwidth due to improper sample distribution.'
+        )
+    return kde
+
+
+def _tree_fit_kdes(
+        X, y, tree, sample_leaves_parents, max_kde_samples, random_state=None
+):
+    """
+    For the given `tree`, fits and evaluates Gaussian KDEs at each leaf parent
+    node.
+
+    """
+    nodes = {}
+    for leaf_idx, leaf_feature in enumerate(tree.feature):
+        if leaf_feature >= 0:
+            # Not a leaf
+            continue
+        parent_idx = leaf_idx - 1
+        feature = tree.feature[parent_idx]
+        if feature < 0:
+            parent_idx = leaf_idx - 2
+            feature = tree.feature[parent_idx]
+        sample_indices = sample_leaves_parents == parent_idx
+        pos_data = X[sample_indices & (y == 1), feature]
+        neg_data = X[sample_indices & (y == 0), feature]
+
+        node = Node(
+            feature, np.array([neg_data.shape[0], pos_data.shape[0]]),
+            True, None, [], []
+        )
+
+        if neg_data.size >= 100 and pos_data.size >= 100:
+            # Bin sample data and evaluate using both KDEs
+            bin_edges = np.histogram_bin_edges(
+                X[:, feature], bins=1000
+            )
+            node.bin_edges = bin_edges
+            bin_edge_diff = np.diff(bin_edges, axis=0)
+            for data in [neg_data, pos_data]:
+                try:
+                    kde = _gaussian_kde(data, random_state, max_kde_samples)
+                except ValueError:
+                    node.used = False
+                    break
+                fitted_densities = \
+                    kde.evaluate(bin_edges[1:] + bin_edge_diff / 2)
+                gof = ks_2samp(data, fitted_densities)
+                node.kde_evals.append(fitted_densities)
+                node.gofs.append(gof)
+        else:
+            node.used = False
+
+        nodes[parent_idx] = node
+
+    return nodes
+
+
+def _tree_decide_kde(X, sample_leaves, nodes: Dict[int, Node]):
+    scores = np.zeros(X.shape[0])
+    for parent_idx, node in nodes.items():
+        sample_indices = sample_leaves == parent_idx
+        if not sample_indices.any():
+            continue
+
+        if not node.used:
+            continue
+
+        sample_data = X[sample_indices, node.feature_idx]
+
+        bin_indices = np.clip(
+            np.searchsorted(node.bin_edges, sample_data) - 2,
+            0,
+            node.bin_edges.shape[0] - 1
+        )
+
+        total_size = node.class_sizes.sum()
+        pos = (node.class_sizes[1] / total_size) * \
+            node.kde_evals[1][bin_indices]
+        neg = (node.class_sizes[0] / total_size) * \
+            node.kde_evals[0][bin_indices]
+
+        # Clip the score ranges to ensure that the log transform is
+        # valid
+        pos = np.clip(pos, None, 1e100)
+        neg = np.clip(neg, 1e-100, None)
+
+        scores[sample_indices] = np.log10(1 + pos / neg)
+
+    return scores
 
 
 class RandomForest(RandomForestClassifier):
@@ -83,105 +202,41 @@ class RandomForest(RandomForestClassifier):
 
         self.max_density_samples = max_density_samples
 
-        self._leaves: List[Dict[int, Leaf]] = []
-        # TODO: generalize this to any tree depth
-        # TODO: check that this is the correct tree node indexing
-        #      1
-        #   2     5
-        #  3 4   6 7
-        #  (based on inspection of tree.feature array)
-        self._leaf_parents = {2: 1, 3: 1, 5: 4, 6: 4}
+        self._nodes: List[Dict[int, Node]] = []
 
     def fit(self, X, y, sample_weight=None):
         super().fit(X, y, sample_weight=sample_weight)
 
-        # This overrides the 'gau' entry of the kernel_switch dictionary
-        # defined in statsmodels in order to use our accelerated implementation
-        kernel_switch['gau'] = CustomGaussianKernel
-
         indicators, index_by_tree = self.decision_path(X)
-
         indices = zip(index_by_tree, index_by_tree[1:])
-        for tree_classifier, (begin, end) in zip(self.estimators_, indices):
-            tree = tree_classifier.tree_
-            sample_leaves = indicators[:, begin:end].indices[2::3]
 
-            leaves = {}
-            for leaf_idx, parent_idx in self._leaf_parents.items():
-                sample_indices = sample_leaves == leaf_idx
-                feature = tree.feature[parent_idx]
-                pos_data = X[sample_indices & (y == 1), feature]
-                neg_data = X[sample_indices & (y == 0), feature]
-
-                if pos_data.size == 0 or neg_data.size == 0:
-                    bin_edges, evals = None, None
-                else:
-                    kdes = [
-                        self._gaussian_kde(data)
-                        for data in [neg_data, pos_data]
-                    ]
-
-                    # Bin sample data and evaluate using both KDEs
-                    bin_edges = np.histogram_bin_edges(
-                        X[sample_indices, feature], bins=1000
-                    )
-                    evals = [
-                        kde.evaluate(bin_edges) for kde in kdes
-                    ]
-
-                leaves[leaf_idx] = Leaf(
-                    feature,
-                    np.array([neg_data.shape[0], pos_data.shape[0]]),
-                    bin_edges,
-                    evals
-                )
-
-            self._leaves.append(leaves)
+        self._nodes = Parallel(n_jobs=self.n_jobs, max_nbytes=1e6)(
+            delayed(_tree_fit_kdes)(
+                X,
+                y,
+                tree_clf.tree_,
+                # Keep only the leaf parent node index
+                self._leaf_parent_indices(indicators, begin, end),
+                self.max_density_samples,
+                self.random_state
+            ) for tree_clf, (begin, end) in zip(self.estimators_, indices)
+        )
 
         return self
 
     def decision_function(self, X):
-        scores = np.zeros(X.shape[0])
-
         indicators, index_by_tree = self.decision_path(X)
         indices = zip(index_by_tree, index_by_tree[1:])
-        for tree_idx, (begin, end) in enumerate(indices):
-            sample_leaves = indicators[:, begin:end].indices[
-                self.max_depth::self.max_depth + 1
-            ]
-            for leaf_idx in self._leaf_parents:
-                sample_indices = sample_leaves == leaf_idx
-                if not sample_indices.any():
-                    continue
-                leaf = self._leaves[tree_idx][leaf_idx]
 
-                if leaf.bin_edges is None:
-                    continue
+        return sum(Parallel(n_jobs=self.n_jobs, max_nbytes=1e6)(
+            delayed(_tree_decide_kde)(
+                X,
+                self._leaf_parent_indices(indicators, begin, end),
+                self._nodes[tree_idx]
+            ) for tree_idx, (begin, end) in enumerate(indices)
+        ))
 
-                sample_data = X[sample_indices, leaf.feature_idx]
-
-                bin_indices = np.clip(
-                    np.searchsorted(leaf.bin_edges, sample_data) - 1,
-                    0,
-                    leaf.bin_edges.shape[0] - 1
-                )
-
-                total_size = leaf.class_sizes.sum()
-                pos = (leaf.class_sizes[1] / total_size) *\
-                    leaf.kde_evals[1][bin_indices]
-                neg = (leaf.class_sizes[0] / total_size) *\
-                    leaf.kde_evals[0][bin_indices]
-
-                scores[sample_indices] += np.log10(2 - (neg / (pos + neg)))
-
-        return scores
-
-    def _gaussian_kde(self, data, bw_method=0.2):
-        kde = KDEUnivariate(
-            np.random.choice(
-                data,
-                size=max(self.max_density_samples, data.shape[0])
-            )
-        )
-        kde.fit(bw=bw_method)
-        return kde
+    def _leaf_parent_indices(self, indicators, begin, end):
+        return indicators[:, begin:end].indices[
+            self.max_depth - 1::self.max_depth + 1
+        ]

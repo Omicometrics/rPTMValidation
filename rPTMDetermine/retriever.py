@@ -1,6 +1,7 @@
 import itertools
 import logging
 import os
+import pickle
 from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
@@ -9,11 +10,11 @@ from pepfrag import ModSite, Peptide
 from . import (
     localization,
     packing,
+    pathway_base,
     readers
 )
 from .constants import DEFAULT_FRAGMENT_IONS, RESIDUES
 from .mass_spectrum import Spectrum
-from .pathway_base import MODEL_CACHE_FILE, PathwayBase
 from .peptide_spectrum_match import PSM
 from .psm_container import PSMContainer
 from .results import write_psm_results
@@ -24,11 +25,12 @@ from .validation_model import ValidationModel
 PeptideTuple = Tuple[Peptide, readers.PeptideType]
 
 
-class Retriever(PathwayBase):
+class Retriever(pathway_base.PathwayBase):
     def __init__(
             self,
             config: RPTMDetermineConfig,
-            model: Optional[ValidationModel] = None
+            model: Optional[ValidationModel] = None,
+            loc_model: Optional[ValidationModel] = None
     ):
         """
         Initialize the Retriever object.
@@ -39,6 +41,7 @@ class Retriever(PathwayBase):
         """
         super().__init__(config, "retrieve.log")
         self.model = model
+        self.loc_model = loc_model
 
     def retrieve(self):
         """
@@ -53,12 +56,27 @@ class Retriever(PathwayBase):
                     'Cache has been invalidated by configuration change'
                 )
 
-            model_cache = os.path.join(self.cache_dir, MODEL_CACHE_FILE)
+            model_cache = os.path.join(
+                self.cache_dir, pathway_base.MODEL_CACHE_FILE
+            )
             if os.path.exists(model_cache):
-                self.model = packing.load_from_file(model_cache)
+                with open(model_cache, 'rb') as fh:
+                    self.model = pickle.load(fh)
             else:
                 logging.error('No cached model found - exiting.')
                 raise RuntimeError('No cached model found - exiting.')
+
+            model_cache = os.path.join(
+                self.cache_dir, pathway_base.LOCALIZATION_MODEL_CACHE_FILE
+            )
+            if os.path.exists(model_cache):
+                with open(model_cache, 'rb') as fh:
+                    self.loc_model = pickle.load(fh)
+            else:
+                logging.error('No cached localization model found - exiting.')
+                raise RuntimeError(
+                    'No cached localization model found - exiting.'
+                )
 
         self._read_results()
 
@@ -101,8 +119,13 @@ class Retriever(PathwayBase):
         logging.info('Correcting isobaric modifications and localizing...')
         for psm in candidates:
             localization.correct_and_localize(
-                psm, self.modification, self.mod_mass,
-                self.config.target_residue, self.model, self.model_features,
+                psm,
+                self.modification,
+                self.mod_mass,
+                self.config.target_residue,
+                self.model,
+                self.loc_model,
+                self.model_features,
                 self.ptmdb
             )
 
