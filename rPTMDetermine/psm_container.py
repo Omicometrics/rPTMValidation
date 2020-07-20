@@ -12,6 +12,7 @@ import sys
 from typing import (Any, Callable, Dict, Generic, Iterable, List, Optional,
                     overload, Sequence, Set, Tuple, TypeVar, TYPE_CHECKING)
 
+from joblib import Parallel, delayed
 import numpy as np
 
 from pepfrag import ModSite, Peptide
@@ -152,10 +153,8 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
         """
         Extracts only the PSM with the greatest score sum for each spectrum
         matched by any number of peptides.
-
         Returns:
             PSMContainer of filtered PSMs.
-
         """
         index = self.get_index(("data_id", "spec_id"))
 
@@ -210,14 +209,11 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
     ) -> PSMContainer[PSMType]:
         """
         Extracts the validated identifications from the full set of PSMs.
-
         Args:
             use_consensus: If True, strict score consensus is required. If
                            False, majority voting will be used instead.
-
         Returns:
             A PSMContainer containing only validated PSMs.
-
         """
         pass_function = (
             machinelearning.scoring.passes_consensus if use_consensus
@@ -256,19 +252,26 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
 
     def to_feature_array(
         self,
-        features: Optional[List[str]] = None
+        features: Optional[List[str]] = None,
+        n_jobs: int = 1
     ) -> np.array:
         """
         Constructs an `np.array` using the features of the contained `PSM`s.
 
         Args:
-            features:
+            features: Names of the features to retain.
+            n_jobs: Number of parallel processes.
 
         Returns:
             numpy array
 
         """
-        return np.array([psm.features.to_list(features) for psm in self.data])
+        return np.array(
+            Parallel(n_jobs=n_jobs)(
+                delayed(lambda psm: psm.features.to_list(features))(psm)
+                for psm in self.data
+            )
+        )
 
     @classmethod
     def from_csv(

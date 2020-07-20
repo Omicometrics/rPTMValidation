@@ -1,11 +1,15 @@
+cloudpickle
 cython
+joblib
 lxml
 msgpack
+numba
 numpy
 openpyxl
 overrides
 pandas
 scipy
 sklearn
+statsmodels
 tqdm
-pepfrag==0.2
+pepfrag==0.3
