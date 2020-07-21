@@ -2,10 +2,13 @@
 Peptide validation using ensemble SVM.
 
 """
+from __future__ import annotations
+
 import bisect
 import dataclasses
 from typing import List, Optional, Sequence, Tuple
 
+import cloudpickle
 import numpy as np
 from sklearn.base import clone
 from sklearn.model_selection import StratifiedKFold
@@ -132,7 +135,8 @@ class ValidationModel:
                 max_depth=2,
                 n_jobs=n_jobs,
                 random_state=1,
-                class_weight='balanced'
+                class_weight='balanced',
+                max_density_samples=10000
             )
         )
         self._estimators: List[RandomForest] = []
@@ -268,3 +272,29 @@ class ValidationModel:
 
         score_info = np.array(list(score_rec.values()))
         return score_info[:, 0], score_info[:, 1]
+
+    def to_file(self, pickle_file: str):
+        """
+        Dumps the ValidationModel to a cloudpickle file.
+
+        Args:
+            pickle_file: Path to the output cloudpickle file.
+
+        """
+        with open(pickle_file, 'wb') as fh:
+            cloudpickle.dump(self, fh)
+
+    @staticmethod
+    def from_file(pickle_file: str) -> ValidationModel:
+        """
+        Reconstructs a ValidationModel from a cloudpickle file.
+
+        Args:
+            pickle_file: Path to the cloudpickle file.
+
+        Returns:
+            ValidationModel
+
+        """
+        with open(pickle_file, 'rb') as fh:
+            return cloudpickle.load(fh)

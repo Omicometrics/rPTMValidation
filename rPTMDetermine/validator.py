@@ -8,6 +8,7 @@ import functools
 import itertools
 import logging
 import os
+import re
 from typing import (
     Callable,
     Iterable,
@@ -191,8 +192,7 @@ class Validator(pathway_base.PathwayBase):
 
         if self.use_cache and os.path.exists(model_cache):
             logging.info('Using cached model...')
-            with open(model_cache, 'rb') as fh:
-                self.model = cloudpickle.load(fh)
+            self.model = ValidationModel.from_file(model_cache)
             return
 
         logging.info('Training machine learning model...')
@@ -203,8 +203,7 @@ class Validator(pathway_base.PathwayBase):
         self.model.fit(self.unmod_psms, self.decoy_psms, self.neg_unmod_psms)
 
         logging.info('Caching trained model...')
-        with open(model_cache, 'wb') as fh:
-            cloudpickle.dump(self.model, fh)
+        self.model.to_file(model_cache)
 
     def _construct_loc_model(self):
         """
@@ -218,8 +217,7 @@ class Validator(pathway_base.PathwayBase):
 
         if self.use_cache and os.path.exists(model_cache):
             logging.info('Using cached localization model...')
-            with open(model_cache, 'rb') as fh:
-                self.loc_model = cloudpickle.load(fh)
+            self.loc_model = ValidationModel.from_file(model_cache)
             return
 
         logging.info('Training machine learning model for localization...')
@@ -232,8 +230,7 @@ class Validator(pathway_base.PathwayBase):
         )
 
         logging.info('Caching trained localization model...')
-        with open(model_cache, 'wb') as fh:
-            cloudpickle.dump(self.loc_model, fh)
+        self.loc_model.to_file(model_cache)
 
     def _output_results(self):
         """
@@ -397,15 +394,15 @@ class Validator(pathway_base.PathwayBase):
     def _results_to_mod_psms(
         self,
         search_res: Iterable[readers.SearchResult],
-        data_id: str
+        data_id: str,
     ) -> PSMContainer[PSM]:
         """
         Converts `SearchResult`s to `PSM`s after filtering.
 
         Filters are applied on peptide type (keep only target identifications),
-        identification rank (keep only top-ranking identification), amino acid
-        residues (check all valid) and modifications (keep only those with the
-        target modification).
+        identification rank (keep only top-ranking identification, and I/L
+        isoforms at rank 2), amino acid residues (check all valid) and
+        modifications (keep only those with the target modification).
 
         Args:
             search_res: The database search results.
@@ -416,19 +413,43 @@ class Validator(pathway_base.PathwayBase):
 
         """
         psms: PSMContainer[PSM] = PSMContainer()
+        allowed_ranks = {1, 2}
+        # Keep track of the top-ranking identification for the spectrum, since
+        # rank 2 identifications will be retained if they are only different
+        # by I/L
+        current_spectrum: Optional[str] = None
+        top_rank_ident: Optional[readers.SearchResult] = None
         for ident in search_res:
             if (ident.pep_type is readers.PeptideType.decoy or
-                    ident.rank != 1 or not RESIDUES.issuperset(ident.seq)):
-                # Filter to rank 1, target identifications for validation
+                    ident.rank not in allowed_ranks or
+                    not RESIDUES.issuperset(ident.seq)):
+                # Filter to rank 1/2, target identifications for validation
                 # and ignore placeholder amino acid residue identifications
                 continue
+
+            if ident.rank == 1:
+                current_spectrum = ident.spectrum
+                top_rank_ident = ident
+            else:
+                if current_spectrum != ident.spectrum:
+                    current_spectrum = None
+                    top_rank_ident = None
+                    continue
+                m = re.fullmatch(
+                    # Construct the pattern by replace I and L in the top rank
+                    # peptide sequence with [IL] for regex matching
+                    re.sub(r'[IL]', '[IL]', top_rank_ident.seq),
+                    ident.seq
+                )
+                if m is None:
+                    # Lower rank sequence is not an I/L isoform of the top
+                    # ranking sequence
+                    continue
 
             dataset = \
                 ident.dataset if ident.dataset is not None else data_id
 
-            if any(ms.mod == self.modification and isinstance(ms.site, int)
-                   and ident.seq[ms.site - 1] == self.config.target_residue
-                   for ms in ident.mods):
+            if self._has_target_mod(ident.mods, ident.seq):
                 psms.append(
                     PSM(
                         dataset,

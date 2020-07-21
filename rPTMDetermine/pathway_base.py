@@ -400,6 +400,24 @@ class PathwayBase:
         """
         return self.config.target_residue in seq
 
+    def _has_target_mod(self, mods: Sequence[ModSite], seq: str) -> bool:
+        """
+        Determines whether the given peptide modifications include the target
+        modification.
+
+        Args:
+            mods: Peptide modifications.
+            seq: Peptide sequence.
+
+        Returns:
+            Boolean indicating whether the configured modification was found in
+            `mods`.
+
+        """
+        return any(ms.mod == self.modification and isinstance(ms.site, int)
+                   and seq[ms.site - 1] == self.config.target_residue
+                   for ms in mods)
+
     def _valid_peptide_length(self, seq: str) -> bool:
         """Evaluates whether the peptide `seq` is within the required length
         range."""
