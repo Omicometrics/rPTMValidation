@@ -17,9 +17,7 @@ import numpy as np
 
 from pepfrag import ModSite, Peptide
 
-from . import (
-    machinelearning
-)
+from .machinelearning import passes_consensus, passes_majority
 from .peptide_spectrum_match import PSM
 from .readers import parse_mods, PTMDB, UnknownModificationException
 
@@ -166,11 +164,11 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
                 continue
 
             best_score_sum = best.ml_scores.sum()
-            best_passes = machinelearning.passes_consensus(best.ml_scores)
+            best_passes = passes_consensus(best.ml_scores)
             for index in indices[1:]:
                 psm = self.data[index]
                 score_sum = psm.ml_scores.sum()
-                current_passes = machinelearning.passes_consensus(psm.ml_scores)
+                current_passes = passes_consensus(psm.ml_scores)
                 if ((current_passes and not best_passes) or
                         (score_sum >= best_score_sum and current_passes) or
                         (score_sum >= best_score_sum and not current_passes and
@@ -215,10 +213,7 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
         Returns:
             A PSMContainer containing only validated PSMs.
         """
-        pass_function = (
-            machinelearning.scoring.passes_consensus if use_consensus
-            else machinelearning.passes_majority
-        )
+        pass_function = passes_consensus if use_consensus else passes_majority
         return PSMContainer([
             psm for psm in self.data if
             pass_function(psm.ml_scores) and
