@@ -6,11 +6,12 @@ from __future__ import annotations
 
 import bisect
 import dataclasses
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import cloudpickle
 import numpy as np
 from sklearn.base import clone
+from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import MinMaxScaler
@@ -108,6 +109,45 @@ def calculate_threshold_score(
     return scores[j + 1]
 
 
+@dataclasses.dataclass
+class _Metrics:
+    sensitivity: float
+    specificity: float
+    balanced_accuracy: float
+    auc: float
+
+
+@dataclasses.dataclass
+class ModelMetrics:
+    avg_sensitivity: np.ndarray
+    std_sensitivity: np.ndarray
+    avg_specificity: np.ndarray
+    std_specificity: np.ndarray
+    avg_balanced_accuracy: np.ndarray
+    std_balanced_accuracy: np.ndarray
+    avg_auc: np.ndarray
+    std_auc: np.ndarray
+
+
+def _combine_metrics(metrics: Sequence[_Metrics]) -> ModelMetrics:
+    sensitivities, specificities, bal_accuracies, aucs = [], [], [], []
+    for est_metrics in metrics:
+        sensitivities.append(est_metrics.sensitivity)
+        specificities.append(est_metrics.specificity)
+        bal_accuracies.append(est_metrics.balanced_accuracy)
+        aucs.append(est_metrics.auc)
+    sensitivities = np.array(sensitivities)
+    specificities = np.array(specificities)
+    bal_accuracies = np.array(bal_accuracies)
+    aucs = np.array(aucs)
+    return ModelMetrics(
+        np.mean(sensitivities), np.std(sensitivities),
+        np.mean(specificities), np.std(specificities),
+        np.mean(bal_accuracies), np.std(bal_accuracies),
+        np.mean(aucs), np.std(aucs)
+    )
+
+
 class ValidationModel:
     """
     Validation of peptide identification.
@@ -148,11 +188,30 @@ class ValidationModel:
         self._scaler: Optional[Scaler] = None
         self._decoy_train_index: Optional[np.ndarray] = None
 
+        self.metrics: Optional[ModelMetrics] = None
+        self.prob_metrics: Optional[ModelMetrics] = None
+
     def fit(
-            self, pos_psms: PSMContainer, decoy_psms: PSMContainer,
-            neg_psms: PSMContainer
+            self,
+            pos_psms: PSMContainer,
+            decoy_psms: PSMContainer,
+            neg_psms: Optional[PSMContainer] = None
     ):
-        """ Construct validation model. """
+        """Constructs validation model.
+
+        Args:
+            pos_psms: Positive (pass FDR control) identifications.
+            decoy_psms: Decoy identifications.
+            neg_psms: Negative (fail FDR control) identifications. Only required
+                      if cv is not None when constructing the ValidationModel.
+
+        """
+        if self.cv is not None and neg_psms is None:
+            raise RuntimeError(
+                'Parameter `neg_psms` must be passed to ValidationModel.fit '
+                'when CV is used'
+            )
+
         # data matrices
         x_pos = pos_psms.to_feature_array(features=self.model_features)
         x_decoy = decoy_psms.to_feature_array(features=self.model_features)
@@ -164,20 +223,21 @@ class ValidationModel:
             axis=0
         )
 
-        x_neg = neg_psms.to_feature_array(features=self.model_features)
-
         train_psms = PSMContainer(pos_psms + decoy_psms)
 
         if self.cv is not None:
             skf = StratifiedKFold(n_splits=self.cv)
             mx, nx = [], []
+            val_metrics, prob_metrics = [], []
             cv_scores = np.empty(x.shape[0])
+            x_neg = neg_psms.to_feature_array(features=self.model_features)
             for train_index, test_index in skf.split(x, y):
                 model = clone(self._base_estimator)
                 model.fit(x[train_index], y[train_index])
                 self._estimators.append(model)
                 # Compute and normalize scores
-                test_scores = model.decision_function(x[test_index])
+                y_test, x_test = y[test_index], x[test_index]
+                test_scores = model.decision_function(x_test)
                 scores = np.concatenate(
                     (test_scores, model.decision_function(x_neg)), axis=0
                 )
@@ -187,22 +247,19 @@ class ValidationModel:
                 cv_scores[test_index] = (test_scores - threshold) / md
                 mx.append(threshold)
                 nx.append(md)
+                val_metrics.append(self._evaluate(y_test, test_scores, np.log10(2)))
+                prob_metrics.append(
+                    self._evaluate(y_test, model.predict_proba(x_test)[:, 1], 0.5)
+                )
 
             mx, nx = np.array(mx), np.array(nx)
             self._scaler = Scaler(mx, nx)
-
-            return cv_scores
+            self.metrics = _combine_metrics(val_metrics)
+            self.prob_metrics = _combine_metrics(prob_metrics)
         else:
             model = clone(self._base_estimator)
             model.fit(x, y)
             self._estimators.append(model)
-            scores = np.concatenate(
-                (model.decision_function(x), model.decision_function(x_neg)),
-                axis=0
-            )
-            psms = PSMContainer(pos_psms + decoy_psms + neg_psms)
-            threshold, md = self._normalize_scores(scores, psms)
-            self._scaler = Scaler(np.array([threshold]), np.array([md]))
 
     def predict(self, X):
         if self.cv is not None:
@@ -221,9 +278,18 @@ class ValidationModel:
             scores = np.array(
                 [e.decision_function(X) for e in self._estimators]
             ).T
-        else:
-            scores = self._estimators[0].decision_function(X)
-        return self._scale_scores(scores) if scale else scores
+            return self._scale_scores(scores) if scale else scores
+
+        return self._estimators[0].decision_function(X)
+
+    def validate(self, psms: PSMContainer) -> np.ndarray:
+        """
+        Validates `psms` using the trained model.
+
+        """
+        return self.decision_function(
+            psms.to_feature_array(features=self.model_features)
+        )
 
     @property
     def thresholds(self):
@@ -234,6 +300,18 @@ class ValidationModel:
     @property
     def feature_importances_(self):
         return tuple(e.feature_importances_ for e in self._estimators)
+
+    def _evaluate(self, y_true, scores, threshold):
+        """
+        """
+        _, nc = np.unique(y_true, return_counts=True)
+        sensitivity = \
+            np.count_nonzero(scores[y_true == 1] >= threshold) / nc[1]
+        specificity = \
+            np.count_nonzero(scores[y_true == 0] < threshold) / nc[0]
+        bal_accuracy = (sensitivity + specificity) / 2
+        auc = roc_auc_score(y_true, scores)
+        return _Metrics(sensitivity, specificity, bal_accuracy, auc)
 
     def _normalize_scores(self, scores, psms):
         """

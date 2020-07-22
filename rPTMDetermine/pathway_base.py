@@ -380,8 +380,7 @@ class PathwayBase:
             container: The PSMContainer containing PSMs to classify.
 
         """
-        x = container.to_feature_array(self.model_features)
-        scores = self.model.decision_function(x)
+        scores = self.model.validate(container)
         for psm, _scores in zip(container, scores):
             psm.ml_scores = _scores
 

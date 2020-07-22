@@ -210,7 +210,9 @@ class RandomForest(RandomForestClassifier):
         indicators, index_by_tree = self.decision_path(X)
         indices = zip(index_by_tree, index_by_tree[1:])
 
-        self._nodes = Parallel(n_jobs=self.n_jobs, max_nbytes=1e6)(
+        self._nodes = Parallel(
+            n_jobs=self.n_jobs, max_nbytes=1e6, backend='multiprocessing'
+        )(
             delayed(_tree_fit_kdes)(
                 X,
                 y,
@@ -228,13 +230,15 @@ class RandomForest(RandomForestClassifier):
         indicators, index_by_tree = self.decision_path(X)
         indices = zip(index_by_tree, index_by_tree[1:])
 
-        return sum(Parallel(n_jobs=self.n_jobs, max_nbytes=1e6)(
+        return sum(Parallel(
+            n_jobs=self.n_jobs, max_nbytes=1e6, backend='multiprocessing'
+        )(
             delayed(_tree_decide_kde)(
                 X,
                 self._leaf_parent_indices(indicators, begin, end),
                 self._nodes[tree_idx]
             ) for tree_idx, (begin, end) in enumerate(indices)
-        ))
+        )) / self.n_estimators
 
     def _leaf_parent_indices(self, indicators, begin, end):
         return indicators[:, begin:end].indices[
