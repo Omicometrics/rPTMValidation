@@ -137,7 +137,9 @@ def _encode(obj):
                     slots.extend(getattr(base_class, '__slots__'))
                 except AttributeError:
                     continue
-            d[b'data'] = {slot: getattr(obj, slot) for slot in slots}
+            d[b'data'] = {
+                slot: getattr(obj, slot) for slot in slots if hasattr(obj, slot)
+            }
         return d
 
     return obj
@@ -207,7 +209,12 @@ def _decode(obj):
                     for slot in new_obj.__slots__:
                         setattr(new_obj, slot, obj[b'data'][slot])
 
-            new_obj = cls.__new__(cls)
+            try:
+                new_obj = cls.__new__(cls)
+            except TypeError as ex:
+                raise TypeError(
+                    f'Error while unpacking {module}.{type_name}: {ex}'
+                )
             try:
                 new_obj.__dict__ = obj[b'data']
             except AttributeError:
