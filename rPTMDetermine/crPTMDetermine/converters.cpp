@@ -99,10 +99,13 @@ PyObject* annotationMapToPyDict(const std::map<std::string, Annotation>& anns) {
 	PyObject* dictObj = PyDict_New();
 	
 	for (const std::pair<std::string, Annotation>& ann : anns) {
+	    PyObject* annotation = (PyObject*)(Annotation) ann.second;
 		PyDict_SetItemString(
 			dictObj,
 			ann.first.c_str(),
-			(PyObject*)(Annotation) ann.second);
+			annotation
+		);
+		Py_DECREF(annotation);
 	}
 	
 	return dictObj;

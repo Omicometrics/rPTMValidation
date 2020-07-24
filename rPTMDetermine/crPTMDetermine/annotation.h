@@ -13,12 +13,11 @@ struct Annotation {
 		: index(_index), delta_mass(_delta_mass), position(_position) {}
 		
 	explicit operator PyObject*() {
-		return PyTuple_Pack(
-			3,
-			PyLong_FromLong(index),
-			PyFloat_FromDouble(delta_mass),
-			PyLong_FromLong(position)
-		);
+	    PyObject* tuple = PyTuple_New(3);
+	    PyTuple_SetItem(tuple, 0, PyLong_FromLong(index));
+	    PyTuple_SetItem(tuple, 1, PyFloat_FromDouble(delta_mass));
+	    PyTuple_SetItem(tuple, 2, PyLong_FromLong(position));
+	    return tuple;
 	}
 };
 
