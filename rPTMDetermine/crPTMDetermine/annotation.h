@@ -12,7 +12,7 @@ struct Annotation {
 	Annotation(long _index, double _delta_mass, long _position)
 		: index(_index), delta_mass(_delta_mass), position(_position) {}
 		
-	explicit operator PyObject*() {
+	explicit operator PyObject*() const {
 	    PyObject* tuple = PyTuple_New(3);
 	    PyTuple_SetItem(tuple, 0, PyLong_FromLong(index));
 	    PyTuple_SetItem(tuple, 1, PyFloat_FromDouble(delta_mass));
