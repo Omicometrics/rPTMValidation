@@ -414,7 +414,7 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
                              for idx, char in enumerate(pep_str)
                              if char == mod_info["residue"]])
 
-        mods = term_mods + sorted(mods, key=operator.itemgetter(1))
+        mods = term_mods + sorted(mods, key=operator.attrgetter('site'))
 
         return pep_str, mods, score, delta
 
@@ -450,6 +450,10 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
         title = urllib.parse.unquote(self._payload_to_dict(payload)["title"])
         if len(title.split(" ")) == 1 and ":" in title:
             return title.split(":")[1]
+
+        match = re.search(r"Locus:([\d\.]+)", title)
+        if match:
+            return match.group(1)
 
         match = re.search(r"NativeID:\"([^\"]*)\"", title)
         if match:
