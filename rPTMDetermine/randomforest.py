@@ -1,3 +1,4 @@
+import time
 import dataclasses
 from typing import Dict, List, Optional, Tuple
 
@@ -95,22 +96,27 @@ def _tree_fit_kdes(
 
         if neg_data.size >= 100 and pos_data.size >= 100:
             # Bin sample data and evaluate using both KDEs
-            bin_edges = np.histogram_bin_edges(
-                X[:, feature], bins=1000
-            )
+            bin_edges = np.histogram_bin_edges(X[:, feature], bins=1000)
             node.bin_edges = bin_edges
-            bin_edge_diff = np.diff(bin_edges, axis=0)
+            bin_centers = bin_edges[1:] - np.diff(bin_edges, axis=0) / 2
+            fitted_densities = []
             for data in [neg_data, pos_data]:
                 try:
                     kde = _gaussian_kde(data, random_state, max_kde_samples)
                 except ValueError:
                     node.used = False
                     break
-                fitted_densities = \
-                    kde.evaluate(bin_edges[1:] + bin_edge_diff / 2)
-                gof = ks_2samp(data, fitted_densities)
-                node.kde_evals.append(fitted_densities)
+                # fitted densities with upper and lower limit be 1e-10 and 1e10
+                data_densities = kde.evaluate(bin_centers)
+                gof = ks_2samp(data, data_densities)
                 node.gofs.append(gof)
+                fitted_densities.append(np.clip(data_densities, 1e-10, 1e10))
+
+            # natural log of negative densities to positive densities
+            if node.used:
+                node.log_ratios = (
+                    np.log(fitted_densities[0]) - np.log(fitted_densities[1])
+                )
         else:
             node.used = False
 
@@ -122,33 +128,23 @@ def _tree_fit_kdes(
 def _tree_decide_kde(X, sample_leaves, nodes: Dict[int, Node]):
     scores = np.zeros(X.shape[0])
     for parent_idx, node in nodes.items():
+        # dnp
+        if not node.used:
+            continue
+
         sample_indices = sample_leaves == parent_idx
         if not sample_indices.any():
             continue
 
-        if not node.used:
-            continue
-
         sample_data = X[sample_indices, node.feature_idx]
 
+        # dnp: change to 1
         bin_indices = np.clip(
-            np.searchsorted(node.bin_edges, sample_data) - 2,
+            np.searchsorted(node.bin_edges, sample_data) - 1,
             0,
-            node.bin_edges.shape[0] - 1
+            node.bin_edges.shape[0] - 2
         )
-
-        total_size = node.class_sizes.sum()
-        pos = (node.class_sizes[1] / total_size) * \
-            node.kde_evals[1][bin_indices]
-        neg = (node.class_sizes[0] / total_size) * \
-            node.kde_evals[0][bin_indices]
-
-        # Clip the score ranges to ensure that the log transform is
-        # valid
-        pos = np.clip(pos, None, 1e100)
-        neg = np.clip(neg, 1e-100, None)
-
-        scores[sample_indices] = np.log10(1 + pos / neg)
+        scores[sample_indices] = node.log_ratios[bin_indices]
 
     return scores
 
@@ -210,9 +206,7 @@ class RandomForest(RandomForestClassifier):
         indicators, index_by_tree = self.decision_path(X)
         indices = zip(index_by_tree, index_by_tree[1:])
 
-        self._nodes = Parallel(
-            n_jobs=self.n_jobs, max_nbytes=1e6, backend='multiprocessing'
-        )(
+        self._nodes = Parallel(n_jobs=self.n_jobs, max_nbytes=1e6)(
             delayed(_tree_fit_kdes)(
                 X,
                 y,

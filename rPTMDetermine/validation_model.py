@@ -16,8 +16,8 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import MinMaxScaler
 
-from .machinelearning import RandomForest
-from .psm_container import PSMContainer
+from .randomforest import RandomForest
+from rPTMDetermine.psm_container import PSMContainer
 
 
 @dataclasses.dataclass
@@ -230,6 +230,7 @@ class ValidationModel:
             mx, nx = [], []
             val_metrics, prob_metrics = [], []
             cv_scores = np.empty(x.shape[0])
+            test_scores_x = []
             x_neg = neg_psms.to_feature_array(features=self.model_features)
             for train_index, test_index in skf.split(x, y):
                 model = clone(self._base_estimator)
@@ -241,13 +242,16 @@ class ValidationModel:
                 scores = np.concatenate(
                     (test_scores, model.decision_function(x_neg)), axis=0
                 )
+                # dnp: return the scores
+                test_scores_x.append(test_scores)
                 psms = \
                     PSMContainer([train_psms[j] for j in test_index]) + neg_psms
                 threshold, md = self._normalize_scores(scores, psms)
+                # dnp: return the normalized scores
                 cv_scores[test_index] = (test_scores - threshold) / md
                 mx.append(threshold)
                 nx.append(md)
-                val_metrics.append(self._evaluate(y_test, test_scores, np.log10(2)))
+                val_metrics.append(self._evaluate(y_test, test_scores, 0))
                 prob_metrics.append(
                     self._evaluate(y_test, model.predict_proba(x_test)[:, 1], 0.5)
                 )
@@ -256,6 +260,8 @@ class ValidationModel:
             self._scaler = Scaler(mx, nx)
             self.metrics = _combine_metrics(val_metrics)
             self.prob_metrics = _combine_metrics(prob_metrics)
+            self.cv_scores = cv_scores
+            self.test_scores = test_scores_x
         else:
             model = clone(self._base_estimator)
             model.fit(x, y)

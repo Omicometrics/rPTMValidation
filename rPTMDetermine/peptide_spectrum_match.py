@@ -248,6 +248,7 @@ class PSM:
         ions = self.peptide.fragment(
             ion_types=DEFAULT_FRAGMENT_IONS if ion_types is None
             else ion_types)
+        self.peptide.clean_fragment_ions()
 
         return self.spectrum.annotate(ions, tol=tol)
 
