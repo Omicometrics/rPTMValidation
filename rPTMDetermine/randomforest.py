@@ -1,4 +1,3 @@
-import time
 import dataclasses
 from typing import Dict, List, Optional, Tuple
 
@@ -16,6 +15,7 @@ class Node:
     feature_idx: int
     class_sizes: np.ndarray
     used: bool
+    log_ratios: Optional[np.ndarray]
     bin_edges: Optional[np.ndarray]
     kde_evals: List[np.ndarray]
     gofs: List[Tuple[float, float]]
@@ -68,7 +68,8 @@ def _gaussian_kde(
 
 
 def _tree_fit_kdes(
-        X, y, tree, sample_leaves_parents, max_kde_samples, random_state=None
+        X, y, tree, sample_leaves_parents, max_kde_samples, random_state=None,
+        eval_gof=False
 ):
     """
     For the given `tree`, fits and evaluates Gaussian KDEs at each leaf parent
@@ -91,7 +92,7 @@ def _tree_fit_kdes(
 
         node = Node(
             feature, np.array([neg_data.shape[0], pos_data.shape[0]]),
-            True, None, [], []
+            True, None, None, [], []
         )
 
         if neg_data.size >= 100 and pos_data.size >= 100:
@@ -108,15 +109,15 @@ def _tree_fit_kdes(
                     break
                 # fitted densities with upper and lower limit be 1e-10 and 1e10
                 data_densities = kde.evaluate(bin_centers)
-                gof = ks_2samp(data, data_densities)
-                node.gofs.append(gof)
+                if eval_gof:
+                    gof = ks_2samp(data, data_densities)
+                    node.gofs.append(gof)
                 fitted_densities.append(np.clip(data_densities, 1e-10, 1e10))
 
             # natural log of negative densities to positive densities
             if node.used:
-                node.log_ratios = (
-                    np.log(fitted_densities[0]) - np.log(fitted_densities[1])
-                )
+                node.log_ratios = \
+                    np.log(fitted_densities[1]) - np.log(fitted_densities[0])
         else:
             node.used = False
 
@@ -128,7 +129,6 @@ def _tree_fit_kdes(
 def _tree_decide_kde(X, sample_leaves, nodes: Dict[int, Node]):
     scores = np.zeros(X.shape[0])
     for parent_idx, node in nodes.items():
-        # dnp
         if not node.used:
             continue
 
@@ -138,7 +138,6 @@ def _tree_decide_kde(X, sample_leaves, nodes: Dict[int, Node]):
 
         sample_data = X[sample_indices, node.feature_idx]
 
-        # dnp: change to 1
         bin_indices = np.clip(
             np.searchsorted(node.bin_edges, sample_data) - 1,
             0,
@@ -172,7 +171,8 @@ class RandomForest(RandomForestClassifier):
             class_weight=None,
             ccp_alpha=0.0,
             max_samples=None,
-            max_density_samples=1000
+            max_density_samples=1000,
+            eval_gof=False
     ):
         super().__init__(
             n_estimators=n_estimators,
@@ -197,6 +197,7 @@ class RandomForest(RandomForestClassifier):
         )
 
         self.max_density_samples = max_density_samples
+        self.eval_gof = eval_gof
 
         self._nodes: List[Dict[int, Node]] = []
 
@@ -214,7 +215,8 @@ class RandomForest(RandomForestClassifier):
                 # Keep only the leaf parent node index
                 self._leaf_parent_indices(indicators, begin, end),
                 self.max_density_samples,
-                self.random_state
+                self.random_state,
+                self.eval_gof
             ) for tree_clf, (begin, end) in zip(self.estimators_, indices)
         )
 

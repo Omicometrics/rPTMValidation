@@ -6,18 +6,18 @@ from __future__ import annotations
 
 import bisect
 import dataclasses
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import cloudpickle
 import numpy as np
 from sklearn.base import clone
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
-from sklearn.pipeline import make_pipeline
+from sklearn.pipeline import make_pipeline, Pipeline
 from sklearn.preprocessing import MinMaxScaler
 
 from .randomforest import RandomForest
-from rPTMDetermine.psm_container import PSMContainer
+from .psm_container import PSMContainer
 
 
 @dataclasses.dataclass
@@ -179,7 +179,7 @@ class ValidationModel:
                 max_density_samples=10000
             )
         )
-        self._estimators: List[RandomForest] = []
+        self._estimators: List[Pipeline] = []
         self.cv = cv
         self.q_threshold = q_threshold
 
@@ -190,6 +190,8 @@ class ValidationModel:
 
         self.metrics: Optional[ModelMetrics] = None
         self.prob_metrics: Optional[ModelMetrics] = None
+        self.cv_scores: Optional[np.ndarray] = None
+        self.test_scores: Optional[List[np.ndarray]] = None
 
     def fit(
             self,
@@ -247,7 +249,6 @@ class ValidationModel:
                 psms = \
                     PSMContainer([train_psms[j] for j in test_index]) + neg_psms
                 threshold, md = self._normalize_scores(scores, psms)
-                # dnp: return the normalized scores
                 cv_scores[test_index] = (test_scores - threshold) / md
                 mx.append(threshold)
                 nx.append(md)
@@ -305,7 +306,7 @@ class ValidationModel:
 
     @property
     def feature_importances_(self):
-        return tuple(e.feature_importances_ for e in self._estimators)
+        return tuple(e.steps[1].feature_importances_ for e in self._estimators)
 
     def _evaluate(self, y_true, scores, threshold):
         """
