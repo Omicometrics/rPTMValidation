@@ -128,10 +128,10 @@ class Features:
 
         # Python 3.8 one-liner:
         # return [v for f in features if (v := self.get(f)) is not None]
-        values: List[float] = []
-        for feature in features:
-            val = self.get(feature)
-            if val is not None:
-                values.append(val)
+        # values: List[float] = []
+        # for feature in features:
+            # val = self.get(feature)
+            # if val is not None:
+                # values.append(val)
 
-        return values
+        return [getattr(self, f, 0.) for f in features]
