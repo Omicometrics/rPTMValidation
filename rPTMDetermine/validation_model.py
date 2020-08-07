@@ -17,7 +17,7 @@ from sklearn.pipeline import make_pipeline, Pipeline
 from sklearn.preprocessing import MinMaxScaler
 
 from .randomforest import RandomForest
-from .psm_container import PSMContainer
+from rPTMDetermine.psm_container import PSMContainer
 
 
 @dataclasses.dataclass
@@ -153,33 +153,46 @@ class ValidationModel:
     Validation of peptide identification.
 
     """
-    def __init__(
-            self,
-            model_features: Optional[Sequence[str]] = None,
-            cv: Optional[int] = None,
-            q_threshold: float = 0.01,
-            n_jobs: int = -1
-    ):
+    def __init__(self,
+                 model_features: Optional[Sequence[str]] = None,
+                 cv: Optional[int] = None,
+                 q_threshold: float = 0.01,
+                 n_estimators: int = 100,
+                 max_samples: Optional[float] = 10000,
+                 n_jobs: int = -1,
+                 max_depth: int = 2,
+                 oob_score: bool = False):
         """
         Initializes the ValidationModel.
 
         Args:
             model_features: Features to be used in model construction and
                             prediction.
+            cv: fold for cross validation.
+            q_threshold: q-value threshold.
+            n_estimators: number of estimators for random forest.
+            max_samples: the number of samples to draw from X to train
+                         each base estimator in random forest.
+            n_jobs: number of jobs to run in parallel.
+            max_depth: the maximum depth of the tree.
+            oob_score: Whether to use out-of-sampling samples to estimate
+                       the balanced accuracy.
 
         """
         self._base_estimator = make_pipeline(
             MinMaxScaler(),
             RandomForest(
-                n_estimators=100,
-                max_depth=2,
+                n_estimators=n_estimators,
+                max_depth=max_depth,
                 n_jobs=n_jobs,
                 random_state=1,
-                class_weight='balanced',
-                max_density_samples=10000
+                max_samples=max_samples,
+                max_density_samples=10000,
+                oob_score=oob_score
             )
         )
         self._estimators: List[Pipeline] = []
+        self.oob_score = oob_score
         self.cv = cv
         self.q_threshold = q_threshold
 
@@ -187,6 +200,7 @@ class ValidationModel:
 
         self._scaler: Optional[Scaler] = None
         self._decoy_train_index: Optional[np.ndarray] = None
+        self._oob_scores: Optional[np.ndarry] = []
 
         self.metrics: Optional[ModelMetrics] = None
         self.prob_metrics: Optional[ModelMetrics] = None
@@ -214,41 +228,49 @@ class ValidationModel:
                 'when CV is used'
             )
 
-        # data matrices
-        x_pos = pos_psms.to_feature_array(features=self.model_features)
-        x_decoy = decoy_psms.to_feature_array(features=self.model_features)
-
-        # Construct model using unmodified peptide identifications
-        x = np.concatenate((x_pos, x_decoy), axis=0)
-        y = np.concatenate(
-            (np.ones(x_pos.shape[0]), np.zeros(x_decoy.shape[0])),
-            axis=0
-        )
-
-        train_psms = PSMContainer(pos_psms + decoy_psms)
+        # training data matrix
+        x, y, train_psms = self._train_matrix(pos_psms, decoy_psms)
 
         if self.cv is not None:
             skf = StratifiedKFold(n_splits=self.cv)
+
+            x_neg = self._features_to_matrix(neg_psms)
+
             mx, nx = [], []
             val_metrics, prob_metrics = [], []
             cv_scores = np.empty(x.shape[0])
             test_scores_x = []
-            x_neg = neg_psms.to_feature_array(features=self.model_features)
+
             for train_index, test_index in skf.split(x, y):
                 model = clone(self._base_estimator)
                 model.fit(x[train_index], y[train_index])
                 self._estimators.append(model)
+
                 # Compute and normalize scores
                 y_test, x_test = y[test_index], x[test_index]
-                test_scores = model.decision_function(x_test)
-                scores = np.concatenate(
-                    (test_scores, model.decision_function(x_neg)), axis=0
-                )
+                ntest = test_index.size
+
+                # combine testing feature matrix with negative feature matrix
+                x_val = np.concatenate((x_test, x_neg), axis=0)
+
+                if self.oob_score:
+                    x_val = model["minmaxscaler"].transform(x_val)
+                    scores, score_matrix =\
+                        model["randomforest"].decision_function(
+                            x_val, return_matrix=True
+                        )
+                    self._set_oob_score(score_matrix[:ntest], y_test)
+                else:
+                    scores = model.decision_function(x_val)
+
+                test_scores = scores[:ntest]
+
                 # dnp: return the scores
                 test_scores_x.append(test_scores)
-                psms = \
-                    PSMContainer([train_psms[j] for j in test_index]) + neg_psms
+                psms = (PSMContainer([train_psms[j] for j in test_index])
+                        + neg_psms)
                 threshold, md = self._normalize_scores(scores, psms)
+
                 cv_scores[test_index] = (test_scores - threshold) / md
                 mx.append(threshold)
                 nx.append(md)
@@ -263,31 +285,32 @@ class ValidationModel:
             self.prob_metrics = _combine_metrics(prob_metrics)
             self.cv_scores = cv_scores
             self.test_scores = test_scores_x
+
         else:
             model = clone(self._base_estimator)
             model.fit(x, y)
             self._estimators.append(model)
 
-    def predict(self, X):
+    def predict(self, x):
         if self.cv is not None:
-            return np.array([e.predict(X) for e in self._estimators]).T
+            return np.array([e.predict(x) for e in self._estimators]).T
 
-        return self._estimators[0].predict(X)
+        return self._estimators[0].predict(x)
 
-    def predict_proba(self, X):
+    def predict_proba(self, x):
         if self.cv is not None:
-            return np.array([e.predict_proba(X) for e in self._estimators]).T
+            return np.array([e.predict_proba(x) for e in self._estimators]).T
 
-        return self._estimators[0].predict_proba(X)
+        return self._estimators[0].predict_proba(x)
 
-    def decision_function(self, X, scale: bool = True):
+    def decision_function(self, x, scale: bool = True):
         if self.cv is not None:
             scores = np.array(
-                [e.decision_function(X) for e in self._estimators]
+                [e.decision_function(x) for e in self._estimators]
             ).T
             return self._scale_scores(scores) if scale else scores
 
-        return self._estimators[0].decision_function(X)
+        return self._estimators[0].decision_function(x)
 
     def validate(self, psms: PSMContainer) -> np.ndarray:
         """
@@ -307,6 +330,21 @@ class ValidationModel:
     @property
     def feature_importances_(self):
         return tuple(e.steps[1].feature_importances_ for e in self._estimators)
+
+    @property
+    def oob_scores(self):
+        """
+        Out of subsampling scores.
+
+        Returns:
+            n_estiamtors: number of estimators
+            oob_scores: Out-of-subsampling scores
+            oob_std: standard deviation of out-of-subsampling scores
+
+        """
+        scores = np.array(self._oob_scores)
+        n = scores.shape[1]
+        return np.arange(1, n+1) * 10, scores.mean(axis=0), scores.std(axis=0)
 
     def _evaluate(self, y_true, scores, threshold):
         """
@@ -338,6 +376,52 @@ class ValidationModel:
 
         """
         return (scores - self._scaler.centers) / self._scaler.normalizer
+
+    def _set_oob_score(self, scores: np.ndarray, y: np.ndarray):
+        """
+        Calculate out-of-sampling scores.
+
+        """
+        oobs = []
+        n = scores.shape[1]
+        for i in range(10, n + 10, 10):
+            s = scores[:, :i].mean(axis=1)
+            m = self._evaluate(y, s, 0)
+            oobs.append(m.balanced_accuracy)
+        self._oob_scores.append(oobs)
+
+    def _train_matrix(self, pos_psms, decoy_psms):
+        """
+        Creates training data matrix
+
+        """
+        # to make this local, thus avoid looking up it in iteration
+        model_features = self.model_features
+
+        npos, ndecoy = len(pos_psms), len(decoy_psms)
+
+        train_psms = PSMContainer(pos_psms + decoy_psms)
+
+        # data matrices
+        x = np.empty((npos + ndecoy, len(model_features)))
+        for i, p in enumerate(train_psms):
+            x[i] = p.features.to_list(model_features)
+
+        y = np.concatenate((np.ones(npos), np.zeros(ndecoy)), axis=0)
+
+        return x, y, train_psms
+
+    def _features_to_matrix(self, psms):
+        """ Creates negative data matrix """
+        # to make this local, thus avoid looking up it in iteration
+        model_features = self.model_features
+
+        x = np.empty((len(psms), len(model_features)))
+
+        for i, p in enumerate(psms):
+            x[i] = p.features.to_list(model_features)
+
+        return x
 
     @staticmethod
     def _reconstruct_psms(
