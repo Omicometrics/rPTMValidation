@@ -3,7 +3,7 @@ import numbers
 import threading
 
 from warnings import warn
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Callable
 from joblib import Parallel, delayed
 
 import numba
@@ -35,10 +35,8 @@ class Node:
     bin_edges: Optional[np.ndarray]
     kde_evals: List[np.ndarray]
     gofs: List[Tuple[float, float]]
-
-
-def iqr(arr):
-    return np.subtract(*np.percentile(arr, (75, 25)))
+    determine: Optional[Callable]
+    root_feature_idx: Optional[int]
 
 
 @numba.njit(fastmath=True, parallel=True)
@@ -60,7 +58,7 @@ class CustomGaussianKernel(Gaussian):
 
 
 def _gaussian_kde(
-        data, random_state, max_samples, bw_method='normal_reference'
+        x, random_state, max_samples, bw_method='normal_reference'
 ):
     """
     Fits a Gaussian KDE to `data`.
@@ -70,12 +68,10 @@ def _gaussian_kde(
     # defined in statsmodels in order to use our accelerated implementation
     kernel_switch['gau'] = CustomGaussianKernel
     np.random.seed(random_state)
-    sample = np.random.choice(
-        data, size=min(max_samples, data.size), replace=False
-    )
+    sample = np.random.choice(x, size=min(max_samples, x.size), replace=False)
     try:
         kde = KDEUnivariate(sample)
-        kde.fit(bw=bw_method)
+        kde.fit(bw=bw_method, kernel="gau", fft=True)
     except RuntimeError:
         raise ValueError("Failed to establish bandwidth due to improper"
                          " sample distribution.")
@@ -83,38 +79,39 @@ def _gaussian_kde(
 
 
 def _tree_fit_kdes(X, y, bin_edges, tree_clf, max_kde_samples,
-                   random_state=None, eval_gof=False):
+                   random_state=None, eval_gof=False, record_root=False):
     """
     For the given `tree`, fits and evaluates Gaussian KDEs at each
     leaf parent node.
 
     """
     nodes = {}
-    tree = tree_clf.tree_
-    node_indicator = tree_clf.decision_path(X)
+    node_features = tree_clf.tree_.feature
+    node_indicator = tree_clf.decision_path(X).A.astype(bool)
+    thresholds = tree_clf.tree_.threshold
+
     y = y.ravel()
-    for leaf_idx, leaf_feature in enumerate(tree.feature):
+    for leaf_idx, leaf_feature in enumerate(node_features):
         if leaf_feature >= 0:
             # Not a leaf
             continue
         parent_node = leaf_idx - 1
-        feature = tree.feature[parent_node]
+        feature = node_features[parent_node]
         if feature < 0:
             parent_node = leaf_idx - 2
-            feature = tree.feature[parent_node]
+            feature = node_features[parent_node]
 
         # if the parent node has been used
         if parent_node in nodes:
             continue
 
-        sample_indices =\
-            node_indicator[:, parent_node].toarray().astype(bool).ravel()
+        sample_indices = node_indicator[:, parent_node]
         pos_data = X[sample_indices & (y == 1), feature]
         neg_data = X[sample_indices & (y == 0), feature]
 
         node = Node(
             feature, [neg_data.size, pos_data.size],
-            True, None, None, [], []
+            True, None, None, [], [], None, None
         )
 
         if neg_data.size >= 100 and pos_data.size >= 100:
@@ -140,6 +137,15 @@ def _tree_fit_kdes(X, y, bin_edges, tree_clf, max_kde_samples,
                 node.bin_edges = feature_bins
                 node.log_ratios = \
                     np.log(fitted_densities[1]) - np.log(fitted_densities[0])
+                node.root_feature_idx = node_features[0]
+
+                # determine the sign
+                if record_root:
+                    node.root_feature_idx = node_features[0]
+                    if pos_data[0] <= thresholds[0]:
+                        node.determine = lambda x: x <= thresholds[0]
+                    else:
+                        node.determine = lambda x: x > thresholds[0]
         else:
             node.used = False
 
@@ -148,23 +154,29 @@ def _tree_fit_kdes(X, y, bin_edges, tree_clf, max_kde_samples,
     return nodes
 
 
-def _tree_decide_kde(X, tree_clf, nodes: Dict[int, Node], bin_indices):
-
-    node_indicator = tree_clf.decision_path(X)
-    
+def _simple_tree_decide_kde(X, tree_clf, nodes: Dict[int, Node], bin_indices):
+    """ Simplifies tree parent nodes access if depth==2 """
     scores = np.zeros(X.shape[0])
     for parent_node, node in nodes.items():
-        if not node.used:
-            continue
+        if node.used:
+            sample_indices = node.determine(X[:, node.root_feature_idx])
+            if sample_indices.any():
+                bin_index = bin_indices[sample_indices, node.feature_idx]
+                scores[sample_indices] = node.log_ratios[bin_index]
+    return scores
 
-        sample_indices =\
-            node_indicator[:, parent_node].toarray().astype(bool).ravel()
-        if not sample_indices.any():
-            continue
 
-        bin_index = bin_indices[sample_indices, node.feature_idx]
+def _tree_decide_kde(X, tree_clf, nodes: Dict[int, Node], bin_indices):
 
-        scores[sample_indices] = node.log_ratios[bin_index]
+    node_indicator = tree_clf.decision_path(X).A.astype(bool)
+
+    scores = np.zeros(X.shape[0])
+    for parent_node, node in nodes.items():
+        if node.used:
+            sample_indices = node_indicator[:, parent_node]
+            if sample_indices.any():
+                bin_index = bin_indices[sample_indices, node.feature_idx]
+                scores[sample_indices] = node.log_ratios[bin_index]
 
     return scores
 
@@ -176,11 +188,11 @@ def _get_n_samples_subsampling(n_samples: int,
     Args:
         n_samples: Number of samples in minor class.
         max_samples: The maximum number of samples to draw
-            from the total available:
-            - if float, this indicates a fraction of the total and
-              should be the interval `(0, 1)`;
-            - if int, this indicates the exact number of samples;
-            - if None, this indicates the total number of samples.
+                     from the total available:
+                     - if float, this indicates a fraction of the total
+                       and should be the interval `(0, 1)`;
+                     - if int, this indicates the exact number of samples;
+                     - if None, this indicates the total number of samples.
 
     """
     if max_samples is None:
@@ -417,15 +429,11 @@ class RandomForest(RandomForestClassifier):
             nodes = Parallel(n_jobs=self.n_jobs, max_nbytes=1e6)(
                 delayed(_tree_fit_kdes)(
                     x[index], y[index], self.bin_edges, e,
-                    self.max_density_samples, self.random_state, self.eval_gof
+                    self.max_density_samples, self.random_state,
+                    self.eval_gof, record_root=self.max_depth==2
                 ) for e, index in zip(trees, random_sample_index)
             )
             self._nodes.extend(nodes)
-
-        # TODO: Add OOB score to current implementation, though
-        #       this is not the original OOB in random forests.
-        # if self.oob_score:
-        #    self._set_oob_score(X, y)
 
         # Decapsulate classes_ attributes
         if hasattr(self, "classes_") and self.n_outputs_ == 1:
@@ -439,24 +447,30 @@ class RandomForest(RandomForestClassifier):
         # bin the data in advance
         bin_indices = self._bin_index(x)
 
-        # TODO: if max_depth=2, try to use a simplified procedure to
-        #       calculate scores, instead of using decision_path and
-        #       converting sparse matrix to indicator array.
-        score_matrix = Parallel(
+        if self.max_depth == 2:
+            score_matrix = Parallel(
             n_jobs=self.n_jobs, max_nbytes=1e6, backend='multiprocessing'
-        )(
-            delayed(_tree_decide_kde)(x, e, self._nodes[i], bin_indices)
-            for i, e in enumerate(self.estimators_)
-        )
-        score_matrix = np.array(score_matrix).T
+            )(
+                delayed(_simple_tree_decide_kde)(
+                    x, e, self._nodes[i], bin_indices
+                ) for i, e in enumerate(self.estimators_)
+            )
+        else:
+            score_matrix = Parallel(
+                n_jobs=self.n_jobs, max_nbytes=1e6, backend='multiprocessing'
+            )(
+                delayed(_tree_decide_kde)(x, e, self._nodes[i], bin_indices)
+                for i, e in enumerate(self.estimators_)
+            )
 
+        score_matrix = np.array(score_matrix).T
         if return_matrix:
             return score_matrix.mean(axis=1), score_matrix
         return score_matrix.mean(axis=1)
 
     def predict(self, x):
         """
-        Overrides sklearn's random forest predict
+        Overrides sk-learn's random forest predict
         """
         proba = self.predict_proba(x)
 
@@ -479,7 +493,7 @@ class RandomForest(RandomForestClassifier):
 
     def predict_proba(self, x):
         """
-        Overrides sklearn's random forest predict_proba
+        Overrides sk-learn's random forest predict_proba
         """
         check_is_fitted(self)
         # Check data
