@@ -6,8 +6,8 @@ from warnings import warn
 from typing import Dict, List, Optional, Tuple, Callable
 from joblib import Parallel, delayed
 
-import numba
 import numpy as np
+from numpy import fft
 from scipy.stats import ks_2samp
 from scipy.sparse import issparse
 
@@ -19,67 +19,79 @@ from sklearn.utils import check_random_state
 from sklearn.utils.fixes import _joblib_parallel_args
 from sklearn.utils.validation import check_is_fitted
 from sklearn.ensemble import RandomForestClassifier
-from statsmodels.sandbox.nonparametric.kernels import Gaussian
-from statsmodels.nonparametric.kde import KDEUnivariate, kernel_switch
 
 
 MAX_INT = np.iinfo(np.int32).max
+# Number of bins for x discretization for kernel density estimation.
+Nbins = 1000
 
 
 @dataclasses.dataclass()
 class Node:
-    feature_idx: int
-    class_sizes: List[int]
-    used: bool
-    log_ratios: Optional[np.ndarray]
-    bin_edges: Optional[np.ndarray]
-    kde_evals: List[np.ndarray]
-    gofs: List[Tuple[float, float]]
-    determine: Optional[Callable]
-    root_feature_idx: Optional[int]
+    feature_idx: Optional[int] = None
+    class_sizes: Optional[List[int]] = None
+    used: bool = True
+    log_ratios: Optional[np.ndarray] = None
+    bin_edges: Optional[np.ndarray] = None
+    kde_evals: Optional[List[np.ndarray]] = None
+    gofs: Optional[List[Tuple[float, float]]] = None
+    determine: Optional[Callable] = None
+    root_feature_idx: Optional[int] = None
 
 
-@numba.njit(fastmath=True, parallel=True)
-def gau(x):
-    return 0.3989422804014327 * np.exp(-x * x / 2.0)
-
-
-class CustomGaussianKernel(Gaussian):
+def _kernel_density_fft(x: np.ndarray, bins: np.ndarray):
     """
-    Gaussian (Normal) Kernel. This is subclassed here and the pointer to the
-    'gau' kernel class swapped to this class in order to provide a more
-    efficient implementation of the lambda shape function. This achieves
-    ~ 2x speed-up versus the numpy version used in the standard implementation.
+    Kernel density estimation using fast fourier transformation.
+    Args:
+        x: x
+        bins: bins for x
 
+    Notes:
+        Only Gaussian kernel is implemented.
+
+    References:
+        [1] Gramacki A. FFT-Based Algorithms for Kernel Density
+            Estimation and Bandwidth Selection. In Nonparametric
+            Kernel Density Estimation and Its Computational Aspects.
+            Springer. 2018, 85-118.
+        [2] Silverman BW. Kernel Density Estimation Using the Fast
+            Fourier Transform. J Royal Stat Soc. C. 1982, 31, 93-99.
+        [3] Wand MP, Jones MC. Kernel Smoothing. Chapman & Hall, New
+            York. 1995.
     """
-    def __init__(self, h=1.0):
-        super().__init__(h=h)
-        self._shape = gau
+    n = x.size
+    m = Nbins
+    # scott bandwidth: 1.059 * A * nobs ** (-1/5.),
+    # where A is min(std(X), IQR/1.34)
+    iqr = (np.percentile(x, 75) - np.percentile(x, 25)) / 1.349
+    bw = 1.059 * np.minimum(iqr, x.std(ddof=1)) * (n ** (-0.2))
+
+    # prepare constants
+    counts, _ = np.histogram(x, bins=bins)
+    grid_size = int(2 ** np.ceil(np.log2(3 * m - 1)))
+    delta = np.diff(bins).mean()
+    # gaussian kernel
+    kai = (np.exp(-(np.arange(m) * (delta / bw)) ** 2 / 2)
+           / (np.sqrt(2 * np.pi) * bw * n))
+
+    # counts vector
+    vector_counts = np.zeros(grid_size)
+    vector_counts[m:m + counts.size] = counts
+    # kernel function vector
+    vector_kernel = np.zeros(grid_size)
+    vector_kernel[:m - 1] = kai[1:][::-1]
+    vector_kernel[m - 1: 2 * m - 1] = kai
+
+    # fast fourier transform
+    c = fft.fft(vector_counts)
+    k = fft.fft(vector_kernel)
+    f = fft.ifft(c * k).real[2 * m - 1: 3 * m - 1]
+
+    return f
 
 
-def _gaussian_kde(
-        x, random_state, max_samples, bw_method='normal_reference'
-):
-    """
-    Fits a Gaussian KDE to `data`.
-
-    """
-    # This overrides the 'gau' entry of the kernel_switch dictionary
-    # defined in statsmodels in order to use our accelerated implementation
-    kernel_switch['gau'] = CustomGaussianKernel
-    np.random.seed(random_state)
-    sample = np.random.choice(x, size=min(max_samples, x.size), replace=False)
-    try:
-        kde = KDEUnivariate(sample)
-        kde.fit(bw=bw_method, kernel="gau", fft=True)
-    except RuntimeError:
-        raise ValueError("Failed to establish bandwidth due to improper"
-                         " sample distribution.")
-    return kde
-
-
-def _tree_fit_kdes(X, y, bin_edges, tree_clf, max_kde_samples,
-                   random_state=None, eval_gof=False, record_root=False):
+def _tree_fit_kdes(x, y, bin_edges, tree_clf,
+                   eval_gof=False, record_root=False):
     """
     For the given `tree`, fits and evaluates Gaussian KDEs at each
     leaf parent node.
@@ -87,7 +99,7 @@ def _tree_fit_kdes(X, y, bin_edges, tree_clf, max_kde_samples,
     """
     nodes = {}
     node_features = tree_clf.tree_.feature
-    node_indicator = tree_clf.decision_path(X).A.astype(bool)
+    node_indicator = tree_clf.decision_path(x).A.astype(bool)
     thresholds = tree_clf.tree_.threshold
 
     y = y.ravel()
@@ -106,31 +118,27 @@ def _tree_fit_kdes(X, y, bin_edges, tree_clf, max_kde_samples,
             continue
 
         sample_indices = node_indicator[:, parent_node]
-        pos_data = X[sample_indices & (y == 1), feature]
-        neg_data = X[sample_indices & (y == 0), feature]
+        pos_data = x[sample_indices & (y == 1), feature]
+        neg_data = x[sample_indices & (y == 0), feature]
 
-        node = Node(
-            feature, [neg_data.size, pos_data.size],
-            True, None, None, [], [], None, None
-        )
+        node = Node(feature_idx=feature,
+                    class_sizes=[neg_data.size, pos_data.size])
 
         if neg_data.size >= 100 and pos_data.size >= 100:
             # Bin sample data and evaluate using both KDEs
             feature_bins = bin_edges[feature]
-            bin_centers = feature_bins[1:] - np.diff(feature_bins, axis=0) / 2
             fitted_densities = []
             for data in [neg_data, pos_data]:
-                try:
-                    kde = _gaussian_kde(data, random_state, max_kde_samples)
-                except ValueError:
+                data_densities = _kernel_density_fft(data, feature_bins)
+                if np.isnan(data_densities).all():
                     node.used = False
                     break
                 # fitted densities with upper and lower limit be 1e-10 and 1e10
-                data_densities = kde.evaluate(bin_centers)
+                fitted_densities.append(np.clip(data_densities, 1e-10, 1e10))
+                # goodness-of-fit
                 if eval_gof:
                     gof = ks_2samp(data, data_densities)
                     node.gofs.append(gof)
-                fitted_densities.append(np.clip(data_densities, 1e-10, 1e10))
 
             # natural log of negative densities to positive densities
             if node.used:
@@ -139,13 +147,13 @@ def _tree_fit_kdes(X, y, bin_edges, tree_clf, max_kde_samples,
                     np.log(fitted_densities[1]) - np.log(fitted_densities[0])
                 node.root_feature_idx = node_features[0]
 
-                # determine the sign
+                # record the path from root to next level parent nodes
                 if record_root:
                     node.root_feature_idx = node_features[0]
                     if pos_data[0] <= thresholds[0]:
-                        node.determine = lambda x: x <= thresholds[0]
+                        node.determine = lambda a: a <= thresholds[0]
                     else:
-                        node.determine = lambda x: x > thresholds[0]
+                        node.determine = lambda a: a > thresholds[0]
         else:
             node.used = False
 
@@ -154,23 +162,23 @@ def _tree_fit_kdes(X, y, bin_edges, tree_clf, max_kde_samples,
     return nodes
 
 
-def _simple_tree_decide_kde(X, tree_clf, nodes: Dict[int, Node], bin_indices):
+def _simple_tree_decide_kde(x, tree_clf, nodes: Dict[int, Node], bin_indices):
     """ Simplifies tree parent nodes access if depth==2 """
-    scores = np.zeros(X.shape[0])
+    scores = np.zeros(x.shape[0])
     for parent_node, node in nodes.items():
         if node.used:
-            sample_indices = node.determine(X[:, node.root_feature_idx])
+            sample_indices = node.determine(x[:, node.root_feature_idx])
             if sample_indices.any():
                 bin_index = bin_indices[sample_indices, node.feature_idx]
                 scores[sample_indices] = node.log_ratios[bin_index]
     return scores
 
 
-def _tree_decide_kde(X, tree_clf, nodes: Dict[int, Node], bin_indices):
+def _tree_decide_kde(x, tree_clf, nodes: Dict[int, Node], bin_indices):
 
-    node_indicator = tree_clf.decision_path(X).A.astype(bool)
-
-    scores = np.zeros(X.shape[0])
+    node_indicator = tree_clf.decision_path(x).A.astype(bool)
+    
+    scores = np.zeros(x.shape[0])
     for parent_node, node in nodes.items():
         if node.used:
             sample_indices = node_indicator[:, parent_node]
@@ -181,8 +189,7 @@ def _tree_decide_kde(X, tree_clf, nodes: Dict[int, Node], bin_indices):
     return scores
 
 
-def _get_n_samples_subsampling(n_samples: int,
-                               max_samples: Optional[float]):
+def _get_n_samples_subsampling(n_samples: int, max_samples: Optional[float]):
     """
     Get the number of samples in a subsampled sample.
     Args:
@@ -248,13 +255,13 @@ def _random_subsampling(y, max_samples, random_states, ntimes):
     return random_sample_index, random_states
 
 
-def _parallel_build_trees(tree, X, y, tree_idx, n_trees, verbose=0):
+def _parallel_build_trees(tree, x, y, tree_idx, n_trees, verbose=0):
     """
     Private function used to fit a single tree in parallel."""
     if verbose > 1:
         print("building tree %d of %d" % (tree_idx + 1, n_trees))
 
-    tree.fit(X, y, check_input=False)
+    tree.fit(x, y, check_input=False)
 
     return tree
 
@@ -422,15 +429,14 @@ class RandomForest(RandomForestClassifier):
             # Collect newly grown trees
             self.estimators_.extend(trees)
 
-            # do kernel density estimation to get scores
+            # do kernel density estimation to parent nodes
             if self.bin_edges is None:
                 self._bin_x(x)
 
             nodes = Parallel(n_jobs=self.n_jobs, max_nbytes=1e6)(
                 delayed(_tree_fit_kdes)(
                     x[index], y[index], self.bin_edges, e,
-                    self.max_density_samples, self.random_state,
-                    self.eval_gof, record_root=self.max_depth==2
+                    self.eval_gof, record_root=self.max_depth == 2
                 ) for e, index in zip(trees, random_sample_index)
             )
             self._nodes.extend(nodes)
@@ -449,7 +455,7 @@ class RandomForest(RandomForestClassifier):
 
         if self.max_depth == 2:
             score_matrix = Parallel(
-            n_jobs=self.n_jobs, max_nbytes=1e6, backend='multiprocessing'
+                n_jobs=self.n_jobs, max_nbytes=1e6, backend='multiprocessing'
             )(
                 delayed(_simple_tree_decide_kde)(
                     x, e, self._nodes[i], bin_indices
@@ -470,7 +476,7 @@ class RandomForest(RandomForestClassifier):
 
     def predict(self, x):
         """
-        Overrides sk-learn's random forest predict
+        Overrides sklearn's random forest predict
         """
         proba = self.predict_proba(x)
 
@@ -488,12 +494,11 @@ class RandomForest(RandomForestClassifier):
                 predictions[:, k] = self.classes_[k].take(np.argmax(proba[k],
                                                                     axis=1),
                                                           axis=0)
-
             return predictions
 
     def predict_proba(self, x):
         """
-        Overrides sk-learn's random forest predict_proba
+        Overrides sklearn's random forest predict_proba
         """
         check_is_fitted(self)
         # Check data
@@ -537,9 +542,10 @@ class RandomForest(RandomForestClassifier):
 
     def _bin_x(self, x):
         """ Bin X """
+        nbins = Nbins
         bin_edges = []
         for i in range(x.shape[1]):
-            bin_edges.append(np.histogram_bin_edges(x[:, i], bins=1000))
+            bin_edges.append(np.histogram_bin_edges(x[:, i], bins=nbins))
         self.bin_edges = bin_edges
 
     def _bin_index(self, x):
