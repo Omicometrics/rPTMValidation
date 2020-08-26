@@ -268,4 +268,6 @@ for the desired FDR cut-off.
 
 # References
 
-[(Back to top)](#table-of-contents)
+[(Back to top)]
+
+Dong NP, Spencer DM, Quan Q, Le Blanc JCY, Feng JW, Li MZ, Siu KWM, Chu IK. rPTMDetermine: A Fully Automated Methodology for Endogenous Tyrosine Nitration Validation, Site-Localization, and Beyond. Anal. Chem. 2020, 92, 15, 10768–10776. [link](https://pubs.acs.org/doi/abs/10.1021/acs.analchem.0c02148)
