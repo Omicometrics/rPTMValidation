@@ -224,7 +224,10 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
 
             mass, mod_name = mod.split(",")
 
-            mod_name, mod_res = self._get_mod_info(mod_name)
+            try:
+                mod_name, mod_res = self._get_mod_info(mod_name)
+            except ParserException:
+                continue
 
             mod_props = {
                 "mass": float(mass),
@@ -301,8 +304,11 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
 
             proteins = re.findall(r'"([^"]+)"', protein_str)
 
-            seq, mods, score, delta =\
-                self._parse_identification(pep_str, var_mods, fixed_mods)
+            try:
+                seq, mods, score, delta =\
+                    self._parse_identification(pep_str, var_mods, fixed_mods)
+            except ParserException:
+                continue
 
             try:
                 res[query_no][pep_type]["peptides"]
@@ -391,7 +397,11 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
                 continue
 
             # Standard modifications
-            mod_mass, mod_name = var_mods[char]["mass"], var_mods[char]["name"]
+            try:
+                var_mod = var_mods[char]
+            except KeyError:
+                raise ParserException(f'Unknown modification character: {c}')
+            mod_mass, mod_name = var_mod["mass"], var_mod"name"]
             if idx == 0:
                 term_mods.append(ModSite(mod_mass, "nterm", mod_name))
             elif idx == len(mods_str) - 1:
