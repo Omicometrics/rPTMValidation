@@ -401,7 +401,7 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
                 var_mod = var_mods[char]
             except KeyError:
                 raise ParserException(f'Unknown modification character: {c}')
-            mod_mass, mod_name = var_mod["mass"], var_mod"name"]
+            mod_mass, mod_name = var_mod["mass"], var_mod["name"]
             if idx == 0:
                 term_mods.append(ModSite(mod_mass, "nterm", mod_name))
             elif idx == len(mods_str) - 1:
