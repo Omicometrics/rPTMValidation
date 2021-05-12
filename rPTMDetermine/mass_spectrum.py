@@ -220,7 +220,7 @@ class Spectrum:
         """
         return self.intensity.max()
 
-    def centroid(self):
+    def centroid(self, tol=0.1):
         """
         Centroids a tandem mass spectrum according to the m/z differences.
         All fragment ions with adjacent m/z differences of less than 0.1 Da
@@ -243,12 +243,12 @@ class Spectrum:
                 centroided.append(peak)
                 break
             diff = mz_diffs[idx]
-            if diff > 0.1:
+            if diff > tol:
                 centroided.append(peak)
             else:
                 peak_cluster = [peak]
                 _diff = 0
-                while _diff <= 0.1:
+                while _diff <= tol:
                     idx += 1
                     peak = self._peaks[idx]
                     peak_cluster.append(peak)

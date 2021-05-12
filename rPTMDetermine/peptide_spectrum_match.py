@@ -5,6 +5,7 @@ Module contains a class to define a Peptide Spectrum Match (PSM).
 """
 import bisect
 import collections
+import itertools
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
@@ -23,6 +24,9 @@ DecoyID = collections.namedtuple(
 
 SimilarityScore = collections.namedtuple(
     "SimilarityScore", ["data_id", "spectrum_id", "score"])
+
+Annotation = collections.namedtuple(
+    "Annotation", ["ion", "mz", "peak_intensity", "mz_diff"])
 
 
 class SpectrumNotFoundError(Exception):
@@ -43,9 +47,12 @@ class PSM:
         "peptide",
         "_spectrum",
         "features",
+        "annotations",
         "ml_scores",
+        "validation_score",
         "site_score",
         "site_prob",
+        "similarity_scores",
         "target",
         "site_diff_score",
         "alternative_localizations",
@@ -70,13 +77,20 @@ class PSM:
         self.target = target
 
         # This can be set later before processing occurs
-        self.spectrum = spectrum
+        self.spectrum: mass_spectrum.Spectrum = spectrum
 
         # The PSM features
         self.features: Features = Features()
 
+        # annotations once the spectrum is provided
+        self.annotations: Optional[Annotation] = None
+
+        # similarity scores
+        self.similarity_scores: List[SimilarityScore] = []
+
         # The results of validation
         self.ml_scores: Optional[np.ndarray] = None
+        self.validation_score: Optional[float] = None
 
         # Localization attributes
         self.site_score: Optional[float] = None
@@ -152,7 +166,7 @@ class PSM:
         Returns the unique identifier for the PSM.
 
         """
-        return f"{self.data_id}_{self.spec_id}_{self.seq}"
+        return f"{self.data_id}@{self.spec_id}@{self.seq}"
 
     def __str__(self) -> str:
         """
@@ -168,10 +182,13 @@ class PSM:
             "peptide": self.peptide,
             "spectrum": self.spectrum,
             "features": self.features,
+            "annotations": self.annotations,
             "ml_scores": self.ml_scores,
+            "validation_score": self.validation_score,
             "site_prob": self.site_prob,
             "site_diff_score": self.site_diff_score,
             "alternative_localizations": self.alternative_localizations,
+            "similarity_scores": self.similarity_scores,
             "target": self.target
         }
         return f"<{self.__class__.__name__} {out}>"
@@ -218,21 +235,51 @@ class PSM:
                 f"PSM ({self.uid}) has not been assigned a Spectrum"
             )
 
-    def annotate_spectrum(
-        self, tol: float = 0.2,
-        ion_types: Optional[Dict[int, List[str]]] = None)\
-            -> Dict[str, mass_spectrum.Annotation]:
+    @property
+    def max_similarity(self) -> float:
+        """
+        Returns the maximum similarity score for the PSM.
+
+        """
+        return (0. if not self.similarity_scores
+                else max(s[2] for s in self.similarity_scores))
+
+    def annotate_spectrum(self, tol: float = 0.2, denoise=True,
+                          ion_types: Optional[Dict[int, List[str]]] = None):
         """
         Annotates the mass spectrum using the theoretical ions of the peptide.
 
         Args:
             tol (float, optional): The annotation m/z tolerance.
             ion_types (dict, optional): The fragmentation configuration dict.
+            denoise (bool, optional): Whether denoising is performed.
 
         Returns:
-            Dictionary mapping ion labels to mass_spectrum.Annotation.
+            List of Annotations.
 
         """
+        # denoise mass spectrum
+        if denoise:
+            _, denoised_spec = self.denoise_spectrum(tol)
+            # TODO: make the denoising optional.
+        else:
+            annotes = self._annotate_spectrum(tol, ion_types)
+
+        frag_annotations = []
+        for ion, anno in annotes.items():
+            frag_annotations.append(Annotation(
+                ion=ion,
+                mz=self.spectrum.mz[anno.peak_num],
+                peak_intensity=self.spectrum.intensity[anno.peak_num],
+                mz_diff=anno.mass_diff
+            ))
+
+        self.annotations = frag_annotations
+
+    def _annotate_spectrum(self, tol: float = 0.2,
+                           ion_types: Optional[Dict[int, List[str]]] = None)\
+            -> Dict[str, mass_spectrum.Annotation]:
+        """ Annotate mass spectrum. """
         self._check_spectrum_initialized()
 
         if ion_types is None:
@@ -250,6 +297,7 @@ class PSM:
             else ion_types)
         self.peptide.clean_fragment_ions()
 
+        # annotate mass spectrum
         return self.spectrum.annotate(ions, tol=tol)
 
     def denoise_spectrum(self, tol: float = 0.2)\
@@ -264,7 +312,7 @@ class PSM:
         self._check_spectrum_initialized()
 
         # The spectrum annotations
-        anns = self.annotate_spectrum(tol=tol)
+        anns = self._annotate_spectrum(tol=tol)
         ann_peak_nums = {an.peak_num for an in anns.values()}
         denoised_peaks, denoised_spec = self.spectrum.denoise(
             [idx in ann_peak_nums for idx in range(len(self.spectrum))])
@@ -315,12 +363,12 @@ class PSM:
         """
         self._check_spectrum_initialized()
 
-        ions, denoised_spectrum = self.denoise_spectrum()
+        ions, denoised_spec = self.denoise_spectrum()
         self.spectrum.normalize()
-        denoised_spectrum.normalize()
-        self._calculate_prop_features(denoised_spectrum)
+        denoised_spec.normalize()
+        self._calculate_prop_features(denoised_spec)
         if ions:
-            self._calculate_ion_features(self.seq, ions, denoised_spectrum, tol)
+            self._calculate_ion_features(self.seq, ions, denoised_spec, tol)
 
         if required_features is None:
             required_features = self.features.all_feature_names()
@@ -385,8 +433,12 @@ class PSM:
         # each tuple: ion name, ion type, charge, peak index
         seq_ions: List[Tuple] = []
         ion_charges: List[int] = []
+        # for getting complementary ions
+        ion_seq_indices: Dict[int, Dict[str, set]] = collections.defaultdict(
+            lambda: collections.defaultdict(set)
+        )
         # get the indices
-        for ion, (peakj, _) in ions.items():
+        for ion, (peakj, ionk) in ions.items():
             if ion.endswith("+]"):
                 c = 1 if ion.endswith("[+]") else int(ion[ion.index("+]") - 1])
             else:
@@ -396,10 +448,9 @@ class PSM:
             if not iontag or c > 2:
                 continue
 
-            if ion[0] == "y":
-                seq_ions.append((ion, "y", c, peakj))
-            elif ion[0] == "b":
-                seq_ions.append((ion, "b", c, peakj))
+            if ion[0] == "yb":
+                seq_ions.append((ion, ion[0], c, peakj))
+                ion_seq_indices[c][ion[0]].add((peakj, ionk))
             elif ion[0] == "a":
                 ion_indices["a"].add(peakj)
             elif "-" in ion and ion[1] == "y":
@@ -427,6 +478,10 @@ class PSM:
         # NOTE: The charge state of each fragment ion series is up to 2
         bion_ix: Set[int] = set()
         yion_ix: Set[int] = set()
+        ncomp: int = 0
+        idx_comp: List[int] = []
+        ncomp_c1: int = 0
+        idx_comp_c1: List[int] = []
         for c in [1, 2]:
             # b series
             ix = [j for _, t, cj, j in seq_ions if cj == c and t == "b"]
@@ -439,6 +494,17 @@ class PSM:
             yion_ix.update(ix)
             self.features.set(f"FracIonInty_c{c}",
                               intensities[ix].sum() / len_normalizer)
+
+            # complementary ions
+            for (k0, yk), (k1, bk) in itertools.product(
+                    ion_seq_indices[c]["y"], ion_seq_indices[c]["b"]
+            ):
+                if yk + bk == pep_len:
+                    ncomp += 1
+                    idx_comp += [k0, k1]
+                    if c == 1:
+                        idx_comp_c1 += [k0, k1]
+                        ncomp_c1 += 1
 
         # The fraction of peaks with intensities greater than 20% of the base
         # peak annotated by the theoretical ions
@@ -454,6 +520,16 @@ class PSM:
         self.features.FracIonInty = intensities[list(yion_ix)].sum() / totalint
         # The fraction of total intensities of b ions
         self.features.FracIonIntb = intensities[list(bion_ix)].sum() / totalint
+        # The fraction of number of complementary ions
+        self.features.FracNumComp = ncomp / len_normalizer
+        # The fraction of total intensities of complementary ions
+        self.features.FracIntComp = intensities[idx_comp].sum() / totalint
+        # The fraction of number of complementary ions, singly charged
+        self.features.FracNumComp_c1 = ncomp_c1 / len_normalizer
+        # The fraction of total intensities of complementary ions,
+        # singly charged
+        self.features.FracIntComp_c1 = (intensities[idx_comp_c1].sum()
+                                        / totalint)
 
         # Sequence coverage
         n_anns = self._calculate_sequence_coverage(seq_ions)

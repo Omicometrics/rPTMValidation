@@ -35,6 +35,11 @@ class Features:
         "FracIonIntb",
         "MatchScore",
         "SeqTagm",
+        "Numyb2Theo",
+        "FracNumComp",
+        "FracIntComp",
+        "FracNumComp_c1",
+        "FracIntComp_c1"
     )
 
     NumPeaks: Optional[float]
@@ -59,6 +64,11 @@ class Features:
     FracIonIntb: Optional[float]
     MatchScore: Optional[float]
     SeqTagm: Optional[float]
+    Numyb2Theo: Optional[float]
+    FracNumComp: Optional[float]
+    FracIntComp: Optional[float]
+    FracNumComp_c1: Optional[float]
+    FracIntComp_c1: Optional[float]
 
     @staticmethod
     def all_feature_names() -> Tuple[str, ...]:

@@ -8,14 +8,21 @@ from typing import Any, Dict, Iterable, List, Sequence, Set, Tuple
 
 import numpy as np
 import tqdm
+import collections
 
 from .peptide_spectrum_match import PSM, SimilarityScore
 from .psm_container import PSMContainer
 from .mass_spectrum import Spectrum
 
 
+def _normalize_peak_intensity(spectrum: Spectrum) -> Spectrum:
+    """ Normalize intensities of peaks for similarity score calculation. """
+    spectrum[:1] = np.sqrt(spectrum[:, 1]) / np.sqrt(spectrum[:, 1].sum())
+    return spectrum
+
+
 def calculate_similarity_scores(mod_psms: PSMContainer[PSM],
-                                unmod_psms: PSMContainer) \
+                                unmod_psms: PSMContainer[PSM]) \
         -> PSMContainer[PSM]:
     """
     Calculates the similarity between the mass spectra of modified and
@@ -33,57 +40,52 @@ def calculate_similarity_scores(mod_psms: PSMContainer[PSM],
     index: Dict[Tuple[str, ...], List[int]] = \
         mod_psms.get_index(("uid",))
 
-    for upsm in tqdm.tqdm(unmod_psms):
+    # preprocess unmodified analogues to avoid repeating denoising
+    mod_index: Dict[int, List[int]] = collections.defaultdict(list)
+    unmod_spec_info: List[Any, Any, Dict[str, Tuple[int, int]], Spectrum] = []
+    for i, upsm in enumerate(unmod_psms):
+        ions, spec = upsm.denoise_spectrum()  # denoising
+        # normalize the peak intensity
+        spec = _normalize_peak_intensity(spec)
+        unmod_spec_info.append((upsm.data_id, upsm.spec_id, ions, spec))
+        # TODO: need to construct the get_mod_ids attribute.
         for psm_uid in upsm.get_mod_ids():
-            psm = mod_psms[index[(psm_uid,)][0]]
-            psm.similarity_scores.append(
-                SimilarityScore(upsm.data_id, upsm.spec_id,
-                                calculate_spectral_similarity(psm, upsm)))
+            j = index[(psm_uid,)][0]
+            mod_index[j].append(i)
         upsm.peptide.clean_fragment_ions()
 
+    # calculate similarities
+    for i in tqdm.tqdm(mod_index.keys()):
+        psm = mod_psms[i]
+        mod_ions, mod_spec = psm.denoise_spectrum()
+        mod_spec = _normalize_peak_intensity(mod_spec)
+        scores = []
+        for j in mod_index[i]:
+            data_id, spec_id, unmod_ions, unmod_spec = unmod_spec_info[j]
+            s = _calculate_spectral_similarity(
+                mod_ions, mod_spec, unmod_ions, unmod_spec
+            )
+            scores.append(SimilarityScore(data_id, spec_id, s))
+        psm.similarity_scores = scores
     mod_psms.clean_fragment_ions()
 
     return mod_psms
 
 
-def calculate_spectral_similarity(psm1: PSM, psm2: PSM) -> float:
+def _calculate_spectral_similarity(ions1, spec1, ions2, spec2):
     """
-    Calculates the similarity between two spectra based on their annotations
-    and intensities. This function computes the dot product of the two
-    spectra.
-
-    Args:
-        psm1 (peptide_spectrum_match.PSM): The first PSM, with an associated
-                                           Spectrum.
-        psm2 (peptide_spectrum_match.PSM): The second PSM, with an associated
-                                           Spectrum.
-
-    Returns:
-        float: The dot product similarity of the spectra.
+    Calculate spectra similarity.
 
     """
-    # Ensure that the spectra have been denoised and get the ion annotations
-    ions1, spec1 = psm1.denoise_spectrum()
-    ions2, spec2 = psm2.denoise_spectrum()
-
     # Get the peak indices of the peaks which match between the two spectra
-    matched_idxs = match_spectra((spec1, ions1), (spec2, ions2))
-
-    # Calculate the dot product of the spectral matches
-    int_product = sum(np.sqrt(spec1[ii][1]) * np.sqrt(spec2[jj][1])
-                      for ii, jj in matched_idxs
-                      if ii is not None and jj is not None)
-
-    sqrt_sum_ints1 = \
-        np.sqrt(sum(spec1[ii][1] for ii, _ in matched_idxs if ii is not None))
-    sqrt_sum_ints2 = \
-        np.sqrt(sum(spec2[ii][1] for _, ii in matched_idxs if ii is not None))
-
-    return int_product / (sqrt_sum_ints1 * sqrt_sum_ints2)
+    idx1, idx2 = match_spectra((spec1, ions1), (spec2, ions2))
+    return (spec1[idx1, 1] * spec2[idx2, 1]).sum()
 
 
-def match_spectra(spectrum1: Tuple[Spectrum, dict],
-                  spectrum2: Tuple[Spectrum, dict]) -> List[Tuple[int, int]]:
+def match_spectra(
+        spectrum1: Tuple[Spectrum, dict],
+        spectrum2: Tuple[Spectrum, dict]
+) -> Tuple[List[int], List[int]]:
     """
     Finds the indices of the matching peaks between two mass spectra.
 
@@ -101,8 +103,9 @@ def match_spectra(spectrum1: Tuple[Spectrum, dict],
 
     # bym contains the b, y and precursor ion names
     # neutrals contains the neutral losses from these ions
-    bym1, neutrals1 = _annotation_names(ions1)
-    bym2, neutrals2 = _annotation_names(ions2)
+    # set of indices
+    bym1, neutrals1, idx_set1 = _annotation_names(ions1)
+    bym2, neutrals2, idx_set2 = _annotation_names(ions2)
 
     # Get the peak indices of the matched fragments
     matched_by1, matched_by2 = \
@@ -111,59 +114,47 @@ def match_spectra(spectrum1: Tuple[Spectrum, dict],
         _matched_peak_indices(ions1, ions2, neutrals1 & neutrals2)
 
     # Remove replicate indices
-    matched_idxs = _merged_matches(matched_by1, matched_by2, spec2)
-    idx_set1 = {ii for ii, _ in matched_idxs}
-    idx_set2 = {ii for _, ii in matched_idxs}
+    mindex1, mindex2 = _merged_matches(matched_by1, matched_by2, spec2)
+    mset_idx1, mset_idx2 = set(mindex1), set(mindex2)
 
     # Find the non b, y or precursor fragments
     try:
-        neut1, neut2 = \
-            zip(*[(ii, jj) for ii, jj in zip(matched_neut1, matched_neut2)
-                  if ii not in idx_set1 and jj not in idx_set2])
+        neut1, neut2 = zip(
+            *[(ii, jj) for ii, jj in zip(matched_neut1, matched_neut2)
+              if ii not in mset_idx1 and jj not in mset_idx2]
+        )
     except ValueError:
         pass
     else:
-        matched_neut = _merged_matches(neut1, neut2, spec2)
-        idx_set1.update(ii for ii, _ in matched_neut)
-        idx_set2.update(ii for _, ii in matched_neut)
-        matched_idxs += matched_neut
+        nix1, nix2 = _merged_matches(neut1, neut2, spec2)
+        mindex1 += nix1
+        mindex2 += nix2
 
-    # Unmatched annotated fragments are left unmatched
-    matched_idxs += [(idx, None) for idx, _ in ions1.values()
-                     if idx not in idx_set1]
-    matched_idxs += [(None, idx) for idx, _ in ions2.values()
-                     if idx not in idx_set2]
-    idx_set1.update(ii for ii, _ in ions1.values())
-    idx_set2.update(ii for ii, _ in ions2.values())
+    # m/z
+    peak_mz1, peak_mz2 = spec1.mz, spec2.mz
+    un_index1 = sorted(set(range(peak_mz1.size)) - idx_set1)
+    un_index2 = np.array(
+        sorted(set(range(peak_mz2.size)) - idx_set2), dtype=int
+    )
 
     # Find the matched but unannotated ions
-    for idx1, peak1 in enumerate(spec1):
-        if idx1 in idx_set1:
-            continue
+    if not un_index1 or un_index2.size == 0:
+        return mindex1, mindex2
 
-        idx_set1.add(idx1)
+    diff_mz = np.absolute(peak_mz2[un_index2]
+                          - peak_mz1[un_index1][:, np.newaxis])
+    for idx1, diff in zip(un_index1, diff_mz):
+        if (diff <= 0.2).any():
+            peak_idx = un_index2[diff <= 0.2]
+            if peak_idx.size == 1:
+                idx2 = peak_idx[0]
+            else:
+                peak_ints = spec2.select(peak_idx, cols=1)
+                idx2 = peak_idx[np.argmax(peak_ints)]
+            mindex1.append(idx1)
+            mindex2.append(idx2)
 
-        peak_idxs = \
-            [idx2 for idx2, peak2 in enumerate(spec2) if idx2 not in idx_set2
-             and abs(peak2[0] - peak1[0]) <= 0.2]
-
-        if not peak_idxs:
-            matched_idxs.append((idx1, None))
-            continue
-
-        if len(peak_idxs) == 1:
-            idx2 = peak_idxs[0]
-        else:
-            peak_ints = spec2.select(peak_idxs, cols=1)
-            idx2 = peak_idxs[np.argmax(peak_ints)]
-
-        matched_idxs.append((idx1, idx2))
-        idx_set2.add(idx2)
-
-    matched_idxs += [(None, idx) for idx in range(len(spec2))
-                     if idx not in idx_set2]
-
-    return matched_idxs
+    return mindex1, mindex2
 
 
 def _matched_peak_indices(ions1: Dict[str, Tuple[int, int]],
@@ -192,7 +183,7 @@ def _matched_peak_indices(ions1: Dict[str, Tuple[int, int]],
 
 
 def _annotation_names(ions: Dict[str, Tuple[int, int]])\
-        -> Tuple[Set[str], Set[str]]:
+        -> Tuple[Set[str], Set[str], Set[int]]:
     """
     Separates the annotations by name into two groups: y/b/M ions and
     others.
@@ -204,13 +195,18 @@ def _annotation_names(ions: Dict[str, Tuple[int, int]])\
         tuple of two sets: y/b/M ions and other ions.
 
     """
-    _ions = set(ions.keys())
-    frags = {l for l in _ions if l[0] in "ybM" and "-" not in l}
-    return frags, _ions - frags
+    frags, neu, index = set(), set(), set()
+    for ion, (i, _) in ions.items():
+        if ion[0] in "ybM" and "-" not in ion:
+            frags.add(ion)
+        else:
+            neu.add(ion)
+        index.add(i)
+    return frags, neu, index
 
 
 def _merged_matches(indices1: Sequence[int], indices2: Sequence[int],
-                    spec2: Spectrum) -> List[Tuple[Any, Any]]:
+                    spec2: Spectrum) -> Tuple[Any, Any]:
     """
     Merges the matched peak indices into a single list of tuples, removing
     replicates in the process.
@@ -221,21 +217,23 @@ def _merged_matches(indices1: Sequence[int], indices2: Sequence[int],
         spec2 (spectrum.Spectrum): The second mass spectrum.
 
     Returns:
+        matched indices
     """
-    merged: List[Tuple[int, int]] = []
+    matched_index1, matched_index2 = [], []
     if len(set(indices1)) < len(indices1):
         for idx1 in set(indices1):
             if indices1.count(idx1) == 1:
-                merged.append((idx1, indices2[indices1.index(idx1)]))
+                idx2 = indices2[indices1.index(idx1)]
             else:
                 # Find the duplicates and keep only the one with the highest
                 # peak intensity
                 m_indices2 = [indices2[ii] for ii, idx in enumerate(indices1)
                               if idx == idx1]
                 peak_ints = list(spec2.select(m_indices2, cols=1))
-                merged.append(
-                    (idx1, m_indices2[peak_ints.index(max(peak_ints))]))
-    else:
-        merged = list(zip(indices1, indices2))
+                idx2 = m_indices2[peak_ints.index(max(peak_ints))]
+            matched_index1.append(idx1)
+            matched_index2.append(idx2)
 
-    return merged
+        return matched_index1, matched_index2
+
+    return list(indices1), list(indices2)
