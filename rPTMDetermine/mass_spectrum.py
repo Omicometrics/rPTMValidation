@@ -43,6 +43,7 @@ class Spectrum:
         "charge",
         "retention_time",
         "_raw_base_peak_intensity",
+        "_num"
     )
 
     def __init__(
@@ -71,6 +72,7 @@ class Spectrum:
         # access to this attribute so that it may not be inadvertently
         # changed following normalization
         self._raw_base_peak_intensity = self.max_intensity()
+        self._num = self._peaks.shape[0]
 
         # Sort the spectrum by the m/z ratios
         self._mz_sort()
@@ -178,6 +180,14 @@ class Spectrum:
 
         """
         return self._peaks[:, 1]
+
+    @property
+    def num(self) -> int:
+        """
+        Returns number of fragments in the spectrum.
+
+        """
+        return self._num
 
     def select(
             self,
@@ -361,7 +371,7 @@ class Spectrum:
 
         return new_peaks, Spectrum(self._peaks[new_peaks, :], self.prec_mz,
                                    self.charge)
-                                   
+
     def to_mgf_block(self, spec_id: str) -> str:
         """
         Constructs a BEGIN IONS - END IONS MGF-format block for the spectrum.
