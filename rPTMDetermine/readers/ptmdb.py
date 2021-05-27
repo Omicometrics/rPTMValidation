@@ -8,7 +8,7 @@ import functools
 import os
 import re
 import sqlite3
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Set
 
 import lxml.etree as etree
 
@@ -287,6 +287,33 @@ class PTMDB:
         """
         return self.get_mods(mass_type=mass_type,
                              filter_class="Post-translational")
+
+    def get_mod_sites(self, name: str) -> Optional[Set[str]]:
+        """
+        Extracts the sites targeting for the modification.
+
+        Args:
+            name (str): The name of the modification.
+
+        Returns:
+            A set of sites targeting the modification.
+
+        Raises:
+            ModificationNotFoundException.
+        
+        """
+        # check whether the name is valid, if not, raise the exception.
+        _ = self._get_row_by_name(name)
+
+        query = """SELECT mod_sites.site FROM mods INNER JOIN mod_sites
+                   ON mods.mod_id = mod_sites.mod_id WHERE name=?"""
+        self.cursor.execute(query, (name, ))
+
+        sites: Set[str] = set()
+        for row in self.cursor.fetchall():
+            sites.add(row["site"])
+
+        return sites
 
     @staticmethod
     def _get_mass_col(mass_type: MassType) -> str:
