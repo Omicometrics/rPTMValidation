@@ -10,7 +10,7 @@ import dataclasses
 import collections
 import itertools
 import warnings
-from typing import List, Optional, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 import cloudpickle
 import numpy as np
@@ -20,7 +20,6 @@ from sklearn.pipeline import make_pipeline, Pipeline
 from sklearn.preprocessing import MinMaxScaler
 
 from .randomforest import RandomForest
-from rPTMDetermine.psm_container import PSMContainer
 
 
 @dataclasses.dataclass
@@ -372,9 +371,7 @@ class ValidationModel:
 
         return self._estimators[0].decision_function(x)
 
-    def validate(
-            self, psms: Optional[PSMContainer, list]
-    ) -> Optional[PSMContainer, list]:
+    def validate(self, psms):
         """ Validates `psms` using the trained model. """
         n, k = len(psms), 10000
         nb = int(n / k) + 1
@@ -459,7 +456,7 @@ class ValidationModel:
         return x
 
     @staticmethod
-    def _reconstruct_psms(psms: Optional[list, PSMContainer]) -> list:
+    def _reconstruct_psms(psms) -> list:
         """ Reconstructs PSMs based on scores for FDR estimation. """
         # compare the identifications to assign top score to each spectrum
         score_rec = collections.defaultdict()
