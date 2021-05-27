@@ -17,7 +17,6 @@ import numpy as np
 
 from pepfrag import ModSite, Peptide
 
-from .machinelearning import passes_consensus, passes_majority
 from .peptide_spectrum_match import PSM
 from .readers import parse_mods, PTMDB, UnknownModificationException
 
@@ -162,6 +161,8 @@ class PSMContainer(collections.UserList, Generic[PSMType]):  # pylint: disable=t
             if len(indices) < 2:
                 best_psms.append(best)
                 continue
+
+            # TODO: Ping, please update this with the new method of scoring PSMs
 
             best_score_sum = best.ml_scores.sum()
             best_passes = passes_consensus(best.ml_scores)
