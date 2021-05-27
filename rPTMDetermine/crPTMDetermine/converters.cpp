@@ -98,7 +98,7 @@ PyObject* longVectorToList(const std::vector<long>& data) {
 PyObject* annotationMapToPyDict(const std::map<std::string, Annotation>& anns) {
 	PyObject* dictObj = PyDict_New();
 	
-	for (const std::pair<std::string, Annotation>& ann : anns) {
+	for (const std::pair<const std::string, Annotation>& ann : anns) {
 	    PyObject* annotation = (PyObject*) ann.second;
 		PyDict_SetItemString(
 			dictObj,

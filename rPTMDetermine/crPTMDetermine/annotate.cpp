@@ -18,7 +18,7 @@ std::map<std::string, Annotation> annotate(
 	
 	int startIdx = 0;
 	for (const Ion& ion : theorIons) {
-		for (int idx = 0; idx < mzArray.size(); idx++) {
+		for (unsigned long idx = 0; idx < mzArray.size(); idx++) {
 			double mz = mzArray[idx];
 			double delta = ion.mass - mz;
 			if (abs(delta) <= tol) {
