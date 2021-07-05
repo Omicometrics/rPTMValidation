@@ -1,308 +1,260 @@
 """
-This module contains functions related to PTM localization and isobaric
-correction.
+This module generates isoforms for localization of modifications.
 
 """
-import copy
 import itertools
-from typing import Container, List, Optional
+import collections
+from operator import itemgetter
+from typing import List, Optional, Dict, Tuple, Any
 
-import numpy as np
+from .features import extract_full_features
 
-from pepfrag import ModSite
+from pepfrag import Peptide, ModSite
+from rPTMDetermine.peptide_spectrum_match import PSM
+from rPTMDetermine.readers import PTMDB
+from rPTMDetermine.readers.ptmdb import ModificationNotFoundException
 
-from . import PSM, PSMContainer
-from .readers import PTMDB
-from .machinelearning import ValidationModel
+ptmdb = PTMDB()
 
 
-def generate_localization_candidates(
-        psm: PSM,
-        mod: str,
-        mod_mass: float,
-        target_residues: Container[str]
-) -> PSMContainer[PSM]:
+def _is_valid_mod_psm(psms: List[Any]) -> List[Any]:
     """
-    Generates alternative localization candidates for `mod` in `psm`.
-
+    Rules for justifying whether the assignments of modifications
+    are valid.
     Args:
-        psm: The peptide spectrum match.
-        mod: Target modification to be permuted.
-        mod_mass: The mass of `mod`.
-        target_residues: The amino acid residues targeted by `mod`.
+        psms: Modified psms.
 
     Returns:
-        PSM candidates.
-
+        Psms with valid modification assignments.
     """
-    candidates: PSMContainer[PSM] = PSMContainer()
-
-    mod_count = sum(ms.mod == mod for ms in psm.mods)
-    if mod_count == 0:
-        return PSMContainer()
-
-    target_res_indices = [
-        ii + 1 for ii, res in enumerate(psm.seq) if res in target_residues
-    ]
-    fixed_mods = [ms for ms in psm.mods if ms.mod != mod]
-
-    temp_psm = copy.deepcopy(psm)
-    temp_psm.mods = fixed_mods
-    candidates.append(copy.deepcopy(temp_psm))
-
-    for num_mods in range(1, mod_count + 1):
-        site_combinations = itertools.combinations(
-            target_res_indices, num_mods
-        )
-        for sites in site_combinations:
-            mods = fixed_mods + \
-                   [ModSite(mod_mass, j, mod) for j in sites]
-            temp_psm.mods = mods
-            candidates.append(copy.deepcopy(temp_psm))
-
-    return candidates
+    psm = psms[0]
+    del_ix = set()
+    # Rule 1: if Gln->pyro-Glu or Glu->pyro-Glu is assigned, it is fixed at
+    #         peptide N-terminus, and other modifications shouldn't appear at
+    #         there, otherwise is rejected.
+    check_mods = {"Gln->pyro-Glu", "Glu->pyro-Glu"}
+    if any(m.mod in check_mods for m in psm.mods):
+        for i, p in enumerate(psms):
+            for m in p.mods:
+                if (m.mod in check_mods
+                        and (m.site != "nterm"
+                             or any(isinstance(m2.site, int)
+                                    and m2.site == 1 for m2 in p.mods))):
+                    del_ix.add(i)
+                    break
+    if not del_ix:
+        return psms
+    return [p for i, p in enumerate(psms) if i not in del_ix]
 
 
-def generate_alternative_nterm_candidates(
-        psm: PSM,
-        validation_mod: str,
-        alternative_mod: str,
-        mod_mass: float
-) -> PSMContainer[PSM]:
+def _combine_mods(seq: str, mods: List[ModSite]) -> str:
+    """ Combine modifications into sequence """
+    if not mods:
+        return seq
+
+    frags, cterm, mods_ = [], None, []
+    for mod in mods:
+        # check terminals
+        if isinstance(mod.site, str):
+            if mod.site == "nterm" or mod.site == "N-term":
+                frags.append(f"[{mod.mod}]")
+            else:
+                cterm = f"[{mod.mod}]"
+        else:
+            mods_.append(mod)
+
+    mods_ = sorted(mods_, key=itemgetter(1))
+    i = 0
+    for mod in mods_:
+        frags.append(f"{seq[i:mod.site]}[{mod.mod}]")
+        i = mod.site
+
+    if i < len(seq): frags.append(seq[i:])
+    if cterm is not None: frags.append(cterm)
+
+    return "".join(frags)
+
+
+class Localization:
     """
-    Generates a candidate PSM with `alternative_mod` at the N-terminus.
+     This generates isoforms and performs localization.
+     Args:
+        sites_in_matches: All sites potentionally targeted by the
+                          modification. This is obtained from database
+                          search results, by summarizing all sites
+                          assigned to the modification.
+     """
+    def __init__(self, sites_in_matches: Dict[str, set]):
+        self.modification_sites = sites_in_matches
 
-    Args:
-        psm: The peptide spectrum match.
-        validation_mod: The modification under validation.
-        alternative_mod: The alternative modification to consider at the
-                         N-terminus.
-        mod_mass: The mass of `mod`.
+        # This is for grouping commonly observed series of residues that
+        # are potential sites for a modification if one of the residue in
+        # each series is modified, for example, deamidation should be observed
+        # at residue N and Q, oxidation is commonly observed at residues H, W,
+        # F, Y and P, phosphorylation at S and T.
+        self.mod_residue_combines: List[str] = ["DE", "ST", "HWFYP",
+                                                "KR", "IL", "NQ"]
 
-    Returns:
-        PSM candidates.
+    def get_isoforms(self, psm: PSM) -> List[PSM]:
+        """
+        Gets the isoforms for the PSM.
+        Args:
+            psm: Modified peptide spectrum match.
 
-    """
-    candidates: PSMContainer[PSM] = PSMContainer()
+        Returns:
+            List of isoforms with modifications at different sites.
+        """
+        if not psm.mods:
+            return [psm]
 
-    fixed_mods = [ms for ms in psm.mods if ms.mod != validation_mod]
+        # Identifies whether mod is in UniMod DB and mass spectrum is included.
+        self._valid_check_for_loc(psm)
 
-    if not any(ms.site == 'nterm' for ms in psm.mods):
-        mods = fixed_mods + [ModSite(mod_mass, 'nterm', alternative_mod)]
+        mod_info = self._psm_mods(psm.mods, psm.seq)
+        pep_isoforms = self._generate_isoforms(psm, mod_info)
+        # check whether it is valid
+        pep_isoforms = _is_valid_mod_psm(pep_isoforms)
 
-        temp_psm = copy.deepcopy(psm)
-        temp_psm.mods = mods
+        # generate isoforms and get features
+        return self._get_features(psm, pep_isoforms)
 
-        candidates.append(temp_psm)
+    @staticmethod
+    def _psm_mods(mods: List[ModSite],
+                  seq: str) -> Dict[str, Tuple[float, int, set]]:
+        """ Summarizes modifications from the input PSM. """
+        # get modifications
+        mod_residues: Dict[str, set] = collections.defaultdict(set)
+        mod_mass: Dict[str, float] = collections.defaultdict()
+        mod_num: Dict[str, int] = collections.defaultdict(int)
+        for m in mods:
+            mass = m.mass
+            if m.mass is None:
+                try:
+                    mass = ptmdb.get_mass(m.mod)
+                except ModificationNotFoundException:
+                    raise
+            mod_mass[m.mod] = mass
+            mod_residues[m.mod].add(
+                seq[m.site-1] if isinstance(m.site, int) else ""
+            )
+            mod_num[m.mod] += 1
+        return {mod: (mod_mass[mod], mod_num[mod], sites)
+                for mod, sites in mod_residues.items()}
 
-    return candidates
+    def _generate_isoforms(self,
+                           psm: PSM,
+                           psm_mods: Dict[str, Tuple[float, int, set]])\
+            -> List[Peptide]:
+        """ Generates peptide isoforms. """
+        # unmodified PSM as initial point for adding modifications
+        isoforms = [Peptide(psm.seq, psm.charge, [])]
+        for mod, (mass, n, sites) in psm_mods.items():
+            # gets sites
+            res, has_nterm, has_cterm = self._get_sites(mod, sites)
+            # generates isoforms iteratively
+            curr_isos = []
+            for iso in isoforms:
+                tmp_isos = self._add_mod_isoform(
+                    iso, mod, mass, res, n,
+                    consider_nterm=has_nterm, consider_cterm=has_cterm
+                )
+                if tmp_isos is None:
+                    tmp_isos = [iso]
+                curr_isos += tmp_isos
+            isoforms = curr_isos
+        return isoforms
 
+    def _get_sites(self, mod: str, sites: set):
+        """
+        Get sites for target modification.
+        Args:
+            mod: modification name in UniMod database name.
+            sites: Potential sites for the modification assigned by
+                   database search.
 
-def generate_deamidation_candidates(
-        psm: PSM,
-        ptmdb: PTMDB
-) -> PSMContainer[PSM]:
-    """
-    Generates alternative deamidation candidates for the given `psm`.
+        Returns:
+            Sites for the modification.
+        """
+        # sites in database
+        db_sites = ptmdb.get_mod_sites(mod)
+        exp_sites = self.modification_sites[mod]
 
-    Args:
-        psm: The peptide spectrum match.
-        ptmdb: The unimod modification database.
+        has_nterm = "nterm" in exp_sites
+        has_cterm = "cterm" in exp_sites
+        if not sites:
+            if has_nterm and "K" in exp_sites:
+                return "K", has_nterm, has_cterm
+            return "", has_nterm, has_cterm
 
-    Returns:
-        PSM candidates.
+        # combination of targets as potential sites
+        target_comb = ("".join([rx for rx in self.mod_residue_combines
+                               if any(site in rx for site in sites)])
+                       + "".join(sites))
+        valid_sites = db_sites.intersection(target_comb)
+        valid_sites.update(sites)  # compensate for ones assigned by database
 
-    """
-    return generate_localization_candidates(
-        psm,
-        'Deamidated',
-        ptmdb.get_mass('Deamidated'),
-        {'N', 'Q'}
-    )
+        return "".join(valid_sites), has_nterm, has_cterm
 
-
-def generate_localization_isoforms(
-        psm: PSM,
-        mod: str,
-        mod_mass: float,
-        target_residue: str
-) -> PSMContainer[PSM]:
-    """
-    Generates all possible isoforms of `mod` for the `psm`.
-
-    The difference between this and generate_localization_candidates is that the
-    latter will allow fewer instances of `mod` than originally exist in the
-    `psm` modifications, whereas this implementation will not. This function
-    may also only be applied to localize `mod` across a single `target_residue`.
-
-    Args:
-        psm: The peptide spctrum match.
-        mod: Target modification to be permuted.
-        mod_mass: The mass of `mod`.
-        target_residue: The amino acid residue targeted by `mod`.
-
-    Returns:
-        PSM localization isoforms.
-
-    """
-    isoforms: PSMContainer[PSM] = PSMContainer()
-
-    mod_sites = [
-        ms.site for ms in psm.mods
-        if ms.mod == mod and isinstance(ms.site, int) and
-        psm.seq[ms.site - 1] == target_residue
-    ]
-
-    mod_count = len(mod_sites)
-
-    possible_sites = [
-        ii + 1 for ii, res in enumerate(psm.seq) if res == target_residue
-    ]
-
-    if mod_count == len(possible_sites):
-        return PSMContainer([psm])
-
-    fixed_mods = [
-        ms for ms in psm.mods if ms.mod != mod and not
-        (isinstance(ms.site, int) and psm.seq[ms.site - 1] == target_residue)
-    ]
-
-    temp_psm = copy.deepcopy(psm)
-
-    for sites in itertools.combinations(possible_sites, mod_count):
-        mods = fixed_mods + [ModSite(mod_mass, site, mod) for site in sites]
-
-        temp_psm.mods = mods
-
-        isoforms.append(copy.deepcopy(temp_psm))
-
-    return isoforms
-
-
-def localize(
-        psm: PSM,
-        target_mod: str,
-        mod_mass: float,
-        target_residue: str,
-        model: ValidationModel,
-        features: Optional[List[str]] = None
-):
-    """
-    Localizes the `target_mod` in `psm` inplace.
-
-    Args:
-        psm: The peptide spectrum match.
-        target_mod: The modification to localize.
-        mod_mass: The mass of `target_mod`.
-        target_residue: The amino acid residue targeted by `target_mod`.
-        model: The PSM classifier trained without cross validation.
-        features: An optional subset of features to use in prediction.
-
-    """
-    isoforms = generate_localization_isoforms(
-        psm,
-        target_mod,
-        mod_mass,
-        target_residue
-    )
-
-    if len(isoforms) == 1:
-        psm.site_prob = 1.
-        psm.site_diff_score = 1.
-        return psm
-
-    for isoform in isoforms:
-        isoform.extract_features()
-
-    feature_array = isoforms.to_feature_array(features=features)
-    scores = model.decision_function(feature_array)
-
-    sorted_score_indices = scores.argsort()[::-1]
-
-    # Find properties of the highest-scoring isoform
-    max_score_idx = sorted_score_indices[0]
-    max_score = scores[max_score_idx]
-    site_prob = 1. / np.exp(scores - max_score).sum()
-    diff_score = min(
-        abs((max_score - scores[sorted_score_indices[1]]) / max_score),
-        1.
-    )
-
-    # Re-assign attributes of the highest-scoring isoform to the input PSM for
-    # inplace update
-    psm.mods = isoforms[max_score_idx].mods
-    psm.features = isoforms[max_score_idx].features
-    psm.site_score = max_score
-    psm.site_prob = site_prob
-    psm.site_diff_score = diff_score
-
-    # Get the scores of the alternative localization isoforms
-    alternatives = []
-    for ii in sorted_score_indices[1:]:
-        isoform = isoforms[ii]
-        sites = [
-            ms.site for ms in isoform.mods if ms.mod == target_mod
-            and isinstance(ms.site, int)
-            and psm.seq[ms.site - 1] == target_residue
+    @staticmethod
+    def _add_mod_isoform(
+            pep: Peptide, mod: str, mod_mass: float,
+            mod_residues: str, nmod: int,
+            consider_nterm: bool = False, consider_cterm: bool = False
+    ) -> Optional[List[Peptide]]:
+        """ Generate isoforms for localization. """
+        # identify whether multiple target residue exists
+        base_mods = [m for m in pep.mods if m.mod != mod]
+        non_mod_sites = set([m.site for m in base_mods])
+        res_sites: List[Any] = [
+            i+1 for i, r in enumerate(pep.seq)
+            if r in mod_residues and i+1 not in non_mod_sites
         ]
-        alternatives.append((tuple(sites), scores[ii]))
-    psm.alternative_localizations = alternatives
 
+        # consider N-terminal modification
+        if consider_nterm and "nterm" not in non_mod_sites:
+            res_sites.insert(0, "nterm")
 
-def correct_and_localize(
-        psm: PSM,
-        target_mod: str,
-        target_mod_mass: float,
-        target_residue: str,
-        model: ValidationModel,
-        ptmdb: PTMDB
-):
-    """
-    Corrects isobaric PTMs and localizes `target_mod` in `PSM`.
+        # consider C-terminal modification
+        if consider_cterm and "cterm" not in non_mod_sites:
+            res_sites.append("cterm")
 
-    Args:
-        psm: The peptide spectrum match.
-        target_mod: The modification to localize.
-        target_mod_mass: The mass change associated with `target_mod`.
-        target_residue: The residue targeted by `target_mod`.
-        model: The machine learning classifier trained without cross
-               validation for localization purposes.
-        ptmdb: The unimod PTM database.
+        if len(res_sites) < nmod:
+            return None
 
-    """
-    cand_psms = generate_deamidation_candidates(psm, ptmdb)
-    cand_psms.extend(
-        generate_alternative_nterm_candidates(
-            psm,
-            target_mod,
-            'Carbamyl',
-            ptmdb.get_mass('Carbamyl')
-        )
-    )
-    for cand_psm in cand_psms:
-        cand_psm.extract_features()
+        # generate isoforms
+        isoforms = []
+        for ix in itertools.combinations(res_sites, nmod):
+            loc_mods = [ModSite(mass=mod_mass, site=k, mod=mod) for k in ix]
+            iso_pep = Peptide(pep.seq, pep.charge, loc_mods + base_mods)
+            isoforms.append(iso_pep)
 
-    # features
-    features = model.model_features
+        return isoforms
 
-    if cand_psms:
-        # Perform correction by selecting the isoform with the highest score
-        cand_psms.append(psm)
-        feature_array = cand_psms.to_feature_array(features=features)
-        ml_scores = model.decision_function(feature_array)
-        isoform_scores = ml_scores.mean(axis=1)
-        max_isoform_score_idx = np.argmax(isoform_scores)
+    @staticmethod
+    def _get_features(psm: PSM, isoforms: List[Peptide]) -> List[PSM]:
+        """ Get features for the isoforms. """
+        iso_psms, iso_peps = [], set()
+        for iso in isoforms:
+            pk = _combine_mods(iso.seq, iso.mods)
+            if pk not in iso_peps:
+                iso_psm = PSM(psm.data_id, psm.spec_id, iso,
+                              spectrum=psm.spectrum)
+                iso_psm = extract_full_features(iso_psm)
+                iso_psms.append(iso_psm)
+                iso_peps.add(pk)
+        return iso_psms
 
-        # Replace the modifications with the corrected ones
-        psm.mods = cand_psms[max_isoform_score_idx].mods
-        psm.ml_scores = ml_scores[max_isoform_score_idx]
+    @staticmethod
+    def _valid_check_for_loc(psm: PSM):
+        """ Justify whether the psm is suitable for localization. """
+        # whether the modification exists in Unimod DB
+        for m in psm.mods:
+            if m.mass is None:
+                try:
+                    _ = ptmdb.get_mass(m.mod)
+                except ModificationNotFoundException:
+                    raise
 
-    if any(ms.mod == target_mod for ms in psm.mods):
-        localize(
-            psm,
-            target_mod,
-            target_mod_mass,
-            target_residue,
-            model,
-            features=features
-        )
+        # spectrum must be assigned for getting features
+        if psm.spectrum is None:
+            raise ValueError("Mass spectrum is not assigned.")
