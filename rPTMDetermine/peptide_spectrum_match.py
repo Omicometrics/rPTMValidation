@@ -448,7 +448,7 @@ class PSM:
             if not iontag or c > 2:
                 continue
 
-            if ion[0] == "yb":
+            if ion[0] in "yb":
                 seq_ions.append((ion, ion[0], c, peakj))
                 ion_seq_indices[c][ion[0]].add((peakj, ionk))
             elif ion[0] == "a":
@@ -461,7 +461,7 @@ class PSM:
         # The peaks annotated by theoretical ions
         ann_peaks = np.unique(np.array(
             [v for c, (v, _) in zip(ion_charges, ions.values()) if c <= 2],
-            dtype=np.int))
+            dtype=int))
 
         # The number of annotated peaks divided by the total number of peaks
         self.features.FracIon = ann_peaks.size / npeak
@@ -530,6 +530,10 @@ class PSM:
         # singly charged
         self.features.FracIntComp_c1 = (intensities[idx_comp_c1].sum()
                                         / totalint)
+        # The fraction of y and b ions annotated to all theoretical
+        # y and b ions
+        self.features.Numyb2Theo = ((len(yion_ix) + len(bion_ix))
+                                    / (2 * (pep_len - 1)))
 
         # Sequence coverage
         n_anns = self._calculate_sequence_coverage(seq_ions)
