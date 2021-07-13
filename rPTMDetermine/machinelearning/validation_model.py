@@ -274,10 +274,7 @@ class ValidationModel:
         self._best_params: List[tuple] = []
         self._internal_cv_params: List[dict] = []
 
-    def fit(self,
-            pos_psms: PSMContainer,
-            decoy_psms: PSMContainer,
-            neg_psms: PSMContainer):
+    def fit(self, pos_psms, decoy_psms, neg_psms):
         """Constructs validation model.
 
         Args:
@@ -290,6 +287,7 @@ class ValidationModel:
             val_psms: List of validated PSMs
             model_index: Spectrum ID
         """
+        t = time.time()
         # randomize data matrix to avoid bias caused by ordered data
         train_psms, rest_psms, pos_uids, dec_uids, neg_uids =\
             self._randomize_psm(pos_psms, decoy_psms, neg_psms)
@@ -331,7 +329,7 @@ class ValidationModel:
         rec_psms = self._reconstruct_psms(psms)
 
         # perform FDR control
-        val_scores = np.array([p.site_score for p in rec_psms])
+        val_scores = np.array([p.validation_score for p in rec_psms])
         groups = np.array([1 if p.target else 0 for p in rec_psms])
         # FDR
         qvals, p0 = calculate_q_values(val_scores, groups)
@@ -347,7 +345,8 @@ class ValidationModel:
             normalizer=abs(np.median(val_scores[groups == 0]) - opt_thr)
         )
 
-        return [p for p in rec_psms if p.site_score >= opt_thr and p.target]
+        return [p for p in rec_psms
+                if p.validation_score >= opt_thr and p.target]
 
     def predict(self, x):
         if self.cv is not None:
