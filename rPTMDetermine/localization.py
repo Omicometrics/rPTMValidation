@@ -86,26 +86,24 @@ class BaseLocalizer:
                              thresholds: Dict[int, float])\
             -> Tuple[PSM, Dict[str, LocInfo]]:
         """ Groups localizations """
+        # sort PSMs based on validation scores
+        psms.sort(key=attrgetter("validation_score"), reverse=True)
+
         # sites for modifications in isoforms
         target_mod_sites = self._group_mods(psms, target_residue)
-        top_psm = max(psms, key=attrgetter("validation_score"))
+        top_psm = psms[0]
 
         # localization
-        if psms == 1:
+        if len(psms) == 1:
             loc_mods = {mod: LocInfo(model_residue=target_residue,
                                      target=mod,
                                      top_sites=tuple(sites[0]),
                                      top_score=top_psm.validation_score)
-                        for mod, sites in target_mod_sites.items() if sites[0]}
+                        for mod, sites in target_mod_sites.items()}
             return top_psm, loc_mods
 
         # for multiple sites
         loc_mods: Dict[str, LocInfo] = collections.defaultdict()
-        # sort PSMs based on validation scores
-        psms.sort(key=attrgetter("validation_score"), reverse=True)
-        top_psm = psms[0]
-
-        # localization of modifications
         for mod, target_sites in target_mod_sites.items():
             top_sites, top_score, alt_sites = self._get_mod_loc_sites(
                 mod, target_sites, psms
@@ -129,7 +127,7 @@ class BaseLocalizer:
 
             # localization info
             loc_mods[mod] = LocInfo(**mods_info,
-                                    next_sites=tuple(alt_sites[1:]),
+                                    next_sites=tuple(alt_sites),
                                     diff=diff_score,
                                     next_score=next_score,
                                     is_loc=diff_score >= thresholds[k])
@@ -164,7 +162,7 @@ class BaseLocalizer:
                     dm_seq_mods.add((p.seq, mods))
 
             # get localization sites for deamidation
-            mod_sites: List[Tuple[List, float]] = []
+            mod_sites: List[Tuple[list, float]] = []
             for sj, p in zip(sites, psms):
                 if not sj:
                     mods = frozenset(m.mod for m in p.mods)
@@ -197,7 +195,7 @@ class BaseLocalizer:
         return uid_psms
 
     @staticmethod
-    def _group_mods(psms: List[PSM], target_residue: str):
+    def _group_mods(psms: Sequence[PSM], target_residue: str):
         """ Group modifications based on modification name. """
         # sites containing target residue
         seq = psms[0].seq
