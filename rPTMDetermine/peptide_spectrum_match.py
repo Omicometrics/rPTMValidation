@@ -12,21 +12,12 @@ import numpy as np
 
 from .constants import DEFAULT_FRAGMENT_IONS, FIXED_MASSES
 from .features import Features
-from . import ionscore
+from .base import SimilarityScore, Annotation, LocInfo, ModLocates
+import rPTMDetermine.ionscore as ionscore
 from . import mass_spectrum
 from . import utilities
 
 from pepfrag import IonType, ModSite, Peptide
-
-
-DecoyID = collections.namedtuple(
-    "DecoyID", ["seq", "charge", "mods", "features"])
-
-SimilarityScore = collections.namedtuple(
-    "SimilarityScore", ["data_id", "spectrum_id", "score"])
-
-Annotation = collections.namedtuple(
-    "Annotation", ["ion", "mz", "peak_intensity", "mz_diff"])
 
 
 class SpectrumNotFoundError(Exception):
@@ -50,12 +41,10 @@ class PSM:
         "annotations",
         "ml_scores",
         "validation_score",
-        "site_score",
-        "site_prob",
         "similarity_scores",
         "target",
-        "site_diff_score",
-        "alternative_localizations",
+        "_localizations",
+        "mod_locates"
     )
 
     def __init__(self, data_id: Optional[str], spec_id: Optional[str],
@@ -93,12 +82,8 @@ class PSM:
         self.validation_score: Optional[float] = None
 
         # Localization attributes
-        self.site_score: Optional[float] = None
-        self.site_prob: Optional[float] = None
-        self.site_diff_score: Optional[float] = None
-        self.alternative_localizations: Optional[
-            Sequence[Tuple[Sequence[int], float]]
-        ] = None
+        self._localizations: Optional[Dict[str, LocInfo]] = None
+        self.mod_locates: Optional[List[ModLocates]] = None
 
     @property
     def seq(self) -> str:
@@ -185,9 +170,8 @@ class PSM:
             "annotations": self.annotations,
             "ml_scores": self.ml_scores,
             "validation_score": self.validation_score,
-            "site_prob": self.site_prob,
-            "site_diff_score": self.site_diff_score,
-            "alternative_localizations": self.alternative_localizations,
+            "localizations": self._localizations,
+            "mod_locates": self.mod_locates,
             "similarity_scores": self.similarity_scores,
             "target": self.target
         }
@@ -326,7 +310,7 @@ class PSM:
 
         return ion_anns, denoised_spec
 
-    def is_localized(self) -> bool:
+    def is_localized(self) -> Dict[str, bool]:
         """
         Determines whether the PSM has been successfully localized.
 
@@ -334,10 +318,13 @@ class PSM:
         is `None`.
 
         Returns:
-            Boolean indicating localization status.
+            Dictionary indicating localization status of a modification.
 
         """
-        return self.site_diff_score is None or self.site_diff_score >= 0.1
+        if self.mod_locates is None:
+            raise ValueError("Didn't perform localization.")
+        return {mloc.modification: mloc.is_localized
+                for mloc in self.mod_locates}
 
     #######################
     # Feature Calculation #

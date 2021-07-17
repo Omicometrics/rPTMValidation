@@ -4,30 +4,17 @@ This module performs localization of modifications.
 """
 import collections
 import itertools
+from operator import itemgetter
 
 import tqdm
 import numpy as np
 
 from operator import attrgetter
-from typing import Dict, List, Set, Tuple, Sequence
+from typing import Dict, List, Set, Tuple, Sequence, Optional
 
 from .peptide_spectrum_match import PSM
 from .machinelearning.validation_model import ValidationModel
-
-
-Fields = ["target", "model_residue", "top_sites", "next_sites",
-          "top_score", "next_score", "diff", "is_loc"]
-LocInfo = collections.namedtuple(
-    "LocInfo", Fields, defaults=(None,) * len(Fields)
-)
-
-
-class PeptideSpectrumMatchLoc(PSM):
-    __slots__ = ["localizations"]
-
-    def __init__(self, data_id, spec_id, peptide, localizations=None):
-        super().__init__(data_id, spec_id, peptide)
-        self.localizations = localizations
+from .base import LocInfo, ModLocates
 
 
 class BaseLocalizer:
@@ -71,12 +58,10 @@ class BaseLocalizer:
                                                           target_residue,
                                                           thresholds)
 
-            loc = PeptideSpectrumMatchLoc(top_psm.data_id,
-                                          top_psm.spec_id,
-                                          top_psm.peptide)
+            loc = PSM(top_psm.data_id, top_psm.spec_id, top_psm.peptide)
             for attr in ["ml_scores", "validation_score", "features"]:
                 setattr(loc, attr, getattr(top_psm, attr))
-            loc.localizations = loc_mods
+            loc._localizations = loc_mods
             loc_mod_psms.append(loc)
 
         return loc_mod_psms
@@ -187,7 +172,7 @@ class BaseLocalizer:
         return top_sites, top_score, alternative_sites[1:]
 
     @staticmethod
-    def _group_psms(psms: List[PSM]):
+    def _group_psms(psms: Sequence[PSM]):
         """ Group psms based on uid. """
         uid_psms: Dict[str, List[PSM]] = collections.defaultdict(list)
         for p in psms:
@@ -236,7 +221,7 @@ class Localizer(BaseLocalizer):
                  validators: Dict[str, ValidationModel],
                  thresholds: Dict[int, float]):
         super().__init__()
-        self.valiators = validators
+        self.validators = validators
         self.thresholds = thresholds
 
     def localize(self, isoforms: Sequence[PSM]) -> List[PSM]:
@@ -249,7 +234,7 @@ class Localizer(BaseLocalizer):
         for a in residue_psm_idx.keys():
             target_aa_psms = [isoforms[i] for i in residue_psm_idx[a]]
             loc_psms = self.get_loc(
-                target_aa_psms, self.valiators[a], a, self.thresholds
+                target_aa_psms, self.validators[a], a, self.thresholds
             )
             # group PSMs based on uid
             for p in loc_psms:
@@ -283,8 +268,7 @@ class Localizer(BaseLocalizer):
                 residue_psm_index[a] += uid_idx[uid]
         return residue_psm_index
 
-    @staticmethod
-    def _update_psms_with_localization(grouped_psms) -> List[PSM]:
+    def _update_psms_with_localization(self, grouped_psms) -> List[PSM]:
         """
         Updates PSMs with localization of modifications using residue
         specific validation models.
@@ -300,14 +284,99 @@ class Localizer(BaseLocalizer):
             for i, (a, p) in enumerate(grouped_psms[uid]):
                 ml_scores[a] = p.ml_scores
                 val_scores[a] = p.validation_score
-                for mod in p.localizations.keys():
-                    loc_info[mod].append(p.localizations[mod])
+                for mod, loc in p._localizations.items():
+                    loc_info[mod].append(loc)
+
+            # determines the localizations
+            mod_locates = []
+            for _, info in loc_info.items():
+                mod_locates.append(self._get_locates(info))
+
             p = max([p for _, p in grouped_psms[uid]],
                     key=attrgetter("validation_score"))
-            psm = PeptideSpectrumMatchLoc(p.data_id, p.spec_id, p.peptide,
-                                          localizations=loc_info)
+            psm = PSM(p.data_id, p.spec_id, p.peptide)
+            psm.features = p.features
+            psm._localizations = loc_info
+            psm.mod_locates = mod_locates
             psm.ml_scores = ml_scores
             psm.validation_score = val_scores
             loc_psms.append(psm)
 
         return loc_psms
+
+    def _get_locates(self, localizations: List[LocInfo]):
+        """ Gets modification locates. """
+        if len(localizations) == 1:
+            return self._mod_locates(localizations)
+        else:
+            loc_index = collections.defaultdict(list)
+            for i, loc in enumerate(localizations):
+                loc_index[(loc.is_loc, loc.top_sites)].append(i)
+
+            # consistently localized
+            if (not any(t for t, _ in loc_index.keys())
+                    or len(set(loc_index.keys())) == 1):
+                return self._mod_locates(localizations)
+
+            # use maximum number as the localization
+            lk, _ = max([(c, len(ix)) for c, ix in loc_index.items()],
+                        key=itemgetter(1))
+            return self._mod_locates(localizations, index=loc_index[lk])
+
+    def _mod_locates(self, localizations: List[LocInfo],
+                     index: Optional[List[int]] = None) -> ModLocates:
+        """ Modification locates. """
+        if len(localizations) == 1:
+            loc = localizations[0]
+            info = {
+                "modification": loc.target, "loc_residues": loc.model_residue,
+                "top_score": loc.top_score, "sites": loc.top_sites,
+                "frac_supports": 1
+            }
+            if loc.next_sites is None:
+                return ModLocates(**info, is_localized=True)
+
+            alt_sites, _ = loc.next_sites[0]
+            k = self._get_site_difference(loc.top_sites, alt_sites)
+            return ModLocates(
+                **info, alternative_score=loc.next_score,
+                score_difference=loc.diff, alternative_sites=alt_sites,
+                site_difference=k, is_localized=loc.is_loc
+            )
+
+        # multiple sites
+        if index is None:
+            index = list(range(len(localizations)))
+
+        mod_locates = collections.defaultdict(list)
+        loc_resid = []
+        for i in index:
+            loc = localizations[i]
+            r, top_sites = loc.model_residue, loc.top_sites
+            loc_resid.append(r)
+            mod_locates["top_score"].append((r, loc.top_score))
+            mod_locates["sites"].append((r, top_sites))
+            if loc.next_sites is not None:
+                mod_locates["alternative_score"].append((r, loc.next_score))
+                mod_locates["score_difference"].append((r, loc.diff))
+                alt_sites, _ = loc.next_sites[0]
+                k = self._get_site_difference(top_sites, alt_sites)
+                mod_locates["alternative_sites"].append((r, alt_sites))
+                mod_locates["site_difference"].append((r, k))
+        mod_locates = {key: dict(info) for key, info in mod_locates.items()}
+
+        # if localized sites are not supported by at least half of models,
+        # reject the localization
+        loc = localizations[index[0]]
+        is_loc = loc.is_loc
+        if is_loc is None:
+            is_loc = True
+        r = len(index) / len(localizations)
+        if is_loc:
+            if ((len(localizations) == 2 and r != 1)
+                    or (len(localizations) > 2 and r < 0.5)):
+                is_loc = False
+
+        return ModLocates(modification=loc.target, is_localized=is_loc,
+                          frac_supports=r, loc_residues=tuple(loc_resid),
+                          **mod_locates)
