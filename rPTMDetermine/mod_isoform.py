@@ -17,36 +17,6 @@ from .readers.ptmdb import ModificationNotFoundException
 ptmdb = PTMDB()
 
 
-def _is_valid_mod_psm(psms: Sequence[Any]) -> List[Any]:
-    """
-    Rules for justifying whether the assignments of modifications
-    are valid.
-    Args:
-        psms: Modified psms or peptides.
-
-    Returns:
-        Psms with valid modification assignments.
-    """
-    psm = psms[0]
-    del_ix = set()
-    # Rule 1: if Gln->pyro-Glu or Glu->pyro-Glu is assigned, it is fixed at
-    #         peptide N-terminus, and other modifications shouldn't appear at
-    #         there, otherwise is rejected.
-    check_mods = {"Gln->pyro-Glu", "Glu->pyro-Glu"}
-    if any(m.mod in check_mods for m in psm.mods):
-        for i, p in enumerate(psms):
-            for m in p.mods:
-                if (m.mod in check_mods
-                        and (m.site != "nterm"
-                             or any(isinstance(m2.site, int)
-                                    and m2.site == 1 for m2 in p.mods))):
-                    del_ix.add(i)
-                    break
-    if not del_ix:
-        return psms
-    return [p for i, p in enumerate(psms) if i not in del_ix]
-
-
 def _get_special_mod_mass(mod: str) -> Tuple[Optional[float], str]:
     """
     Get special modification mass not in UniMod DB.
@@ -117,7 +87,7 @@ class Isoform:
                        of which are low-score, meaningless in the
                        localization and memory consuming.
      """
-    def __init__(self, sites_in_matches: Dict[str, Set[str]],
+    def __init__(self, sites_in_matches: Optional[Dict[str, Set[str]]] = None,
                  tol: float = 0.2, max_num_sites: int = 5):
         self.modification_sites = sites_in_matches
         self.tol = tol
@@ -148,8 +118,6 @@ class Isoform:
 
         mod_info = self._psm_mods(psm.mods, psm.seq)
         pep_isoforms = self._generate_isoforms(psm, mod_info)
-        # check whether it is valid and return valid PSMs
-        pep_isoforms = _is_valid_mod_psm(pep_isoforms)
 
         # isoform PSMs
         isoforms = self._pep2psm(psm, pep_isoforms)
@@ -181,8 +149,8 @@ class Isoform:
                 for mod, sites in mod_residues.items()}
 
     def _generate_isoforms(self, psm: PSM,
-                           psm_mods: Dict[str, Tuple[float, int, set]]) ->\
-            List[Peptide]:
+                           psm_mods: Dict[str, Tuple[float, int, set]])\
+            -> List[Peptide]:
         """ Generates peptide isoforms. """
         # unmodified PSM as initial point for adding modifications
         isoforms: List[Peptide] = [Peptide(psm.seq, psm.charge, [])]
@@ -277,12 +245,21 @@ class Isoform:
             db_sites = ptmdb.get_mod_sites(mod)
         except ModificationNotFoundException:
             db_sites = set()
-        exp_sites = self.modification_sites[mod]
 
-        has_nterm = "nterm" in exp_sites
-        has_cterm = "cterm" in exp_sites
+        # determines the N- and C- terminus from database search results,
+        # if isn't assigned, use the sites defined in Unimod database
+        # only.
+        exp_sites = None
+        if self.modification_sites is not None:
+            exp_sites = self.modification_sites[mod]
+            has_nterm = "nterm" in exp_sites
+            has_cterm = "cterm" in exp_sites
+        else:
+            has_nterm = "N-term" in db_sites
+            has_cterm = "C-term" in db_sites
+
         if not sites:
-            if has_nterm and "K" in exp_sites:
+            if exp_sites is not None and has_nterm and "K" in exp_sites:
                 return "K", has_nterm, has_cterm
             return "", has_nterm, has_cterm
 
@@ -308,6 +285,14 @@ class Isoform:
             i+1 for i, r in enumerate(pep.seq)
             if r in mod_residues and i+1 not in non_mod_sites
         ]
+
+        # if terminus has been assigned, the sites are prohibited
+        # for modification
+        if "nterm" in non_mod_sites or 1 in non_mod_sites:
+            non_mod_sites.update(["nterm", 1])
+
+        if "cterm" in non_mod_sites or len(pep.seq) in non_mod_sites:
+            non_mod_sites.update(["cterm", len(pep.seq)])
 
         # consider N-terminal modification
         if consider_nterm and "nterm" not in non_mod_sites:

@@ -50,9 +50,7 @@ class BaseLocalizer:
         loc_mod_psms: List[PSM] = []
         # group the isoforms based on psm uid
         uid_psms = self._group_psms(isoforms)
-        for uid in tqdm.tqdm(uid_psms.keys(),
-                             desc=f"Localize {target_residue}"):
-
+        for uid in uid_psms.keys():
             # get localizations
             top_psm, loc_mods = self._parse_localizations(uid_psms[uid],
                                                           target_residue,
