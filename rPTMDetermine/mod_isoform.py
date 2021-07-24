@@ -122,6 +122,9 @@ class Isoform:
         # isoform PSMs
         isoforms = self._pep2psm(psm, pep_isoforms)
 
+        # considers the isoform with non-monoisotopic precursor
+        isoforms = self._precursor_correct_isoform(isoforms)
+
         return self._generate_features(isoforms)
 
     @staticmethod
@@ -228,6 +231,49 @@ class Isoform:
         isoforms.append(iso_pep)
 
         return isoforms
+
+    @staticmethod
+    def _precursor_correct_isoform(isoforms: Sequence[PSM]) -> List[PSM]:
+        """ Considers an isoform for correcting precursors """
+        # 13C addition mass comparing to 12C
+        m_13c_add = 1.0034
+        tol = 0.1
+        # corrections
+        corr_isoforms: List[PSM] = []
+        for iso in isoforms:
+            if len(iso.mods) <= 1:
+                corr_isoforms.append(iso)
+                continue
+
+            # potential pairs
+            comb_mods_mass = [(m1, m2)
+                              for m1, m2 in itertools.combinations(iso.mods, 2)
+                              if -1 * tol <= m1.mass + m2.mass <= 3.1]
+            if not comb_mods_mass:
+                corr_isoforms.append(iso)
+                continue
+
+            # generate isoforms
+            tmp_isoforms = []
+            for m1, m2 in comb_mods_mass:
+                # up to 3rd isotopic peaks in the distrubition is considered
+                mm = m1.mass + m2.mass
+                n = round(mm / m_13c_add)
+                if abs(mm - n * m_13c_add) <= tol:
+                    exp_mods = {(m1.mod, m1.site), (m2.mod, m2.site)}
+                    p = PSM(iso.data_id, iso.spec_id,
+                            Peptide(iso.seq, iso.charge,
+                                    [m for m in iso.mods
+                                     if (m.mod, m.site) not in exp_mods]),
+                            spectrum=iso.spectrum)
+                    tmp_isoforms.append(p)
+
+            if tmp_isoforms:
+                corr_isoforms += tmp_isoforms
+            else:
+                corr_isoforms.append(iso)
+
+        return corr_isoforms
 
     def _get_sites(self, mod: str, sites: Set[str]):
         """
