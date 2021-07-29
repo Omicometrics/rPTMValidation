@@ -8,7 +8,7 @@ import functools
 import os
 import re
 import sqlite3
-from typing import Dict, List, Optional, Tuple, Set
+from typing import Dict, List, Optional, Tuple, Set, Any
 
 import lxml.etree as etree
 
@@ -77,7 +77,7 @@ class PTMDB:
 
         # Construct table mapping modifications to sites, with a classification
         self.cursor.execute('''CREATE TABLE mod_sites
-                               (mod_id integer, site text,
+                               (mod_id integer, site text, position text,
                                 classification text)''')
         self.cursor.execute("CREATE INDEX id_index ON mod_sites(mod_id)")
 
@@ -100,11 +100,12 @@ class PTMDB:
                 for e in element.findall(f"{{{namespace}}}specificity"):
                     site = e.get("site")
                     classification = e.get("classification")
+                    position = e.get("position")
                     self.cursor.execute(
                         '''INSERT INTO mod_sites (mod_id, site,
-                                                  classification)
-                           VALUES (?, ?, ?)''',
-                        (mod_id, site, classification))
+                                                  position, classification)
+                           VALUES (?, ?, ?, ?)''',
+                        (mod_id, site, position, classification))
 
         self.conn.commit()
 
@@ -239,11 +240,10 @@ class PTMDB:
 
         return res[0]
 
-    def get_mods(
-        self,
-        mass_type: MassType = MassType.mono,
-        filter_class: Optional[str] = None) \
-            -> Dict[Tuple[str, float], List[str]]:
+    def get_mods(self,
+                 mass_type: MassType = MassType.mono,
+                 filter_class: Optional[str] = None)\
+            -> Dict[str, Dict[str, Any]]:
         """
         Extracts the database entries for the modifications, optionally
         filtering on the classification field.
@@ -254,21 +254,28 @@ class PTMDB:
                                           are classified in this category.
 
         Returns:
-            A dictionary mapping (modification name, modification mass) to
-            the peptide sites.
+            A dictionary mapping (modification name) to
+            the peptide sites, modification mass and positions.
 
         """
         col = self._get_mass_col(mass_type)
-        query = f'''SELECT mods.mod_id, name, {col}, site FROM mods
-                    INNER JOIN mod_sites ON mods.mod_id = mod_sites.mod_id'''
+        query = f'''
+            SELECT mods.mod_id, name, {col}, site, mod_sites.position FROM mods
+            INNER JOIN mod_sites ON mods.mod_id = mod_sites.mod_id
+        '''
         if filter_class is not None:
             query += f' WHERE classification = "{filter_class}"'
         self.cursor.execute(query)
 
-        mods: Dict[Tuple[str, float], List[str]] = \
-            collections.defaultdict(list)
+        mods: Dict[str, Dict[str, Any]] = collections.defaultdict(dict)
+        sites: Dict[str, Set[str]] = collections.defaultdict(set)
         for row in self.cursor.fetchall():
-            mods[(row["name"], row[col])].append(row["site"])
+            sites[row["name"]].add(row["site"])
+            mods[row["name"]]["position"] = row["position"]
+            mods[row["name"]]["mass"] = row[col]
+
+        for name in sites.keys():
+            mods[name]["sites"] = sites[name]
         return mods
 
     def get_ptms(self, mass_type: MassType = MassType.mono) \
@@ -281,8 +288,9 @@ class PTMDB:
             mass_type (MassType, optional): The mass type.
 
         Returns:
-            A dictionary mapping (modification name, modification mass) to
-            the peptide sites which can be post-translationally modified.
+            A dictionary mapping (modification name) to the peptide
+            sites which can be post-translationally modified,
+            modification mass and position.
 
         """
         return self.get_mods(mass_type=mass_type,
@@ -300,7 +308,7 @@ class PTMDB:
 
         Raises:
             ModificationNotFoundException.
-        
+
         """
         # check whether the name is valid, if not, raise the exception.
         _ = self._get_row_by_name(name)
