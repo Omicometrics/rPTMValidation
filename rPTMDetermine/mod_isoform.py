@@ -119,11 +119,11 @@ class Isoform:
         mod_info = self._psm_mods(psm.mods, psm.seq)
         pep_isoforms = self._generate_isoforms(psm, mod_info)
 
+        # considers the isoform with non-monoisotopic precursor
+        pep_isoforms = self._precursor_correct_isoform(pep_isoforms)
+
         # isoform PSMs
         isoforms = self._pep2psm(psm, pep_isoforms)
-
-        # considers the isoform with non-monoisotopic precursor
-        isoforms = self._precursor_correct_isoform(isoforms)
 
         return self._generate_features(isoforms)
 
@@ -176,7 +176,8 @@ class Isoform:
                     iso, mod, mass, res, n,
                     consider_nterm=has_nterm, consider_cterm=has_cterm
                 )
-                curr_isos += tmp_isos
+                if tmp_isos is not None:
+                    curr_isos += tmp_isos
             isoforms = curr_isos
 
         return isoforms
@@ -233,45 +234,35 @@ class Isoform:
         return isoforms
 
     @staticmethod
-    def _precursor_correct_isoform(isoforms: Sequence[PSM]) -> List[PSM]:
+    def _precursor_correct_isoform(isoforms: Sequence[Peptide])\
+            -> List[Peptide]:
         """ Considers an isoform for correcting precursors """
         # 13C addition mass comparing to 12C
         m_13c_add = 1.0034
         tol = 0.1
         # corrections
-        corr_isoforms: List[PSM] = []
+        corr_isoforms: List[Peptide] = []
         for iso in isoforms:
+            corr_isoforms.append(iso)
             if len(iso.mods) <= 1:
-                corr_isoforms.append(iso)
                 continue
 
-            # potential pairs
-            comb_mods_mass = [(m1, m2)
-                              for m1, m2 in itertools.combinations(iso.mods, 2)
-                              if -1 * tol <= m1.mass + m2.mass <= 3.1]
-            if not comb_mods_mass:
-                corr_isoforms.append(iso)
-                continue
-
-            # generate isoforms
+            # generate isoforms as potential corrections: up to 3 combinations
             tmp_isoforms = []
-            for m1, m2 in comb_mods_mass:
-                # up to 3rd isotopic peaks in the distrubition is considered
-                mm = m1.mass + m2.mass
-                n = round(mm / m_13c_add)
-                if abs(mm - n * m_13c_add) <= tol:
-                    exp_mods = {(m1.mod, m1.site), (m2.mod, m2.site)}
-                    p = PSM(iso.data_id, iso.spec_id,
-                            Peptide(iso.seq, iso.charge,
-                                    [m for m in iso.mods
-                                     if (m.mod, m.site) not in exp_mods]),
-                            spectrum=iso.spectrum)
-                    tmp_isoforms.append(p)
+            for k in range(2, min(len(iso.mods) + 1, 4)):
+                for mods in itertools.combinations(iso.mods, k):
+                    mm = sum(m.mass for m in mods)
+                    if -0.2 <= mm <= 3.1:
+                        n = round(mm / m_13c_add)
+                        if abs(mm - n * m_13c_add) <= tol:
+                            exp_mods = {(m.mod, m.site) for m in mods}
+                            p = Peptide(iso.seq, iso.charge,
+                                        [m for m in iso.mods
+                                         if (m.mod, m.site) not in exp_mods])
+                            tmp_isoforms.append(p)
 
             if tmp_isoforms:
                 corr_isoforms += tmp_isoforms
-            else:
-                corr_isoforms.append(iso)
 
         return corr_isoforms
 
@@ -322,7 +313,8 @@ class Isoform:
     def _add_mod_isoform(pep: Peptide, mod: str, mod_mass: float,
                          mod_residues: str, nmod: int,
                          consider_nterm: bool = False,
-                         consider_cterm: bool = False) -> List[Peptide]:
+                         consider_cterm: bool = False)\
+            -> Optional[List[Peptide]]:
         """ Generate isoforms for localization. """
         # identify whether multiple target residue exists
         base_mods = [m for m in pep.mods if m.mod != mod]
@@ -349,7 +341,7 @@ class Isoform:
             res_sites.append("cterm")
 
         if len(res_sites) < nmod:
-            return [pep]
+            return None
 
         # generate isoforms
         isoforms: List[Peptide] = []
