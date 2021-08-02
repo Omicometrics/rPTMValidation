@@ -121,6 +121,11 @@ class Isoform:
 
         # considers the isoform with non-monoisotopic precursor
         pep_isoforms = self._precursor_correct_isoform(pep_isoforms)
+        if not pep_isoforms:
+            return pep_isoforms
+
+        # remove invalid isoforms
+        pep_isoforms = self._is_valid_mod_psm(pep_isoforms)
 
         # isoform PSMs
         isoforms = self._pep2psm(psm, pep_isoforms)
@@ -236,7 +241,13 @@ class Isoform:
     @staticmethod
     def _precursor_correct_isoform(isoforms: Sequence[Peptide])\
             -> List[Peptide]:
-        """ Considers an isoform for correcting precursors """
+        """
+        Corrects isoform precursor mass, that mass of modification
+        combinations equals to 0 or is close to non-monoisotopic mass
+        in isotopic distribution, resulting in potential false
+        positives.
+
+        """
         # 13C addition mass comparing to 12C
         m_13c_add = 1.0034
         tol = 0.1
@@ -283,9 +294,8 @@ class Isoform:
         except ModificationNotFoundException:
             db_sites = set()
 
-        # determines the N- and C- terminus from database search results,
-        # if isn't assigned, use the sites defined in Unimod database
-        # only.
+        # determines the N- and C- terminus from database search results, if
+        # isn't assigned, use the sites defined in Unimod database only.
         exp_sites = None
         if self.modification_sites is not None:
             exp_sites = self.modification_sites[mod]
@@ -318,27 +328,19 @@ class Isoform:
         """ Generate isoforms for localization. """
         # identify whether multiple target residue exists
         base_mods = [m for m in pep.mods if m.mod != mod]
-        non_mod_sites = set([m.site for m in base_mods])
-        res_sites: List[int] = [
-            i+1 for i, r in enumerate(pep.seq)
-            if r in mod_residues and i+1 not in non_mod_sites
-        ]
+        base_sites = set([m.site for m in base_mods])
+        res_sites = [i + 1 for i, r in enumerate(pep.seq)
+                     if r in mod_residues and i + 1 not in base_sites]
 
-        # if terminus has been assigned, the sites are prohibited
-        # for modification
-        if "nterm" in non_mod_sites or 1 in non_mod_sites:
-            non_mod_sites.update(["nterm", 1])
+        # terminus
+        if consider_nterm and not ("nterm" in base_sites or 1 in base_sites):
+            if 1 not in res_sites:
+                res_sites.insert(0, "nterm")
 
-        if "cterm" in non_mod_sites or len(pep.seq) in non_mod_sites:
-            non_mod_sites.update(["cterm", len(pep.seq)])
-
-        # consider N-terminal modification
-        if consider_nterm and "nterm" not in non_mod_sites:
-            res_sites.insert(0, "nterm")
-
-        # consider C-terminal modification
-        if consider_cterm and "cterm" not in non_mod_sites:
-            res_sites.append("cterm")
+        if consider_cterm and not ("cterm" in base_sites
+                                   or len(pep.seq) in base_sites):
+            if len(pep.seq) not in res_sites:
+                res_sites.append("cterm")
 
         if len(res_sites) < nmod:
             return None
@@ -375,8 +377,8 @@ class Isoform:
     def _filter_isoform(self, psms: Sequence[PSM]) -> List[PSM]:
         """
         Filters out isoforms with low ion scores so that each
-        modification has no more than 3 alternative sites for subsequent
-        localization.
+        modification has no more than `self.max_num_sites` alternative sites
+        for subsequent localization.
 
         """
         # scores for filtering low-quality or redundant isoforms
@@ -415,21 +417,19 @@ class Isoform:
             tmp_sites = mod_sits[i]
             # combine modification based on sites and add up the sites if new
             # site is found
-            ind = []
+            t = False
             for mod in all_mods:
                 sites = tmp_sites[mod] if mod in tmp_sites else frozenset([])
-                t = False
                 if sites not in mod_sites_cum[mod]:
                     # this is a new site and No. of alternative sites <= 3
                     if num_sites_cum[mod] < self.max_num_sites:
                         t = True
                     num_sites_cum[mod] += 1
                     mod_sites_cum[mod].add(frozenset(sites))
-                ind.append(t)
 
             # if the new site added is valid, i.e., increases a new site
             # to any modification with No. of sites < 3
-            if any(ind):
+            if t:
                 retain_index.append(i)
 
             # No. of sites reaches 3 or maximum for that modification
@@ -446,6 +446,66 @@ class Isoform:
             p.extract_features()
             p.spectrum = None
         return psms
+
+    @staticmethod
+    def _is_valid_mod_psm(psms: Sequence[Any]) -> List[Any]:
+        """
+        justifies whether the assignments of modifications are valid,
+        mainly due to the residue in sites whereas in position the
+        modification should be at peptide terminus.
+
+        Args:
+            psms: Modified psms or peptides.
+
+        Returns:
+            PSMs with valid and corrected modification assignments.
+
+        """
+        # all modifications
+        mods = set(m.mod for p in psms for m in p.mods)
+
+        # the modifications only happen at peptide terminus
+        check_mods: Set[str] = set()
+        term_mods: Dict[str, Set[str]] = collections.defaultdict(set)
+        for mod in mods:
+            positions = ptmdb.get_mod_positions(mod)
+            if "Anywhere" not in positions:
+                check_mods.add(mod)
+
+            # modification sites
+            sites = ptmdb.get_mod_terminus(mod)
+            if sites is not None:
+                term_mods[mod] = sites
+
+        # remove the modifications not at peptide terminus
+        i0, i1 = 1, len(psms[0].seq)
+        del_ix: Set[int] = set()
+        for i, p in enumerate(psms):
+            if any(m.mod in check_mods and isinstance(m.site, int)
+                   and i0 < m.site < i1 for m in p.mods):
+                del_ix.add(i)
+            else:
+                # correct the modification sites
+                pep_mods = []
+                for m in p.mods:
+                    if (isinstance(m.site, str) or i0 < m.site < i1
+                            or m.mod not in term_mods):
+                        pep_mods.append(m)
+                    else:
+                        if "N-term" in term_mods[m.mod] and m.site == i0:
+                            pep_mods.append(ModSite(mod=m.mod, mass=m.mass,
+                                                    site="nterm"))
+                        elif "C-term" in term_mods[m.mod] and m.site == i1:
+                            pep_mods.append(ModSite(mod=m.mod, mass=m.mass,
+                                                    site="cterm"))
+                        else:
+                            pep_mods.append(m)
+                p.mods = pep_mods
+
+        if not del_ix:
+            return psms
+
+        return [p for i, p in enumerate(psms) if i not in del_ix]
 
     @staticmethod
     def _valid_check_for_loc(psm: PSM):

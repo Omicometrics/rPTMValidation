@@ -228,7 +228,7 @@ class PSM:
         return (0. if not self.similarity_scores
                 else max(s[2] for s in self.similarity_scores))
 
-    def annotate_spectrum(self, tol: float = 0.2, denoise=True,
+    def annotate_spectrum(self, tol: float = 0.2, denoise: bool = True,
                           ion_types: Optional[Dict[int, List[str]]] = None):
         """
         Annotates the mass spectrum using the theoretical ions of the peptide.
