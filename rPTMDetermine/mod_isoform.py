@@ -97,8 +97,8 @@ class Isoform:
         # are potential sites for a modification if one of the residue in
         # each series is modified, for example, deamidation should be observed
         # at residue N and Q, oxidation is commonly observed at residues H, W,
-        # F, Y and P, phosphorylation at S and T, etc.
-        self.mod_residue_combines: List[str] = ["DE", "ST", "HWFYP",
+        # F, M, Y and P, phosphorylation at S and T, etc.
+        self.mod_residue_combines: List[str] = ["DE", "ST", "MHWFYP",
                                                 "KR", "IL", "NQ"]
 
     def get_isoforms(self, psm: PSM) -> List[PSM]:
@@ -165,11 +165,25 @@ class Isoform:
 
         # if is deamidated, update the initial isoforms
         if any("Deamidated" in mod for mod in psm_mods.keys()):
-            isoforms = self._deamidated_isoform(psm.peptide)
-            # clears the deamidated, but keeps modification combinations,
-            # e.g., Methyl+Deamidated
+            isoforms, parsed_mods = self._deamidated_isoform(psm.peptide)
+            # updates the modifications due to deamidation
             if "Deamidated" in psm_mods:
+                # clears the deamidated
                 del psm_mods["Deamidated"]
+            # updates modification after removing deamidation,
+            # e.g., Methyl in Methyl+Deamidated
+            deam_mods = [m for m in psm_mods.keys() if "Deamidated" in m]
+            # adds the parsed modifications
+            for mod in parsed_mods:
+                if mod in psm_mods:
+                    m, n, sites = psm_mods[mod]
+                    psm_mods[mod] = (m, n + 1, sites)
+                else:
+                    m, n, _ = [psm_mods[x] for x in deam_mods if mod in x][0]
+                    psm_mods[mod] = (ptmdb.get_mass(mod), n, {""})
+            # removes the deamidated containing modifications
+            for mod in deam_mods:
+                del psm_mods[mod]
 
         for mod, (mass, n, sites) in psm_mods.items():
             # gets sites
@@ -188,7 +202,8 @@ class Isoform:
         return isoforms
 
     @staticmethod
-    def _deamidated_isoform(pep: Peptide) -> List[Peptide]:
+    def _deamidated_isoform(pep: Peptide)\
+            -> Tuple[List[Peptide], Optional[List[str]]]:
         """
         Isoforms for deamidation. As deamidation can be artifically
         introduced due to incorrect selection of monoisotopic peak
@@ -202,6 +217,7 @@ class Isoform:
         # deamidations and sites
         dm_sites: List[Any] = []
         base_mods: List[ModSite] = []  # base modification
+        parsed_mods: List[str] = []
         for m in mods:
             if "Deamidated" in m.mod:
                 dm_sites.append(m.site)
@@ -211,11 +227,12 @@ class Isoform:
                     # update mass
                     mass = m.mass - mdm
                     base_mods.append(ModSite(mass=mass, mod=mod, site=m.site))
+                    parsed_mods.append(mod)
             else:
                 base_mods.append(m)
 
         if not dm_sites:
-            return [pep]
+            return [pep], None
 
         # potential sites for deamidation: NQR; deamidation of arginine
         # is named as Citrullination.
@@ -236,7 +253,7 @@ class Isoform:
         iso_pep = Peptide(seq, c, base_mods)
         isoforms.append(iso_pep)
 
-        return isoforms
+        return isoforms, parsed_mods
 
     @staticmethod
     def _precursor_correct_isoform(isoforms: Sequence[Peptide])\

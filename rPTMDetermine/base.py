@@ -2,9 +2,8 @@ import collections
 
 
 # similarity scores
-SimilarityScore = collections.namedtuple(
-    "SimilarityScore", ["data_id", "spectrum_id", "score"]
-)
+SimilarityScore = collections.namedtuple("SimilarityScore",
+                                         ["uid", "score", "analogue"])
 
 # ion annotations
 Annotation = collections.namedtuple(

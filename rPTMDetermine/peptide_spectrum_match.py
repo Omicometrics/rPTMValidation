@@ -242,21 +242,27 @@ class PSM:
             List of Annotations.
 
         """
+        frag_annotations = []
         # denoise mass spectrum
         if denoise:
-            _, denoised_spec = self.denoise_spectrum(tol)
-            # TODO: make the denoising optional.
+            ions, denoised_spec = self.denoise_spectrum(tol)
+            # get annotations
+            for ion, (j, k) in ions.items():
+                frag_annotations.append(Annotation(
+                    ion=ion,
+                    mz=denoised_spec.mz[j],
+                    peak_intensity=denoised_spec.intensity[j],
+                    mz_diff=None
+                ))
         else:
             annotes = self._annotate_spectrum(tol, ion_types)
-
-        frag_annotations = []
-        for ion, anno in annotes.items():
-            frag_annotations.append(Annotation(
-                ion=ion,
-                mz=self.spectrum.mz[anno.peak_num],
-                peak_intensity=self.spectrum.intensity[anno.peak_num],
-                mz_diff=anno.mass_diff
-            ))
+            for ion, anno in annotes.items():
+                frag_annotations.append(Annotation(
+                    ion=ion,
+                    mz=self.spectrum.mz[anno.peak_num],
+                    peak_intensity=self.spectrum.intensity[anno.peak_num],
+                    mz_diff=anno.mass_diff
+                ))
 
         self.annotations = frag_annotations
 
@@ -279,7 +285,6 @@ class PSM:
         ions = self.peptide.fragment(
             ion_types=DEFAULT_FRAGMENT_IONS if ion_types is None
             else ion_types)
-        self.peptide.clean_fragment_ions()
 
         # annotate mass spectrum
         return self.spectrum.annotate(ions, tol=tol)

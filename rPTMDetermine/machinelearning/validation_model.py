@@ -4,6 +4,8 @@ Peptide validation using ensemble SVM.
 """
 from __future__ import annotations
 
+import time
+import pickle
 import bisect
 import random
 import dataclasses
@@ -297,6 +299,7 @@ class ValidationModel:
         train_uids = np.array(pos_uids + dec_uids, dtype=str)
         y = np.concatenate((np.ones(npos), np.zeros(ndec)), axis=0)
 
+        print(f"Data processing: {time.time() - t}")
         # stratified K fold
         ncv = self.cv
         skf = StratifiedKFold(n_splits=ncv)
@@ -315,6 +318,7 @@ class ValidationModel:
 
             # train the model and do validation
             model, sc_te, mt, pmt, pm, bpm = self._fit_model(psms_tr, psms_te)
+            print(f"CV {i + 1}: {time.time() - t}")
 
             val_metrics.append(mt)
             prob_metrics.append(pmt)
@@ -335,6 +339,7 @@ class ValidationModel:
         qvals, p0 = calculate_q_values(val_scores, groups)
         # FDR threshold
         opt_thr = calculate_threshold_score(qvals, 0.01)
+        print(f"FDR control: {time.time() - t}")
 
         self.metrics = _combine_metrics(val_metrics)
         self.prob_metrics = _combine_metrics(prob_metrics)
@@ -373,7 +378,8 @@ class ValidationModel:
     def validate(self, psms):
         """ Validates `psms` using the trained model. """
         n, k = len(psms), 10000
-        nb = int(n / k) + 1
+        d = n / k
+        nb = int(d) + 1 if d > int(d) else int(d)
         # :: calculate scores in blocks
         for i in range(nb):
             i0, i1 = i*k, min((i+1)*k, n)
