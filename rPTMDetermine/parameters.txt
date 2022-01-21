@@ -1,0 +1,89 @@
+[Search Results]
+# >>>>> Search results related parameters
+# Search engine, e.g., ProteinPilot, Mascot, Comet, etc.
+engine = ProteinPilot
+
+# Files that contain all modified peptide identifications. These can be a list
+# files separated by `;`, or simply `*.xml` for all files with `xml` extension.
+# However, for the latter case, it should be careful that other files with same
+# extension will be loaded, which may cause errors.
+# :: Directory where search results files locate.
+path =
+# :: Results files.
+files =
+
+# Mass spectra files used for database search. `mgf`, `mzXML` or `mzML` file
+# type is accepted. These can be a list of files separated by `;`, or simply
+# `*.mgf`, `*.mzXML` and `*.mzML` for all `mgf`, `mzXML` and `mzML` files.
+# :: Directory where mass spectra files locate. Leave empty to use same
+# :: directory as for database search results above.
+path =
+# :: Mass spectra files.
+files =
+
+# Files used for model construction. This is set when new version of
+# ProteinPilot search results were used for validation of modified peptide
+# identifications, since ProteinPilot automatically trims the identification
+# with confidence lower than 0.1, resulting in insufficient identifications
+# for model construction. Therefore, additional search results, for example,
+# obtained from Comet or Mascot should be used. The files can be a list of
+# file names separated by `;`, or simply like `*.pep.xml` for all results
+# from Comet search or TPP post-processed results.
+# :: Search engine
+model_search_res_engine =
+# :: Directory where search results files locates. Leave empty to use same
+# :: directory as for database search results above.
+model_search_res_path =
+# :: Results files
+model_search_res_files =
+
+# False discovery rate (FDR) threshold for defining search results groups:
+# positive for target peptide identifications with FDR <= threshold, negative
+# for target peptide identifications with FDR > threshold.
+fdr = 0.01
+
+[Model Construction]
+# >>>>> Model related parameters
+# Number of folds for cross validation, default 3.
+k = 3
+# FDR (q value) thresholds for validation of peptide identifications. These
+# thresholds will be used later as the thresholds for validation of modified
+# peptide identifications.
+q = 0.01
+
+[Peptide Spectrum Matches]
+# >>>>> Peptide spectrum match related parameters
+# Tolerance for matching peptides to mass spectra. This is used in retrieval of
+# mass spectra and peptides with alternative modifications to correct the
+# modifications assigned by database search. Default is 0.1 Da. Tolerance in
+# ppm can also be used.
+peptide_tolerance = 0.1 Da
+# Tolerance for matching peptide theoretical ions to fragment ions of a mass
+# spectrum. This is used in the annotation of a mass spectrum for calculating
+# features, and others. Default is 0.2 Da. Tolerance in ppm can also be used.
+fragment_ion_tolerance = 0.2 Da
+
+[Modification]
+# >>>>> Modifications related parameters
+# List of modifications excluded in the analysis, separated by `;` and no space
+# between modifications. Each modification is presented as `name@site`, with
+# name must be PSI-MS Name or Interim name (if PSI-MS Name does not exist) in
+# Unimod database. For terminal modifications, use `nterm` for N-terminal and
+# `cterm` for C-terminal modifications. For example, `Carbamidomethyl@C` will
+# exclude all carbamidomethylation on cysteine, and `Acetyl@nterm` to exclude
+# N-terminal acetylation. Note that, if other modifications co-exist in a
+# peptide, these modificatios will also be considered during localization.
+# Otherwise the identifications are excluded in the analysis.
+excludes = Carbamidomethyl@C;Oxidation@M
+
+# List of modifications considered for validation. Some of the modifications
+# have been identified by database search. However, it may be possible that
+# additional modifications are considered. All these modifications should be
+# provided in a separate file (either `.csv` or `.txt` type file). Note that
+# Excel files can't be recognized. The table is a single column with a name
+# per line, no header is required. These names must be PSI-MS Name or Interim
+# name (if PSI-MS Name does not exist) in Unimod database. The mass and sites
+# of these modifications will be determined automatically from the Unimod
+# database. Leave empty will use the modifications identified by database
+# search only.
+modification_list =
