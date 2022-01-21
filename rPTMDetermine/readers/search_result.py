@@ -23,10 +23,10 @@ class PeptideType(enum.Enum):
 
 @dataclasses.dataclass(eq=True, frozen=True)
 class SearchResult:  # pylint: disable=too-few-public-methods
-    """
-    A data class to store information about an identification from a database
-    search engine. All search engine readers should return a list of
-    SearchResult objects in order to standardize the interface.
+    """ A data class to store information about an identification
+    from a database search engine. All search engine readers should
+    return a list of SearchResult objects in order to standardize
+    the interface.
 
     """
 

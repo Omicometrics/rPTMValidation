@@ -4,6 +4,8 @@ A script providing functions for parsing and processing the modifications
 applied to peptides.
 
 """
+import logging
+
 from typing import List, Union
 
 from pepfrag import MassType, ModSite
@@ -83,9 +85,8 @@ def _parse_mod_string(mod_str: str, ptmdb: PTMDB, mass_type: MassType)\
     try:
         mass = ptmdb.get_mass(name, mass_type)
     except ModificationNotFoundException:
-        raise UnknownModificationException(
-            f"Failed to detect mass for modification {name}"
-        )
+        mass = None
+        logging.warning(f"Failed to detect mass for modification {name}")
 
     return ModSite(mass, site, name)
 
@@ -142,7 +143,7 @@ def parse_mods(
         # Ignore modifications that begin with "No ", since these reflect the
         # absence of a modification, e.g. quantitative label
         mods = [_parse_mod_string(mod, ptmdb, mass_type)
-                for mod in mods_str.split(';') if not mod.startswith("No ")]
+                for mod in mods_str.split(';')]
     elif "|" in mods_str:
         mods = [_parse_bar_mod_string(mod)
                 for mod in mods_str.split(",")]

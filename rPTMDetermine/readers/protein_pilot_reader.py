@@ -4,12 +4,11 @@ This module provides functions for reading ProteinPilot results
 (PeptideSummary/XML) files.
 
 """
-import collections
 import csv
 import dataclasses
-import logging
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from html import unescape
 
 import lxml.etree as etree
 
@@ -66,11 +65,7 @@ class ProteinPilotSearchResult(_ProteinPilotSearchResult):
 @dataclasses.dataclass(eq=True, frozen=True)
 class ProteinPilotXMLSearchResult(_ProteinPilotSearchResult):
 
-    __slots__ = (
-        "byscore",
-        "eval",
-        "mod_prob",
-    )
+    __slots__ = "byscore", "eval", "mod_prob"
 
     byscore: Optional[float]
     eval: Optional[float]
@@ -163,12 +158,7 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
 
         """
         mods = modifications.preparse_mod_string(row["Modifications"])
-
-        try:
-            parsed_mods = modifications.parse_mods(mods, self.ptmdb)
-        except modifications.UnknownModificationException as ex:
-            logging.warning(ex)
-            return None
+        parsed_mods = modifications.parse_mods(mods, self.ptmdb)
 
         try:
             used = bool(int(row['Used']))
@@ -182,12 +172,12 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
             spectrum=row["Spectrum"],
             dataset=None,
             rank=1,
-            pep_type=PeptideType.decoy if "REVERSED" in row["Names"]
-            else PeptideType.normal,
+            pep_type=(PeptideType.decoy if "REVERSED" in row["Names"]
+                      else PeptideType.normal),
             theor_mz=float(row["Theor m/z"]),
-            time=row["Time"],
-            confidence=float(row["Conf"]),
-            prec_mz=float(row["Prec m/z"]),
+            time=row["Acq Time"],
+            confidence=float(row["Conf"]) / 100,
+            prec_mz=float(row["Obs m/z"]),
             itraq_peaks=(
                 {k: float(row[k]) for k in itraq_peak_cols if row[k]}
                 if itraq_peak_cols else None
@@ -203,12 +193,6 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
             ),
             used_in_quantitation=used
         )
-
-
-TempResult = collections.namedtuple(
-    "TempResult",
-    ("spec_id", "prec_mz", "rank", "seq", "charge", "mods", "conf",
-     "score", "eval", "mod_prob", "pep_type", "rt", "itraq_peaks"))
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
@@ -269,7 +253,7 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
             The read information as a list of ProteinPilotXMLSearchResults.
 
         """
-        res: Dict[str, _ProteinPilotXMLTempResult] = {}
+        temp_res: Dict[str, _ProteinPilotXMLTempResult] = {}
         match_protein_map: Dict[str, List[str]] = {}
         context = etree.iterparse(filename, events=["end"], recover=True,
                                   encoding="iso-8859-1")
@@ -292,14 +276,11 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
                                 else PeptideType.decoy)
                     match_id = match_element.get(f"{{{self.id_namespace}}}id")
 
-                    try:
-                        mods: List[ModSite] = list(
-                            self._parse_mods(match_element, "MOD_FEATURE"))
-                        mods.extend(
-                            self._parse_mods(match_element, "TERM_MOD_FEATURE",
-                                             "nterm"))
-                    except ModificationNotFoundException:
-                        continue
+                    mods: List[ModSite] = self._parse_mods(match_element,
+                                                           "MOD_FEATURE")
+                    mods.extend(
+                        self._parse_mods(match_element, "TERM_MOD_FEATURE",
+                                         term_site=True))
 
                     temp_result = _ProteinPilotXMLTempResult(
                         seq=match_element.get("seq"),
@@ -319,11 +300,11 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
                         itraq_peaks=itraq_peaks
                     )
 
-                    if predicate is None or predicate(temp_result):
-                        res[match_id] = temp_result
+                    if predicate is None or predicate(temp_res):
+                        temp_res[match_id] = temp_result
 
                 element.clear()
-                for ancestor in element.xpath('ancestor-or-self::*'):
+                for ancestor in element.xpath("ancestor-or-self::*"):
                     while ancestor.getprevious() is not None:
                         del ancestor.getparent()[0]
 
@@ -337,12 +318,17 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
                     match_protein_map[match_id] = protein_ids
 
                 element.clear()
-                for ancestor in element.xpath('ancestor-or-self::*'):
+                for ancestor in element.xpath("ancestor-or-self::*"):
                     while ancestor.getprevious() is not None:
                         del ancestor.getparent()[0]
 
-        for match_id, r in res.items():
-            yield ProteinPilotXMLSearchResult(
+            elif element.tag == "LCMS_FEATURE":
+                element.clear()
+                break
+
+        res: List[ProteinPilotXMLSearchResult] = []
+        for match_id, r in temp_res.items():
+            res.append(ProteinPilotXMLSearchResult(
                     seq=r.seq,
                     mods=r.mods,
                     charge=r.charge,
@@ -359,7 +345,9 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
                     eval=r.eval,
                     mod_prob=r.mod_prob,
                     itraq_peaks=r.itraq_peaks
-            )
+            ))
+
+        return res
 
     @staticmethod
     def read_biases(filename: str) -> Dict[Tuple[str, str], float]:
@@ -404,17 +392,20 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
                         (float(peak_area), float(err_peak_area))
         return peaks
 
-    def _parse_mods(self, element, mod_xml_tag: str,
-                    fixed_site: Optional[str] = None):
+    def _parse_mods(self, element, mod_xml_tag: str, term_site: bool = False):
         """
-        Raises:
-            ModificationNotFoundException
 
         """
+        mods = []
         for mod in element.findall(mod_xml_tag):
-            name = mod.get("mod")
+            name = unescape(mod.get("mod"))
             if not name.startswith("No "):
-                yield ModSite(
-                    self.ptmdb.get_mass(name),
-                    int(mod.get("pos")) if fixed_site is None else fixed_site,
-                    name)
+                try:
+                    mass = self.ptmdb.get_mass(name)
+                except ModificationNotFoundException:
+                    mass = None
+                site = int(mod.get("pos"))
+                if term_site:
+                    site = "nterm" if site == 1 else "cterm"
+                mods.append(ModSite(mass, site, name))
+        return mods

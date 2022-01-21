@@ -4,10 +4,11 @@ This module provides a class for parsing TPP pepXML files.
 
 """
 import dataclasses
-import operator
-from typing import Any, Callable, Dict, List, Optional
-
 import lxml.etree as etree
+
+from html import unescape
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
 from pepfrag import AA_MASSES, ModSite
 
 from .base_reader import Reader
@@ -19,9 +20,11 @@ from .search_result import PeptideType, SearchResult
 @dataclasses.dataclass(eq=True, frozen=True)
 class TPPSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
 
-    __slots__ = ("scores",)
+    __slots__ = ("scores", "peptide_prob", "iprophet_prob")
 
     scores: Dict[str, float]
+    peptide_prob: Optional[Dict[str, float]]
+    iprophet_prob: Optional[Dict[str, float]]
 
 
 class TPPReader(Reader):  # pylint: disable=too-few-public-methods
@@ -29,11 +32,8 @@ class TPPReader(Reader):  # pylint: disable=too-few-public-methods
     Class to read a TPP pepXML file.
 
     """
-    _mass_mod_names = {
-        305: "iTRAQ8plex",
-        58: "Cabamidomethyl",
-        44: "Carbamyl"
-    }
+    mod_term_mass_correct = {"mod_cterm_mass": 17.00274,
+                             "mod_nterm_mass": 1.007825}
 
     def __init__(self, ptmdb: PTMDB):
         """
@@ -67,20 +67,15 @@ class TPPReader(Reader):  # pylint: disable=too-few-public-methods
         """
         res: List[TPPSearchResult] = []
         for event, element in etree.iterparse(filename, events=['end']):
-            if (event == "end" and
-                    element.tag == f"{{{self.namespace}}}spectrum_query"):
+            if element.tag == f"{{{self.namespace}}}spectrum_query":
                 raw_id = element.get("spectrum").split(".")
                 raw_file, scan_no = raw_id[0], int(raw_id[1])
                 charge = int(element.get("assumed_charge"))
                 spec_id = self._get_id(element)
 
-                hits = [
-                    self._extract_hit(hit, charge)
-                    for hit in element.xpath(
-                        'x:search_result/x:search_hit',
-                        namespaces=self.ns_map
-                    )
-                ]
+                hits = [self._extract_hit(h, charge)
+                        for h in element.xpath('x:search_result/x:search_hit',
+                                               namespaces=self.ns_map)]
 
                 # _build_search_result has been split out as a separate method
                 # such that it may be overridden for specific TPPReader
@@ -89,6 +84,11 @@ class TPPReader(Reader):  # pylint: disable=too-few-public-methods
                     self._build_search_result(raw_file, scan_no, spec_id, hit)
                     for hit in hits
                 ])
+
+                element.clear()
+                for ancestor in element.xpath("ancestor-or-self::*"):
+                    while ancestor.getprevious() is not None:
+                        del ancestor.getparent()[0]
 
         return res if not predicate else [r for r in res if predicate(r)]
 
@@ -99,63 +99,98 @@ class TPPReader(Reader):  # pylint: disable=too-few-public-methods
         """
         spec_id = query_element.get("spectrumNativeID")
         if spec_id is None:
-            return f"0.1.{query_element.get('start_scan')}"
-        return spec_id.split(":")[1]
+            return query_element.get('start_scan')
+        return unescape(spec_id)
 
     def _extract_hit(self, hit_element, charge: int) -> Dict[str, Any]:
         """
         Parses the search_hit XML element to extract relevant information.
 
         """
+        pprophet_probs, iprophet_probs = self._process_prophet(hit_element)
         return {
             'rank': int(hit_element.get("hit_rank")),
             'seq': hit_element.get("peptide"),
             'mods': tuple(self._process_mods(
-                hit_element.get('peptide'),
+                hit_element.get("peptide"),
                 hit_element.find(f"{{{self.namespace}}}modification_info")
             )),
             'charge': charge,
             'scores': {
                 s.get("name"): float(s.get("value"))
                 for s in hit_element.xpath(
-                    "x:search_score", namespaces=self.ns_map
-                )
-            },
+                    "x:search_score", namespaces=self.ns_map)},
             'pep_type': PeptideType.decoy
             if hit_element.get("protein").startswith("DECOY_")
-            else PeptideType.normal
+            else PeptideType.normal,
+            'peptide_prob': pprophet_probs if pprophet_probs else None,
+            'iprophet_prob': iprophet_probs if iprophet_probs else None
         }
 
-    def _process_mods(self, seq: str, mod_info) -> List[ModSite]:
+    def _process_prophet(self, elem)\
+            -> Tuple[Dict[str, float], Dict[str, float]]:
+        """
+        Parse the search_hit XML element to extract PeptideProphet and
+        iProphet parameters and probability.
+
+        """
+        pprophet_probs: Dict[str, float] = {}
+        iprophet_probs: Dict[str, float] = {}
+        for anal in elem.xpath("x:analysis_result", namespaces=self.ns_map):
+            scores = {s.get("name"): float(s.get("value"))
+                      for s in anal.xpath(".//x:parameter",
+                                          namespaces=self.ns_map)}
+            if anal.get("analysis") == "peptideprophet":
+                for p in anal.xpath("x:peptideprophet_result",
+                                    namespaces=self.ns_map):
+                    pprophet_probs["prob"] = float(p.get("probability"))
+                pprophet_probs.update(scores)
+            elif anal.get("analysis") == "interprophet":
+                for p in anal.xpath("x:interprophet_result",
+                                    namespaces=self.ns_map):
+                    iprophet_probs["prob"] = float(p.get("probability"))
+                iprophet_probs.update(scores)
+        return pprophet_probs, iprophet_probs
+
+    def _process_mods(self, seq, mod_info) -> List[ModSite]:
         """
         Processes the modification elements of the pepXML search result.
 
         Args:
-            mod_info
+            seq: sequence
+            mod_info: modification element
 
         Raises:
             ParserException
 
         """
-        if mod_info is None:
-            return []
-
-        mod_nterm_mass = mod_info.get("mod_nterm_mass", None)
-        nterm_mod: Optional[ModSite] = None
-        if mod_nterm_mass is not None:
-            mod_nterm_mass = float(mod_nterm_mass)
-            name = TPPReader._mass_mod_names.get(int(mod_nterm_mass), None)
-            if name is None:
-                try:
-                    name = self.ptmdb.get_name(mod_nterm_mass)
-                except ModificationNotFoundException:
-                    name = 'unknown'
-
-            nterm_mod = ModSite(mod_nterm_mass, "N-term", name)
+        def _get_mod_name(m):
+            try:
+                name = self.ptmdb.get_name(m)
+            except ModificationNotFoundException:
+                name = 'unknown'
+            return name
 
         mods: List[ModSite] = []
+
+        if mod_info is None:
+            return mods
+
+        # terminal modifications
+        for attrib in ["mod_nterm_mass", "mod_cterm_mass"]:
+            mod_term_mass = mod_info.get(attrib, None)
+            if mod_term_mass is not None:
+                mod_term_mass = float(mod_term_mass)
+                mod_term_mass -= self.mod_term_mass_correct[attrib]
+                # get modification name
+                mods.append(ModSite(
+                    mod_term_mass,
+                    "nterm" if attrib == "mod_nterm_mass" else "cterm",
+                    _get_mod_name(mod_term_mass)))
+
+        # amino acid modifications
         for mod in mod_info.findall(f"{{{self.namespace}}}mod_aminoacid_mass"):
-            for attrib in ['mass', 'static', 'variable']:
+            for attrib in ['static', 'variable', 'mass']:
                 if attrib in mod.attrib:
                     mass = float(mod.get(attrib))
                     break
@@ -166,17 +201,11 @@ class TPPReader(Reader):  # pylint: disable=too-few-public-methods
                 )
 
             site = int(mod.get('position'))
-            mod_mass = mass - AA_MASSES[seq[site - 1]].mono
-            try:
-                mod_name = self.ptmdb.get_name(mod_mass)
-            except ModificationNotFoundException:
-                mod_name = 'unknown'
-
-            mods.append(ModSite(mod_mass, site, mod_name))
-
-        mods = sorted(mods, key=operator.attrgetter('site'))
-        if nterm_mod is not None:
-            mods.insert(0, nterm_mod)
+            # the mass is from 'mass' content, which is the mass of residue
+            # plus modification mass, thus should be corrected
+            if attrib == "mass":
+                mass -= AA_MASSES[seq[site - 1]].mono
+            mods.append(ModSite(mass, site, _get_mod_name(mass)))
 
         return mods
 
@@ -203,5 +232,7 @@ class TPPReader(Reader):  # pylint: disable=too-few-public-methods
             rank=hit['rank'],
             pep_type=hit['pep_type'],
             theor_mz=None,
-            scores=hit['scores']
+            scores=hit['scores'],
+            peptide_prob=hit['peptide_prob'],
+            iprophet_prob=hit['iprophet_prob']
         )
