@@ -27,7 +27,6 @@ from pepfrag import ModSite
 
 from . import (
     PSMContainer,
-    machinelearning,
     mass_spectrum,
     packing,
     peptides,
@@ -38,12 +37,10 @@ from . import (
 from .features import Features
 from .readers import SearchEngine
 from .rptmdetermine_config import DataSetConfig, RPTMDetermineConfig
-from .validation_model import ValidationModel
+from .machinelearning import ValidationModel
 
 
 MODEL_CACHE_FILE = 'model.pkl'
-LOCALIZATION_MODEL_CACHE_FILE = 'model_loc.pkl'
-
 
 FDRSplitter = Callable[
     [Sequence[readers.SearchResult], float],

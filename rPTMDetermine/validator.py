@@ -17,7 +17,6 @@ from typing import (
     Set,
 )
 
-import cloudpickle
 from pepfrag import Peptide
 
 from . import (
@@ -33,7 +32,7 @@ from .psm_container import PSMContainer
 from .readers import PeptideType
 from .results import write_psm_results
 from .rptmdetermine_config import DataSetConfig, RPTMDetermineConfig
-from .validation_model import ValidationModel
+from .machinelearning import ValidationModel
 
 
 def get_parallel_mods(
