@@ -281,10 +281,8 @@ class RandomForest(RandomForestClassifier):
             max_features="auto",
             max_leaf_nodes=None,
             min_impurity_decrease=0.,
-            min_impurity_split=None,
             bootstrap=True,
             oob_score=False,
-            n_jobs=None,
             random_state=None,
             verbose=0,
             warm_start=False,
@@ -304,10 +302,9 @@ class RandomForest(RandomForestClassifier):
             max_features=max_features,
             max_leaf_nodes=max_leaf_nodes,
             min_impurity_decrease=min_impurity_decrease,
-            min_impurity_split=min_impurity_split,
             bootstrap=bootstrap,
             oob_score=oob_score,
-            n_jobs=n_jobs,
+            n_jobs=1,
             random_state=random_state,
             verbose=verbose,
             warm_start=warm_start,
@@ -351,9 +348,6 @@ class RandomForest(RandomForestClassifier):
             # Pre-sort indices to avoid that each individual tree of the
             # ensemble sorts the indices.
             x.sort_indices()
-
-        # Remap output
-        self.n_features_ = x.shape[1]
 
         y = np.atleast_1d(y)
         if y.ndim == 2 and y.shape[1] == 1:

@@ -6,7 +6,6 @@ import collections
 import itertools
 from operator import itemgetter
 
-import tqdm
 import numpy as np
 
 from operator import attrgetter

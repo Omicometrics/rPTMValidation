@@ -5,14 +5,13 @@ Peptide validation using ensemble SVM.
 from __future__ import annotations
 
 import time
-import pickle
 import bisect
 import random
 import dataclasses
 import collections
 import itertools
 import warnings
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import cloudpickle
 import numpy as np
@@ -234,7 +233,6 @@ class ValidationModel:
                  q_threshold: float = 0.01,
                  n_estimators: Optional[int] = None,
                  max_samples: Optional[int] = 3000,
-                 n_jobs: int = -1,
                  max_depth: int = 2,
                  oob_score: bool = False):
         """
@@ -266,7 +264,7 @@ class ValidationModel:
         self._p0: Optional[np.ndarray] = None
         self._rf_params = {
             "n_estimators": n_estimators, "max_depth": max_depth,
-            "n_jobs": n_jobs, "random_state": 1, "max_samples": max_samples,
+            "random_state": 1, "max_samples": max_samples,
             "max_density_samples": 10000, "oob_score": oob_score
         }
 
