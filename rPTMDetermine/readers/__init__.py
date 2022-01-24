@@ -10,6 +10,7 @@ from .modifications import (
     preparse_mod_string,
     UnknownModificationException
 )
+from .comet_reader import CometReader, CometSearchResult
 from .msfragger_reader import MSFraggerReader, MSFraggerSearchResult
 from .msgfplus_reader import MSGFPlusReader, MSGFPlusSearchResult
 from .mzidentml_reader import MZIdentMLReader, MZIdentMLSearchResult
@@ -38,6 +39,8 @@ __all__ = [
     "parse_mods",
     "preparse_mod_string",
     "UnknownModificationException",
+    "CometReader",
+    "CometSearchResult",
     "MSFraggerReader",
     "MSFraggerSearchResult",
     "MSGFPlusReader",
