@@ -1,21 +1,26 @@
+"""
+This module provides a class for reading MSFragger search results.
+
+"""
+
 import dataclasses
 from typing import Any, Dict
 
 from overrides import overrides
 
 from .ptmdb import PTMDB
-from .tpp_reader import TPPReader, TPPSearchResult
+from .tpp_reader_base import TPPBaseReader, TPPSearchResult
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
-class MSFraggerSearchResult(TPPSearchResult):  # pylint: disable=too-few-public-methods
+class MSFraggerSearchResult(TPPSearchResult):
 
     __slots__ = ('massdiff',)
 
     massdiff: float
 
 
-class MSFraggerReader(TPPReader):  # pylint: disable=too-few-public-methods
+class MSFraggerReader(TPPBaseReader):
     """
     Class to read an MSFragger pepXML file.
 
@@ -38,10 +43,8 @@ class MSFraggerReader(TPPReader):  # pylint: disable=too-few-public-methods
         """
         spec_id = query_element.get('native_id')
         if spec_id is None:
-            return f"0.1.{query_element.get('start_scan')}"
-        return '.'.join(
-            [s.split('=')[1] for s in spec_id.split(' ')]
-        )
+            return query_element.get('start_scan')
+        return spec_id
 
     @overrides
     def _extract_hit(self, hit_element, charge: int) -> Dict[str, Any]:
@@ -55,12 +58,8 @@ class MSFraggerReader(TPPReader):  # pylint: disable=too-few-public-methods
 
     @staticmethod
     @overrides
-    def _build_search_result(
-            raw_file: str,
-            scan_no: int,
-            spec_id: str,
-            hit: Dict[str, Any]
-    ) -> MSFraggerSearchResult:
+    def _build_search_result(raw_file: str, scan_no: int, spec_id: str,
+                             hit: Dict[str, Any]) -> MSFraggerSearchResult:
         """
         Converts a search result to a standard SearchResult.
 

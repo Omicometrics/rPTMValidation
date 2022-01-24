@@ -11,6 +11,7 @@ from .msgfplus_reader import MSGFPlusReader
 from .percolator_reader import PercolatorReader, PercolatorTextReader
 from .protein_pilot_reader import ProteinPilotReader, ProteinPilotXMLReader
 from .tpp_reader import TPPReader
+from .comet_reader import CometReader
 from .ptmdb import PTMDB
 
 
@@ -35,7 +36,7 @@ ENGINE_READER_MAP = {
     SearchEngine.ProteinPilot: ProteinPilotReader,
     SearchEngine.ProteinPilotXML: ProteinPilotXMLReader,
     SearchEngine.Mascot: MascotReader,
-    SearchEngine.Comet: TPPReader,
+    SearchEngine.Comet: CometReader,
     SearchEngine.XTandem: TPPReader,
     SearchEngine.TPP: TPPReader,
     SearchEngine.MSGFPlus: MSGFPlusReader,
