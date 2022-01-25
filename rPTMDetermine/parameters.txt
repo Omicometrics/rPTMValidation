@@ -1,6 +1,31 @@
+[General]
+# >>>>> General parameters
+# Number of CPU cores used for processing data, including generation of features,
+# construction of validation models, etc.
+ncores = 6
+
+# Output directory, where cache, results and others will be put.
+output_path =
+
+# Whether those cache files will be removed after finishing the analysis. If
+# re-analysis is performed later, for example, without the requirements of
+# re-construction of validation models (generally, when >1e5 mass spectra have
+# been processed), all cache files can be removed. 1 for removing and 0 for
+# keeping, cache files. Default 1.
+clear_cache = 1
+
 [Search Results]
 # >>>>> Search results related parameters
-# Search engine, e.g., ProteinPilot, Mascot, Comet, etc.
+# The list of search engines allowed are:
+# 1. ProteinPilot
+# 2. Mascot
+# 3. Comet
+# 4. X!Tandem
+# 5. MSFragger
+# 6. MSGF
+# 7. TPP (for PeptideProhet/iProphet postprocessing)
+# 8. Percolator (for Percolator postprocessing)
+# Search engine, use name listed above.
 engine = ProteinPilot
 
 # Files that contain all modified peptide identifications. These can be a list
@@ -17,9 +42,9 @@ files =
 # `*.mgf`, `*.mzXML` and `*.mzML` for all `mgf`, `mzXML` and `mzML` files.
 # :: Directory where mass spectra files locate. Leave empty to use same
 # :: directory as for database search results above.
-path =
+mass_spec_path =
 # :: Mass spectra files.
-files =
+mass_spec_files =
 
 # Files used for model construction. This is set when new version of
 # ProteinPilot search results were used for validation of modified peptide
@@ -27,9 +52,9 @@ files =
 # with confidence lower than 0.1, resulting in insufficient identifications
 # for model construction. Therefore, additional search results, for example,
 # obtained from Comet or Mascot should be used. The files can be a list of
-# file names separated by `;`, or simply like `*.pep.xml` for all results
-# from Comet search or TPP post-processed results.
-# :: Search engine
+# file names separated by `;`, or simply like `*.pep.xml` for all `pep.xml`
+# files.
+# :: Search engine, use names listed above.
 model_search_res_engine =
 # :: Directory where search results files locates. Leave empty to use same
 # :: directory as for database search results above.
@@ -39,13 +64,23 @@ model_search_res_files =
 
 # False discovery rate (FDR) threshold for defining search results groups:
 # positive for target peptide identifications with FDR <= threshold, negative
-# for target peptide identifications with FDR > threshold.
+# for target peptide identifications with FDR > threshold. If the TPP or
+# Percolator is used, will be ignored.
 fdr = 0.01
+
+# TPP probability. Though interProphet may be used, peptide prophet probability
+# is used here. Default is 0.99.
+peptide_prophet_prob = 0.99
+
+# Percolator q value. If `model_search_res_engine` is set to `Percolator`, this
+# is used.
+percolator_qvalue = 0.01
 
 [Model Construction]
 # >>>>> Model related parameters
 # Number of folds for cross validation, default 3.
 k = 3
+
 # FDR (q value) thresholds for validation of peptide identifications. These
 # thresholds will be used later as the thresholds for validation of modified
 # peptide identifications.
@@ -53,14 +88,18 @@ q = 0.01
 
 [Peptide Spectrum Matches]
 # >>>>> Peptide spectrum match related parameters
+# Enzyme for digesting proteins.
+enzyme = trypsin
+
 # Tolerance for matching peptides to mass spectra. This is used in retrieval of
 # mass spectra and peptides with alternative modifications to correct the
 # modifications assigned by database search. Default is 0.1 Da. Tolerance in
 # ppm can also be used.
-peptide_tolerance = 0.1 Da
+precursor_tolerance = 0.1 Da
+
 # Tolerance for matching peptide theoretical ions to fragment ions of a mass
 # spectrum. This is used in the annotation of a mass spectrum for calculating
-# features, and others. Default is 0.2 Da. Tolerance in ppm can also be used.
+# features, and others. Default is 0.2 Da. Tolerance in ppm is also accepted.
 fragment_ion_tolerance = 0.2 Da
 
 [Modification]
@@ -87,3 +126,16 @@ excludes = Carbamidomethyl@C;Oxidation@M
 # database. Leave empty will use the modifications identified by database
 # search only.
 modification_list =
+
+# Modification isobaric tolerance. The tolerance to merging modifications in
+# `modification_list` or list of modifications in database search results with
+# mass within the tolerance, so that if these modifications locate at the same
+# sites, they will be combined and not differentiated as they will be treated
+# like isobarics. As a result, they will not be reported in the final results.
+# Both `Da` and `ppm` are accepted.
+modification_tolerance = 0.1 Da
+
+# Fix modifications. In Percolator post-processed results, fixed modification
+# is not shown in results. This compensates for this setup, with same format
+# as `excludes`.
+fixed_modification = Carbamidomethyl@C

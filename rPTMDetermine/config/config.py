@@ -4,7 +4,6 @@ A module to define a base `Config` class for easy generation of
 configuration classes.
 
 """
-import collections
 import dataclasses
 import enum
 import hashlib
@@ -36,13 +35,13 @@ def make_getter(field: ConfigField):
         if field.has_default:
             if isinstance(field.default, ConfigField):
                 try:
-                    value = self.json_config[field.name]
+                    value = self.config[field.name]
                 except KeyError:
                     return getattr(self, field.default.name)
                 return field.caster(value)
-            return field.caster(self.json_config.get(field.name, field.default))
+            return field.caster(self.config.get(field.name, field.default))
         else:
-            return field.caster(self.json_config[field.name])
+            return field.caster(self.config[field.name])
     return fget
 
 
@@ -79,15 +78,15 @@ class Config(metaclass=ConfigMeta):
     """
     config_fields: List[ConfigField] = []
 
-    def __init__(self, json_config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any]):
         """
-        Initialize the class using the JSON configuration.
+        Initialize the class using the configuration.
 
         Raises:
             MissingConfigOptionException.
 
         """
-        self.json_config = json_config
+        self.config = config
         self.required = [f.name for f in self.config_fields
                          if not f.has_default]
         self._check_required()
