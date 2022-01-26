@@ -7,17 +7,14 @@ from .config import MissingConfigOptionException
 from .mass_spectrum import Spectrum
 from .peptide_spectrum_match import PSM
 from .proteolysis import Proteolyzer
-from .psm_container import PSMContainer
-from .retriever import Retriever
-from .rptmdetermine_config import RPTMDetermineConfig
+from .modminer_config import ModMinerConfig
 from .validator import Validator
 
 __all__ = [
-    'RPTMDetermineConfig',
+    'ModMinerConfig',
     "MissingConfigOptionException",
     "Spectrum",
     "PSM",
     "Proteolyzer",
-    "PSMContainer",
     "Validator",
 ]

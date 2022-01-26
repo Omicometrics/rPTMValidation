@@ -17,14 +17,15 @@ clear_cache = 1
 [Search Results]
 # >>>>> Search results related parameters
 # The list of search engines allowed are:
-# 1. ProteinPilot
-# 2. Mascot
-# 3. Comet
-# 4. X!Tandem
-# 5. MSFragger
-# 6. MSGF
-# 7. TPP (for PeptideProhet/iProphet postprocessing)
-# 8. Percolator (for Percolator postprocessing)
+# 1. ProteinPilot (`PeptideSummary.txt` file)
+# 2. ProteinPilotXML (`xml` file)
+# 3. Mascot
+# 4. Comet
+# 5. XTandem
+# 6. MSFragger
+# 7. MSGF
+# 8. TPP (for PeptideProhet/iProphet postprocessing)
+# 9. Percolator (for Percolator postprocessing)
 # Search engine, use name listed above.
 engine = ProteinPilot
 
@@ -116,15 +117,15 @@ fragment_ion_tolerance = 0.2 Da
 excludes = Carbamidomethyl@C;Oxidation@M
 
 # List of modifications considered for validation. Some of the modifications
-# have been identified by database search. However, it may be possible that
-# additional modifications are considered. All these modifications should be
-# provided in a separate file (either `.csv` or `.txt` type file). Note that
+# may have been identified by database search. All these modifications should
+# be provided in a separate file (either `.csv` or `.txt` type file). Note that
 # Excel files can't be recognized. The table is a single column with a name
 # per line, no header is required. These names must be PSI-MS Name or Interim
 # name (if PSI-MS Name does not exist) in Unimod database. The mass and sites
 # of these modifications will be determined automatically from the Unimod
 # database. Leave empty will use the modifications identified by database
 # search only.
+# Full absolute directory or relative directory should be provided.
 modification_list =
 
 # Modification isobaric tolerance. The tolerance to merging modifications in

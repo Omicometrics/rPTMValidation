@@ -12,6 +12,7 @@ from .percolator_reader import PercolatorReader, PercolatorTextReader
 from .protein_pilot_reader import ProteinPilotReader, ProteinPilotXMLReader
 from .tpp_reader import TPPReader
 from .comet_reader import CometReader
+from .msfragger_reader import MSFraggerReader
 from .ptmdb import PTMDB
 
 
@@ -26,6 +27,7 @@ class SearchEngine(enum.Enum):
     Mascot = enum.auto()
     Comet = enum.auto()
     XTandem = enum.auto()
+    MSFragger = enum.auto()
     TPP = enum.auto()
     MSGFPlus = enum.auto()
     Percolator = enum.auto()
@@ -38,6 +40,7 @@ ENGINE_READER_MAP = {
     SearchEngine.Mascot: MascotReader,
     SearchEngine.Comet: CometReader,
     SearchEngine.XTandem: TPPReader,
+    SearchEngine.MSFragger: MSFraggerReader,
     SearchEngine.TPP: TPPReader,
     SearchEngine.MSGFPlus: MSGFPlusReader,
     SearchEngine.Percolator: PercolatorReader,

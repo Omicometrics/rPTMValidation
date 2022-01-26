@@ -29,7 +29,7 @@ class PercolatorSearchResult(SearchResult):  # pylint: disable=too-few-public-me
     svm_score: float
     q_value: float
     pep: float
-    p_value: float
+    p_value: Optional[float]
 
 
 class PercolatorReader(Reader):  # pylint: disable=too-few-public-methods
@@ -124,7 +124,7 @@ class PercolatorReader(Reader):  # pylint: disable=too-few-public-methods
                     f"No modification found with Unimod ID {mod_id}")
 
             idx = peptide_seq.index("[")
-            mods.append(ModSite(mod[1], "N-term" if idx == 0 else idx, mod[0]))
+            mods.append(ModSite(mod[1], "nterm" if idx == 0 else idx, mod[0]))
 
             peptide_seq = self.mod_regex.sub("", peptide_seq, count=1)
         return peptide_seq, mods
@@ -256,10 +256,8 @@ class PercolatorTextReader(Reader):  # pylint: disable=too-few-public-methods
                     f"No modification found with Unimod ID {mod_mass}")
 
             idx = peptide_seq.index("[")
-            mod_mass_accurate = self.ptmdb.get_mass(mod)
-            mods.append(ModSite(mod_mass_accurate,
-                                "N-term" if idx == 0 else idx,
-                                mod))
+            mod_mass = self.ptmdb.get_mass(mod)
+            mods.append(ModSite(mod_mass, "nterm" if idx == 0 else idx, mod))
 
             peptide_seq = self.mod_regex.sub("", peptide_seq, count=1)
         return peptide_seq, mods

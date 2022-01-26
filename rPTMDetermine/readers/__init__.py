@@ -30,7 +30,7 @@ from .ptmdb import PTMDB
 from .readers import get_reader, read_fasta_sequences, SearchEngine
 from .search_result import PeptideType, SearchResult
 from .tpp_reader import TPPReader, TPPSearchResult
-from .uniprot import read_uniprot_ptms
+# from .uniprot import read_uniprot_ptms
 
 __all__ = [
     "Reader",
@@ -62,5 +62,5 @@ __all__ = [
     "SearchResult",
     "TPPReader",
     "TPPSearchResult",
-    "read_uniprot_ptms",
+    # "read_uniprot_ptms",
 ]
