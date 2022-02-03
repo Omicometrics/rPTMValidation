@@ -4,116 +4,85 @@ This module provides a base class to be inherited for validation and
 retrieval pathways.
 
 """
-from bisect import bisect_left
 import functools
 import logging
-import operator
 import os
 import sys
-from typing import (
-    cast,
-    Callable,
-    Dict,
-    Generator,
-    Iterable,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    Type,
-)
+import collections
+import operator
+from typing import (Dict, Generator, Iterable, List,
+                    Optional, Sequence, Tuple, Type)
 
-from pepfrag import ModSite
+from modification import Mod
 
-from . import (
-    PSMContainer,
-    mass_spectrum,
-    packing,
-    peptides,
-    proteolysis,
-    readers,
-    spectra_readers
-)
+from . import mass_spectrum, packing, peptides, proteolysis, readers
+
+from .spectra_readers import read_spectra_file
+from .base import (ScoreGetter, ScoreGetterMap,
+                   PositiveGetterMap, PositiveChecker)
 from .features import Features
-from .readers import SearchEngine
-from .rptmdetermine_config import DataSetConfig, RPTMDetermineConfig
+from .readers import SearchResult, PeptideType
+from .modminer_config import ModMinerConfig
+from .peptide_spectrum_match import PSM
 from .machinelearning import ValidationModel
 
 
-MODEL_CACHE_FILE = 'model.pkl'
+def split_res(
+        results: Sequence[SearchResult],
+        thr: float,
+        is_positive: PositiveGetterMap
+) -> Tuple[List[SearchResult], List[SearchResult]]:
+    """ Groups search results into positives and negatives.
 
-FDRSplitter = Callable[
-    [Sequence[readers.SearchResult], float],
-    Tuple[List[readers.SearchResult], List[readers.SearchResult]]
-]
-
-
-def split_proteinpilot_fdr(
-        results: Sequence[readers.SearchResult], conf: float
-):
-    positive: List[readers.SearchResult] = []
-    negative: List[readers.SearchResult] = []
+    """
+    positive: List[SearchResult] = []
+    negative: List[SearchResult] = []
     for res in results:
-        (positive
-         if cast(readers.ProteinPilotSearchResult, res).confidence
-            >= conf else negative).append(res)
+        (positive if is_positive(res, thr) else negative).append(res)
     return positive, negative
 
 
-ENGINE_FDR_SPLITTER_MAP: Dict[SearchEngine, FDRSplitter] = {
-    SearchEngine.ProteinPilot: split_proteinpilot_fdr,
-    SearchEngine.ProteinPilotXML: split_proteinpilot_fdr
-}
-
-
-ScoreGetter = Callable[[readers.SearchResult], float]
-
-ENGINE_SCORE_GETTER_MAP: Dict[SearchEngine, ScoreGetter] = {
-    SearchEngine.Mascot: operator.attrgetter("ionscore"),
-    SearchEngine.Comet: lambda r: r.scores["xcorr"]
-}
-
-
 def get_fdr_threshold(
-    search_results: Iterable[readers.SearchResult],
-    score_getter: ScoreGetter,
-    fdr: float
+        search_results: Iterable[SearchResult],
+        score_getter: ScoreGetter,
+        fdr: float
 ) -> float:
-    """
-    Calculates the score threshold with the given FDR.
+    """ Calculates the score threshold with the given FDR.
 
     Returns:
         The ion score threshold as a float.
 
     """
-    topranking = {}
-    for res in [r for r in search_results if r.rank == 1]:
-        if res.spectrum in topranking:
-            if score_getter(res) >= score_getter(topranking[res.spectrum]):
-                topranking[res.spectrum] = res
-        else:
-            topranking[res.spectrum] = res
+    # normal and decoy indicators
+    normal, decoy = PeptideType.normal.value, PeptideType.decoy.value
 
-    scores = {
-        readers.PeptideType.normal: [],
-        readers.PeptideType.decoy: []
-    }
-    for res in topranking.values():
-        scores[res.pep_type].append(score_getter(res))
-    tscores = sorted(scores[readers.PeptideType.normal])
-    dscores = sorted(scores[readers.PeptideType.decoy])
+    # get scores and peptide types
+    top_scores = {}
+    SCORE = collections.namedtuple("SCORE", ["score", "type"])
+    for res in [r for r in search_results if r.rank == 1]:
+        spid = res.spectrum
+        if (spid not in top_scores
+                or score_getter(res) >= top_scores[spid].score):
+            top_scores[spid] = SCORE(score_getter(res), res.pep_type.value)
+
+    scores = sorted(top_scores.values(),
+                    key=operator.attrgetter("score"),
+                    reverse=True)
 
     threshold = None
-    for idx, score in enumerate(tscores[::-1]):
-        didx = bisect_left(dscores, score)
-        dpassed = len(dscores) - didx
-        if idx + dpassed == 0:
-            continue
-        est_fdr = dpassed / (idx + dpassed)
-        if est_fdr < fdr:
-            threshold = score
-        if est_fdr > fdr:
-            break
+    n_decoy, n_target = 0, 0
+    for score in scores:
+        if score.type == normal:
+            n_target += 1
+        else:
+            if n_target > 0:
+                est_fdr = n_decoy / n_target
+                if est_fdr <= fdr:
+                    threshold = score.score
+            n_decoy += 1
+
+    if n_decoy == 0:
+        raise ValueError("No decoy identification is found.")
 
     if threshold is not None:
         return threshold
@@ -121,7 +90,7 @@ def get_fdr_threshold(
 
 
 @functools.lru_cache(maxsize=1024)
-def merge_peptide_sequence(seq: str, mods: Tuple[ModSite, ...]) -> str:
+def merge_peptide_sequence(seq: str, mods: Tuple[Mod, ...]) -> str:
     """
     Merges the modifications into the peptide sequence.
 
@@ -142,7 +111,8 @@ class PathwayBase:
     retrieval pathways for the program.
 
     """
-    def __init__(self, config: RPTMDetermineConfig, log_file: str):
+
+    def __init__(self, config: ModMinerConfig, log_file: str):
         """
         Initialize the object.
 
@@ -153,15 +123,7 @@ class PathwayBase:
         """
         self.config = config
 
-        self.modification = self.config.modification
-
-        path_str = (f"{self.modification.replace('->', '2')}_"
-                    f"{self.config.target_residue}")
-
         output_dir = self.config.output_dir
-        if output_dir is None:
-            output_dir = path_str
-
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
 
@@ -193,29 +155,19 @@ class PathwayBase:
         logging.info("Reading UniMod PTM DB.")
         self.ptmdb = readers.PTMDB()
 
-        # The database search reader
+        # The database search result reader
         self.reader: readers.Reader = readers.get_reader(
             self.config.search_engine, self.ptmdb
         )
 
-        self.decoy_reader: readers.Reader = readers.get_reader(
-            self.config.decoy_search_engine, self.ptmdb
+        # The database search result reader for model construction
+        self.reader_model: readers.Reader = readers.get_reader(
+            self.config.model_search_res_engine, self.ptmdb
         )
 
-        # Get the mass change associated with the target modification
-        self.mod_mass = self.ptmdb.get_mass(self.config.modification)
+        self.search_results: Dict[List[Type[SearchResult]]] = {}
 
-        self.file_prefix = os.path.join(output_dir, f'{path_str}_')
-
-        self.search_results: Dict[str, List[Type[readers.SearchResult]]] = {}
-
-        self.model_features = [
-            f for f in Features.all_feature_names()
-            if f not in self.config.exclude_features
-        ]
-
-        self.model: Optional[ValidationModel] = None
-        self.loc_model: Optional[ValidationModel] = None
+        self.model_features = Features.all_feature_names()
 
     def _valid_cache(self) -> bool:
         """
@@ -240,8 +192,8 @@ class PathwayBase:
 
         return False
 
-    def _filter_mods(self, mods: Iterable[ModSite], seq: str)\
-            -> List[ModSite]:
+    @staticmethod
+    def _filter_mods(mods: Iterable[Mod], target_mod: str) -> List[Mod]:
         """
         Filters the modification list to remove those instances of the
         target modification at the target residue.
@@ -254,77 +206,55 @@ class PathwayBase:
             Filtered list of ModSites.
 
         """
-        new_mods = []
-        for mod_site in mods:
-            try:
-                site = int(mod_site.site)
-            except ValueError:
-                new_mods.append(mod_site)
-                continue
+        return [m for m in mods if m.mod != target_mod]
 
-            if (mod_site.mod != self.modification and
-                    seq[site - 1] != self.config.target_residue):
-                new_mods.append(mod_site)
-
-        return new_mods
-
-    def _read_results(self):
+    def _read_results(self, res_files):
         """
         Retrieves the search results from the set of input files.
 
         """
-        search_results_cache = os.path.join(
-            self.cache_dir, 'search_results'
-        )
+        search_results_cache = os.path.join(self.cache_dir, 'search_results')
 
         if self.use_cache and os.path.exists(search_results_cache):
             logging.info('Using cached search results...')
             self.search_results = packing.load_from_file(search_results_cache)
             return
 
-        for set_id, set_info in self.config.data_sets.items():
-            res_path = os.path.join(set_info.data_dir, set_info.results)
-            self.search_results[set_id] = list(self.reader.read(res_path))
+        for fl in res_files:
+            logging.info(f'Load search results: {fl}')
+            self.search_results[fl] = self.reader.read(fl)
 
         logging.info('Caching search results...')
         packing.save_to_file(self.search_results, search_results_cache)
 
-    def _split_fdr(
-            self,
-            search_results: Sequence[readers.SearchResult],
-            data_config: DataSetConfig,
-    ) -> Tuple[Sequence[readers.SearchResult], Sequence[readers.SearchResult]]:
+    def _split_fdr(self, search_results: Sequence[SearchResult]) \
+            -> Tuple[Sequence[SearchResult], Sequence[SearchResult]]:
         """
-        Splits the `search_results` into two lists according to the configured
-        FDR confidence (for ProteinPilot) or calculated FDR threshold for other
-        search engines.
+        Splits the `search_results` into two lists according to the
+        configured FDR threshold or calculated score threshold at the
+        FDR for other search engines.
 
         """
-        fdr_splitter: Optional[FDRSplitter] = \
-            ENGINE_FDR_SPLITTER_MAP.get(self.config.search_engine)
+        splitter: Optional[PositiveChecker] = \
+            PositiveGetterMap.get(self.config.search_engine)
 
-        if fdr_splitter is not None:
-            return fdr_splitter(search_results, data_config.confidence)
+        if splitter is not None:
+            logging.info("Split search results at "
+                         f"{self.config.res_split.msg}")
+            return split_res(search_results,
+                             self.config.res_split.threshold,
+                             splitter)
 
         score_getter: Optional[ScoreGetter] = \
-            ENGINE_SCORE_GETTER_MAP.get(self.config.search_engine)
+            ScoreGetterMap.get(self.config.search_engine)
 
-        positive: List[readers.SearchResult] = []
-        negative: List[readers.SearchResult] = []
-        if score_getter is not None:
-            score = get_fdr_threshold(
-                search_results, score_getter, self.config.fdr)
-            logging.info(f"Calculated score threshold to be {score} "
-                         f"at {self.config.fdr} FDR")
-            for res in search_results:
-                (positive if score_getter(res) >= score
-                 else negative).append(res)
-            return positive, negative
+        score = get_fdr_threshold(
+            search_results, score_getter, self.config.fdr)
 
-        raise NotImplementedError(
-            'No score getter configured for search engine '
-            f'{self.config.search_engine}'
-        )
+        logging.info(f"Calculated score threshold to be {score} "
+                     f"at {self.config.fdr} FDR")
+        splitter = lambda r, s: score_getter(r) >= s
+        return split_res(search_results, score, splitter)
 
     def read_mass_spectra(self) \
             -> Generator[Tuple[str, Dict[str, mass_spectrum.Spectrum]], None,
@@ -360,8 +290,7 @@ class PathwayBase:
 
             spectra = {
                 spec_id: spectrum.centroid().remove_itraq()
-                for spec_id, spectrum in
-                spectra_readers.read_spectra_file(spec_file_path)
+                for spec_id, spectrum in read_spectra_file(spec_file_path)
             }
 
             logging.info(f'Caching {data_conf_id} spectra...')
@@ -369,7 +298,7 @@ class PathwayBase:
 
             yield data_conf_id, spectra
 
-    def _classify(self, container: PSMContainer):
+    def _classify(self, psms: List[PSM]):
         """
         Classifies all PSMs in `container`.
 
@@ -377,8 +306,8 @@ class PathwayBase:
             container: The PSMContainer containing PSMs to classify.
 
         """
-        scores = self.model.validate(container)
-        for psm, _scores in zip(container, scores):
+        scores = self.model.validate(psms)
+        for psm, _scores in zip(psms, scores):
             psm.ml_scores = _scores
 
     def _has_target_residue(self, seq: str) -> bool:
@@ -418,4 +347,4 @@ class PathwayBase:
         """Evaluates whether the peptide `seq` is within the required length
         range."""
         return self.config.min_peptide_length <= len(seq) \
-            <= self.config.max_peptide_length
+               <= self.config.max_peptide_length

@@ -87,9 +87,6 @@ class Config(metaclass=ConfigMeta):
 
         """
         self.config = config
-        self.required = [f.name for f in self.config_fields
-                         if not f.has_default]
-        self._check_required()
 
     def __repr__(self) -> str:
         """
@@ -145,19 +142,3 @@ class Config(metaclass=ConfigMeta):
 
         """
         return tuple([getattr(self, f.name) for f in self.config_fields])
-
-    def _check_required(self):
-        """
-        Checks that the required options have been set in the configuration
-        file.
-
-        Raises:
-            MissingConfigOptionException.
-
-        """
-        for attr in self.required:
-            try:
-                getattr(self, attr)
-            except KeyError as ex:
-                raise MissingConfigOptionException(
-                    f"Missing required config option: {attr}") from ex

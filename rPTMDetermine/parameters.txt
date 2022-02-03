@@ -2,7 +2,7 @@
 # >>>>> General parameters
 # Number of CPU cores used for processing data, including generation of features,
 # construction of validation models, etc.
-ncores = 6
+num_cores = 6
 
 # Output directory, where cache, results and others will be put.
 output_path =
@@ -26,7 +26,7 @@ clear_cache = 1
 # 7. MSGF
 # 8. TPP (for PeptideProhet/iProphet postprocessing)
 # 9. Percolator (for Percolator postprocessing)
-# Search engine, use name listed above.
+# Search engine, use name listed above. Default ProteinPilot.
 engine = ProteinPilot
 
 # Files that contain all modified peptide identifications. These can be a list
@@ -70,8 +70,8 @@ model_search_res_files =
 fdr = 0.01
 
 # TPP probability. Though interProphet may be used, peptide prophet probability
-# is used here. Default is 0.99.
-peptide_prophet_prob = 0.99
+# is used here. Default 0.95.
+peptide_prophet_prob = 0.95
 
 # Percolator q value. If `model_search_res_engine` is set to `Percolator`, this
 # is used.
@@ -89,18 +89,18 @@ q = 0.01
 
 [Peptide Spectrum Matches]
 # >>>>> Peptide spectrum match related parameters
-# Enzyme for digesting proteins.
-enzyme = trypsin
+# Enzyme for digesting proteins, default Trypsin.
+enzyme = Trypsin
 
 # Tolerance for matching peptides to mass spectra. This is used in retrieval of
 # mass spectra and peptides with alternative modifications to correct the
-# modifications assigned by database search. Default is 0.1 Da. Tolerance in
+# modifications assigned by database search. Default 0.1 Da. Tolerance in
 # ppm can also be used.
 precursor_tolerance = 0.1 Da
 
 # Tolerance for matching peptide theoretical ions to fragment ions of a mass
 # spectrum. This is used in the annotation of a mass spectrum for calculating
-# features, and others. Default is 0.2 Da. Tolerance in ppm is also accepted.
+# features, and others. Default 0.2 Da. Tolerance in ppm is also accepted.
 fragment_ion_tolerance = 0.2 Da
 
 [Modification]

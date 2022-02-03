@@ -15,13 +15,17 @@ ScoreGetterMap: Dict[SearchEngine, ScoreGetter] = {
     SearchEngine.Mascot: operator.attrgetter("ionscore"),
     SearchEngine.ProteinPilot: operator.attrgetter("confidence"),
     SearchEngine.ProteinPilotXML: operator.attrgetter("confidence"),
-    SearchEngine.TPP: operator.attrgetter("pprophet_prob"),
-    SearchEngine.Percolator: operator.attrgetter("q_value"),
     SearchEngine.Comet: lambda r: r.scores["xcorr"],
     SearchEngine.XTandem: lambda r: r.scores["hyperscore"],
     SearchEngine.MSFragger: lambda r: r.scores["hyperscore"]
 }
 
+# data splitter
+PositiveChecker = Callable[[SearchResult, float], bool]
+PositiveGetterMap: Dict[SearchEngine, PositiveChecker] = {
+    SearchEngine.TPP: lambda r, prob: r.pprophet_prob >= prob,
+    SearchEngine.Percolator: lambda r, q: r.q_value <= q
+}
 
 # similarity scores
 SimilarityScore = collections.namedtuple(

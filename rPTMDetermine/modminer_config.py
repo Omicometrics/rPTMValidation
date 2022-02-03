@@ -1,29 +1,35 @@
 #! /usr/bin/env python3
 import os
 import glob
+import collections
+import configparser
 from typing import Dict, List, Tuple, Set, Any
 
-from config import Config, ConfigField
+from config import Config, ConfigField, MissingConfigOptionException
 from readers import SearchEngine
 from readers import PTMDB
 
 
-class AllParams(Config):
-    """ Default and required configurations.
+SPLITTHRESHOLD = collections.namedtuple(
+    "SPLITTHRESHOLD", ["threshold", "engine", "msg"])
+
+
+class ParamConfigurator:
+    """ Parameter configurations.
 
     """
-    _search_engine_field = ConfigField('search_engine',
-                                       False,
-                                       None,
-                                       lambda v: SearchEngine[v])
     config_fields: List[ConfigField] = [
-        _search_engine_field,
+        ConfigField('engine', False, None, lambda v: SearchEngine[v]),
+        ConfigField('model_search_res_engine', False, None,
+                    lambda v: SearchEngine[v]),
         ConfigField('path', False, None),
         ConfigField('mass_spec_path', False, None),
         ConfigField('model_search_res_path', False, None),
         ConfigField('files', False, None),
         ConfigField('mass_spec_files', False, None),
         ConfigField('model_search_res_files', False, None),
+        ConfigField("peptide_prophet_prob", True, 0.95),
+        ConfigField("percolator_qvalue", True, 0.01),
         ConfigField('enzyme', True, 'Trypsin'),
         ConfigField('output_path', True, 'result'),
         ConfigField('fdr', True, 0.01),
@@ -35,16 +41,14 @@ class AllParams(Config):
         ConfigField('min_peptide_length', True, 7),
         ConfigField('max_peptide_length', True, 30),
         ConfigField('retrieval_tolerance', True, 0.05),
-        ConfigField('num_cores', True, int(os.cpu_count() / 2)),
-        ConfigField('model_search_res_engine',
-                    True,
-                    _search_engine_field,
-                    lambda v: SearchEngine[v])
+        ConfigField('num_cores', True, int(os.cpu_count() / 2))
     ]
 
     # Type hints for dynamic fields
-    search_engine: SearchEngine
+    engine: SearchEngine
     model_search_res_engine: SearchEngine
+    peptide_prophet_prob: float
+    percolator_qvalue: float
     enzyme: str
     output_path: str
     path: str
@@ -64,21 +68,17 @@ class AllParams(Config):
     spec_files: List[str]
     excludes: str
     mod_excludes: Set[Tuple[str, ...]]
+    fixed_modification: str
     mod_fix: Set[Tuple[str, ...]]
     mod_list: Dict[str, Dict[str, Any]]
 
+    def __init__(self, config: configparser.ConfigParser):
+        self.required = [f.name for f in self.config_fields
+                         if not f.has_default]
+        self._config = config
+        self._configparser_to_dict()
+        self._check_required()
 
-class ModMinerConfig(AllParams):
-    """
-    This class represents the configuration options for rPTMDetermine. Its
-    purpose is to centralize the possible options and their corresponding
-    default values, if any.
-
-    """
-    def resolve_params(self):
-        """ Resolve parameters
-
-        """
         # path and files
         self.mod_res_files = self._parse_file_str(self.path, self.files)
         self.res_model_files = self._parse_file_str(
@@ -91,6 +91,15 @@ class ModMinerConfig(AllParams):
         self.mod_fix = self._parse_mod_str(self.fixed_modification)
 
         self.mod_list = self._load_mod()
+
+        # search engines
+        self._set_threshold()
+
+    def _configparser_to_dict(self):
+        """ ConfigParser to dict. """
+        for sec in self._config:
+            for key, val in self._config[sec].items():
+                setattr(self, key, val)
 
     @staticmethod
     def _parse_file_str(path: str, file_str: str) -> List[str]:
@@ -147,8 +156,60 @@ class ModMinerConfig(AllParams):
 
         # check any modification not in Unimod Database
         unimod_db = PTMDB().get_mods()
-        unkown_mods = [m for m in mods if m not in unimod_db]
-        if unkown_mods:
-            raise ValueError(f"Unkown modifications: {'; '.join(unkown_mods)}")
+        unknown_mods = "; ".join([m for m in mods if m not in unimod_db])
+        if unknown_mods:
+            raise ValueError(f"Unknown modifications: {unknown_mods}.")
 
         return {m: unimod_db[m] for m in mods}
+
+    def _set_threshold(self):
+        """ Sets threshold for splitting search results.
+
+        """
+        try:
+            search_engine = SearchEngine[self.search_engine]
+        except KeyError:
+            raise NotImplementedError(
+                f"Cannot recognize engine: {self.search_engine}."
+            )
+
+        if search_engine == SearchEngine.TPP:
+            self.res_split = SPLITTHRESHOLD(
+                self.peptide_prophet_prob,
+                search_engine,
+                f"TPP peptide probability {self.peptide_prophet_prob}")
+        elif search_engine == SearchEngine.Percolator:
+            self.res_split = SPLITTHRESHOLD(
+                self.percolator_qvalue,
+                search_engine,
+                f"Percolator q-value {self.percolator_qvalue}")
+        else:
+            self.res_split = SPLITTHRESHOLD(self.fdr, search_engine, None)
+
+    def _check_required(self):
+        """
+        Checks that the required options have been set in the configuration
+        file.
+
+        Raises:
+            MissingConfigOptionException.
+
+        """
+        # TODO: separate the required params into sections so that
+        #       the missing parameters with corresponding section
+        #       can be traced.
+        for param in self.required:
+            for sec in self._config:
+                if self.config[sec].get(param) is None:
+                    raise MissingConfigOptionException(
+                        f"Missing required config option: {param}")
+
+
+class ModMinerConfig(Config):
+    """
+    This class represents the configuration options for rPTMDetermine. Its
+    purpose is to centralize the possible options and their corresponding
+    default values, if any.
+
+    """
+    config_fields = ParamConfigurator.config_fields
