@@ -41,6 +41,8 @@ files =
 # Mass spectra files used for database search. `mgf`, `mzXML` or `mzML` file
 # type is accepted. These can be a list of files separated by `;`, or simply
 # `*.mgf`, `*.mzXML` and `*.mzML` for all `mgf`, `mzXML` and `mzML` files.
+# This is mainly for ProteinPilot search results. The names of `mgf` or `mzML`
+# files must be same with corresponding search results file names.
 # :: Directory where mass spectra files locate. Leave empty to use same
 # :: directory as for database search results above.
 mass_spec_path =

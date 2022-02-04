@@ -92,10 +92,9 @@ class TPPReader(TPPBaseReader):
 
     @staticmethod
     def _build_search_result(
-            raw_file: str,
-            scan_no: int,
             spec_id: str,
-            hit: Dict[str, Any]
+            hit: Dict[str, Any],
+            dataset: Optional[Tuple[str, str]] = None
     ) -> TPPSearchResult:
         """
         Converts a search result to a standard SearchResult.
@@ -109,7 +108,7 @@ class TPPReader(TPPBaseReader):
             mods=hit['mods'],
             charge=hit['charge'],
             spectrum=spec_id,
-            dataset=None,
+            dataset=dataset,
             rank=hit['rank'],
             pep_type=hit['pep_type'],
             theor_mz=None,

@@ -4,7 +4,7 @@ This module provides a class for reading MSFragger search results.
 """
 
 import dataclasses
-from typing import Any, Dict
+from typing import Any, Dict, Tuple, Optional
 
 from overrides import overrides
 
@@ -58,8 +58,10 @@ class MSFraggerReader(TPPBaseReader):
 
     @staticmethod
     @overrides
-    def _build_search_result(raw_file: str, scan_no: int, spec_id: str,
-                             hit: Dict[str, Any]) -> MSFraggerSearchResult:
+    def _build_search_result(spec_id: str,
+                             hit: Dict[str, Any],
+                             dataset: Optional[Tuple[str, str]] = None)\
+            -> MSFraggerSearchResult:
         """
         Converts a search result to a standard SearchResult.
 
@@ -72,7 +74,7 @@ class MSFraggerReader(TPPBaseReader):
             mods=hit['mods'],
             charge=hit['charge'],
             spectrum=spec_id,
-            dataset=None,
+            dataset=dataset,
             rank=hit['rank'],
             pep_type=hit['pep_type'],
             theor_mz=None,

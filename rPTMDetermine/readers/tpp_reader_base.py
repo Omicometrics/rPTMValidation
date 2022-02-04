@@ -7,7 +7,7 @@ import dataclasses
 import lxml.etree as etree
 
 from html import unescape
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from pepfrag import AA_MASSES, ModSite
 
@@ -66,11 +66,12 @@ class TPPBaseReader(Reader):
         res: List[TPPSearchResult] = []
         for event, element in etree.iterparse(filename, events=['end']):
             if element.tag == f"{{{self.namespace}}}spectrum_query":
-                raw_id = element.get("spectrum").split(".")
-                raw_file, scan_no = raw_id[0], int(raw_id[1])
+                parent = element.getparent()
+                # dataset
+                raw_file = parent.get("base_name")
+                raw_ext = parent.get("raw_data")
                 charge = int(element.get("assumed_charge"))
                 spec_id = self._get_id(element)
-
                 hits = [self._extract_hit(h, charge)
                         for h in element.xpath('x:search_result/x:search_hit',
                                                namespaces=self.ns_map)]
@@ -79,7 +80,8 @@ class TPPBaseReader(Reader):
                 # such that it may be overridden for specific TPPReader
                 # subclasses, e.g. Comet or X! Tandem, in future
                 res.extend([
-                    self._build_search_result(raw_file, scan_no, spec_id, hit)
+                    self._build_search_result(spec_id, hit,
+                                              dataset=(raw_file, raw_ext))
                     for hit in hits
                 ])
 
@@ -189,10 +191,9 @@ class TPPBaseReader(Reader):
 
     @staticmethod
     def _build_search_result(
-            raw_file: str,
-            scan_no: int,
             spec_id: str,
-            hit: Dict[str, Any]
+            hit: Dict[str, Any],
+            dataset: Optional[Tuple[str, str]] = None
     ) -> TPPSearchResult:
         """
         Converts a search result to a standard SearchResult.
@@ -206,7 +207,7 @@ class TPPBaseReader(Reader):
             mods=hit['mods'],
             charge=hit['charge'],
             spectrum=spec_id,
-            dataset=None,
+            dataset=dataset,
             rank=hit['rank'],
             pep_type=hit['pep_type'],
             theor_mz=None,
