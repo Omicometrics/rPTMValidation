@@ -88,7 +88,7 @@ class MGFReader:
             self._id_getter = self._get_id_native
             return spec_id
 
-        raise ParserException("Failed to detect ID in TITLE field")
+        raise text
 
     def read(self, spec_file: str) -> SpectrumGenerator:
         """
@@ -106,17 +106,18 @@ class MGFReader:
                     continue
 
                 items = list(group)
+                if "=" in items[-1]:
+                    continue
 
                 fields = {}
                 for ii, line in enumerate(items):
-                    if "=" not in line:
+                    # to avoid the header which is not "BEGIN IONS"
+                    if "=" not in line and fields:
                         peak_start_idx = ii
                         break
-                    split_line = line.strip().split("=", maxsplit=1)
-                    fields[split_line[0]] = split_line[1]
-                else:
-                    # No lines containing mz/intensity information found
-                    continue
+                    if "=" in line:
+                        split_line = line.strip().split("=", maxsplit=1)
+                        fields[split_line[0]] = split_line[1]
 
                 spec_id = self._get_id(fields["TITLE"])
 

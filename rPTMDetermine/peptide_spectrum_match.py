@@ -356,6 +356,7 @@ class PSM:
         self._check_spectrum_initialized()
 
         ions, denoised_spec = self.denoise_spectrum()
+        # TODO: not necessary to normalize here.
         self.spectrum.normalize()
         denoised_spec.normalize()
         self._calculate_prop_features(denoised_spec)

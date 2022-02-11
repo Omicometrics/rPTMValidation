@@ -1,14 +1,16 @@
 [General]
 # >>>>> General parameters
-# Number of CPU cores used for processing data, including generation of features,
-# construction of validation models, etc.
-num_cores = 6
+# --> Number of CPU cores
+# Used for processing data, including generation of features, construction of
+# validation models, etc.
+num_cores = 2
 
-# Output directory, where cache, results and others will be put.
+# --> Output directory
+# Directory where cache, results and others will be put.
 output_path =
 
-# Whether those cache files will be removed after finishing the analysis. If
-# re-analysis is performed later, for example, without the requirements of
+# --> Whether those cache files will be removed after finishing the analysis.
+# If re-analysis is performed later, for example, without the requirements of
 # re-construction of validation models (generally, when >1e5 mass spectra have
 # been processed), all cache files can be removed. 1 for removing and 0 for
 # keeping, cache files. Default 1.
@@ -26,28 +28,28 @@ clear_cache = 1
 # 7. MSGF
 # 8. TPP (for PeptideProhet/iProphet postprocessing)
 # 9. Percolator (for Percolator postprocessing)
-# Search engine, use name listed above. Default ProteinPilot.
+# --> Search engine
+# Search engine for identifying modified peptides. Use name listed above.
+# Default ProteinPilot.
 engine = ProteinPilot
 
 # Files that contain all modified peptide identifications. These can be a list
 # files separated by `;`, or simply `*.xml` for all files with `xml` extension.
 # However, for the latter case, it should be careful that other files with same
 # extension will be loaded, which may cause errors.
-# :: Directory where search results files locate.
-path =
-# :: Results files.
-files =
+# --> Directory where search results files locate.
+path = D:\Data\yeast\yeast_data\comet_search_results
+# --> Results files.
+files = *.pep.xml
 
 # Mass spectra files used for database search. `mgf`, `mzXML` or `mzML` file
 # type is accepted. These can be a list of files separated by `;`, or simply
 # `*.mgf`, `*.mzXML` and `*.mzML` for all `mgf`, `mzXML` and `mzML` files.
-# This is mainly for ProteinPilot search results. The names of `mgf` or `mzML`
-# files must be same with corresponding search results file names.
-# :: Directory where mass spectra files locate. Leave empty to use same
-# :: directory as for database search results above.
-mass_spec_path =
-# :: Mass spectra files.
-mass_spec_files =
+# --> Directory where mass spectra files locate. Leave empty to use same
+#     directory as for database search results above.
+mass_spec_path = D:\syn_PTM_search\mgfs_cid_hcd
+# --> Mass spectra files.
+mass_spec_files = *.mgf
 
 # Files used for model construction. This is set when new version of
 # ProteinPilot search results were used for validation of modified peptide
@@ -57,80 +59,89 @@ mass_spec_files =
 # obtained from Comet or Mascot should be used. The files can be a list of
 # file names separated by `;`, or simply like `*.pep.xml` for all `pep.xml`
 # files.
-# :: Search engine, use names listed above.
+# --> Search engine, use names listed above. Leave empty to use search engine
+#     provided in `engine`.
 model_search_res_engine =
-# :: Directory where search results files locates. Leave empty to use same
-# :: directory as for database search results above.
+# --> Directory where search results files locates.
+# Leave empty to use same directory in `path`.
 model_search_res_path =
-# :: Results files
+# --> Results files.
+# Leave empty to use same files in `files`.
 model_search_res_files =
 
-# False discovery rate (FDR) threshold for defining search results groups:
-# positive for target peptide identifications with FDR <= threshold, negative
-# for target peptide identifications with FDR > threshold. If the TPP or
-# Percolator is used, will be ignored.
+# --> False discovery rate (FDR) threshold
+# This is for defining search results groups: positive for target peptide
+# identifications with FDR <= threshold, negative for target peptide
+# identifications with FDR > threshold. If the TPP or Percolator is used,
+# will be ignored.
 fdr = 0.01
 
-# TPP probability. Though interProphet may be used, peptide prophet probability
-# is used here. Default 0.95.
+# --> TPP probability.
+# Though interProphet may be used, peptide prophet probability is used here.
+# Default 0.95.
 peptide_prophet_prob = 0.95
 
-# Percolator q value. If `model_search_res_engine` is set to `Percolator`, this
-# is used.
+# --> Percolator q value.
+# If `model_search_res_engine` is set to `Percolator`, this is used.
 percolator_qvalue = 0.01
 
 [Model Construction]
 # >>>>> Model related parameters
-# Number of folds for cross validation, default 3.
+# --> Number of folds for cross validation, default 3.
 k = 3
 
-# FDR (q value) thresholds for validation of peptide identifications. These
-# thresholds will be used later as the thresholds for validation of modified
-# peptide identifications.
+# --> FDR (q value) thresholds for validation of peptide identifications.
+# These thresholds will be used later as the thresholds for validation of
+# modified peptide identifications.
 q = 0.01
 
 [Peptide Spectrum Matches]
 # >>>>> Peptide spectrum match related parameters
-# Enzyme for digesting proteins, default Trypsin.
+# --> Enzyme for digesting proteins, default Trypsin.
 enzyme = Trypsin
 
-# Tolerance for matching peptides to mass spectra. This is used in retrieval of
-# mass spectra and peptides with alternative modifications to correct the
-# modifications assigned by database search. Default 0.1 Da. Tolerance in
-# ppm can also be used.
+# --> Tolerance for matching peptides to mass spectra.
+# This is used in retrieval of mass spectra and peptides with alternative
+# modifications to correct the modifications assigned by database search.
+# Default 0.1 Da. Tolerance in ppm can also be used.
 precursor_tolerance = 0.1 Da
 
-# Tolerance for matching peptide theoretical ions to fragment ions of a mass
-# spectrum. This is used in the annotation of a mass spectrum for calculating
-# features, and others. Default 0.2 Da. Tolerance in ppm is also accepted.
+# --> Tolerance for matching peptide theoretical ions to fragment ions of a
+#     mass spectrum.
+# This is used in the annotation of a mass spectrum for calculating features,
+# and others. Default 0.2 Da. Tolerance in ppm is also accepted.
 fragment_ion_tolerance = 0.2 Da
 
 [Modification]
 # >>>>> Modifications related parameters
-# List of modifications excluded in the analysis, separated by `;` and no space
-# between modifications. Each modification is presented as `name@site`, with
-# name must be PSI-MS Name or Interim name (if PSI-MS Name does not exist) in
-# Unimod database. For terminal modifications, use `nterm` for N-terminal and
-# `cterm` for C-terminal modifications. For example, `Carbamidomethyl@C` will
+# --> List of modifications excluded in the analysis.
+# All modifications should be separated by `;` and no space between them.
+# Each modification is presented as `name@site`, with names must (if PSI-MS
+# Name does not exist) in be PSI-MS Name or Interim name Unimod database.
+# For terminal modifications, use `nterm` and `cterm` for N-terminal and
+# C-terminal modifications, separately. For example, `Carbamidomethyl@C` will
 # exclude all carbamidomethylation on cysteine, and `Acetyl@nterm` to exclude
 # N-terminal acetylation. Note that, if other modifications co-exist in a
-# peptide, these modificatios will also be considered during localization.
+# peptide, these modifications will also be considered during localization.
 # Otherwise the identifications are excluded in the analysis.
+# Note that peptides containing these modifications will be considered as
+# unmodified peptides and used for model construction.
 excludes = Carbamidomethyl@C;Oxidation@M
 
-# List of modifications considered for validation. Some of the modifications
-# may have been identified by database search. All these modifications should
-# be provided in a separate file (either `.csv` or `.txt` type file). Note that
-# Excel files can't be recognized. The table is a single column with a name
-# per line, no header is required. These names must be PSI-MS Name or Interim
-# name (if PSI-MS Name does not exist) in Unimod database. The mass and sites
-# of these modifications will be determined automatically from the Unimod
-# database. Leave empty will use the modifications identified by database
-# search only.
+# --> List of modifications considered for validation.
+# Some of the modifications may have been identified by database search. All
+# these modifications should be provided in a separate file (either `.csv` or
+# `.txt` type file). Note that Excel files can't be recognized. The table is
+# a single column with a name per line, no header is required. These names must
+# be PSI-MS Name or Interim name (if PSI-MS Name does not exist) in Unimod
+# database. The mass and sites of these modifications will be determined
+# automatically from the Unimod database. Leave empty will use the identified
+# modifications only.
 # Full absolute directory or relative directory should be provided.
 modification_list =
 
-# Modification isobaric tolerance. The tolerance to merging modifications in
+# --> Modification isobaric tolerance.
+# The tolerance to merging modifications in
 # `modification_list` or list of modifications in database search results with
 # mass within the tolerance, so that if these modifications locate at the same
 # sites, they will be combined and not differentiated as they will be treated
@@ -138,7 +149,18 @@ modification_list =
 # Both `Da` and `ppm` are accepted.
 modification_tolerance = 0.1 Da
 
-# Fix modifications. In Percolator post-processed results, fixed modification
+# --> Fix modifications.
+# In Percolator post-processed results, fixed modification
 # is not shown in results. This compensates for this setup, with same format
 # as `excludes`.
 fixed_modification = Carbamidomethyl@C
+
+[Quantification]
+# >>>>> Quantification used in the experiments
+# --> Quantification technique.
+# Quantification considered here, currently, are
+# 1. iTRAQ8plex
+# 2. iTRAQ4plex
+# This will influence the processing of mass spectra, that the tags will be
+# removed from the mass spectra. Leave empty indicates no labelling.
+quantitation =

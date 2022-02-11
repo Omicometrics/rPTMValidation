@@ -5,7 +5,7 @@ extracting modification related information.
 """
 import dataclasses
 
-from typing import Optional
+from typing import Optional, Tuple
 
 from pepfrag import ModSite
 
@@ -15,7 +15,8 @@ class Mod(ModSite):
 
     @property
     def int_site(self) -> int:
-        """ Converts site to integer so that the residue can be extracted
+        """
+        Converts site to integer so that the residue can be extracted
         using seq[site-1]
 
         returns:
@@ -30,9 +31,16 @@ class Mod(ModSite):
 
     @property
     def name(self) -> Optional[str]:
-        """ Valid modification name.
+        """
+        Valid modification name.
 
         Returns:
             Modification name if it's not `unknown`, otherwise None
         """
         return None if self.mod == "unknown" else self.mod
+
+    def mod_res(self, seq) -> Tuple[str, str]:
+        """
+        Gets modification residue
+        """
+        return self.mod, seq[self.int_site - 1]

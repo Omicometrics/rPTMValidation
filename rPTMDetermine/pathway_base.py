@@ -31,15 +31,18 @@ def split_res(
         results: Sequence[SearchResult],
         thr: float,
         is_positive: PositiveGetterMap
-) -> Tuple[List[SearchResult], List[SearchResult]]:
+) -> Tuple[List[SearchResult], List[SearchResult], List[SearchResult]]:
     """ Groups search results into positives and negatives.
 
     """
     positive: List[SearchResult] = []
     negative: List[SearchResult] = []
+    decoys: List[SearchResult] = []
     for res in results:
-        (positive if is_positive(res, thr) else negative).append(res)
-    return positive, negative
+        (decoys if res.pep_type is PeptideType.decoy
+         else positive if is_positive(res, thr)
+        else negative).append(res)
+    return positive, negative, decoys
 
 
 def get_fdr_threshold(
@@ -59,7 +62,10 @@ def get_fdr_threshold(
     # get scores and peptide types
     top_scores = {}
     SCORE = collections.namedtuple("SCORE", ["score", "type"])
-    for res in [r for r in search_results if r.rank == 1]:
+    for res in search_results:
+        if res.rank != 1:
+            continue
+
         spid = res.spectrum
         if (spid not in top_scores
                 or score_getter(res) >= top_scores[spid].score):
@@ -123,7 +129,7 @@ class PathwayBase:
         """
         self.config = config
 
-        output_dir = self.config.output_dir
+        output_dir = self.config.output_path
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
 
@@ -146,7 +152,7 @@ class PathwayBase:
         self.use_cache = self._valid_cache()
         if self.use_cache:
             logging.info(
-                f'Configuration unchanged since last run - using cached files'
+                'Configuration unchanged since last run - using cached files'
             )
 
         self.proteolyzer = proteolysis.Proteolyzer(self.config.enzyme)
@@ -157,7 +163,7 @@ class PathwayBase:
 
         # The database search result reader
         self.reader: readers.Reader = readers.get_reader(
-            self.config.search_engine, self.ptmdb
+            self.config.engine, self.ptmdb
         )
 
         # The database search result reader for model construction
@@ -208,9 +214,15 @@ class PathwayBase:
         """
         return [m for m in mods if m.mod != target_mod]
 
-    def _read_results(self, res_files):
+    def _read_results(self, res_files: Sequence[str], mode: str):
         """
-        Retrieves the search results from the set of input files.
+        Reads the search results from the set of input files.
+
+        Args:
+            res_files: List of files with full directory.
+            mode: Type of the results files, {'model', 'modification'}
+                  for construction of validation model or validation
+                  of modifications.
 
         """
         search_results_cache = os.path.join(self.cache_dir, 'search_results')
@@ -220,15 +232,17 @@ class PathwayBase:
             self.search_results = packing.load_from_file(search_results_cache)
             return
 
+        # reader according to search engine specified
+        reader = self.reader_model if mode == "model" else self.reader
         for fl in res_files:
             logging.info(f'Load search results: {fl}')
-            self.search_results[fl] = self.reader.read(fl)
-
-        logging.info('Caching search results...')
-        packing.save_to_file(self.search_results, search_results_cache)
+            fl_name = os.path.basename(fl)
+            self.search_results[fl_name] = reader.read(fl)
 
     def _split_fdr(self, search_results: Sequence[SearchResult]) \
-            -> Tuple[Sequence[SearchResult], Sequence[SearchResult]]:
+            -> Tuple[Sequence[SearchResult],
+                     Sequence[SearchResult],
+                     Sequence[SearchResult]]:
         """
         Splits the `search_results` into two lists according to the
         configured FDR threshold or calculated score threshold at the
@@ -240,7 +254,7 @@ class PathwayBase:
 
         if splitter is not None:
             logging.info("Split search results at "
-                         f"{self.config.res_split.msg}")
+                         f"{self.config.res_split.msg}...")
             return split_res(search_results,
                              self.config.res_split.threshold,
                              splitter)
@@ -256,9 +270,7 @@ class PathwayBase:
         splitter = lambda r, s: score_getter(r) >= s
         return split_res(search_results, score, splitter)
 
-    def read_mass_spectra(self) \
-            -> Generator[Tuple[str, Dict[str, mass_spectrum.Spectrum]], None,
-                         None]:
+    def read_mass_spectra(self):
         """
         Reads the mass spectra from the configured spectra_files.
 
@@ -266,37 +278,13 @@ class PathwayBase:
 
 
         """
-        for data_conf_id, data_conf in self.config.data_sets.items():
-            spectra_cache_file = os.path.join(
-                self.cache_dir, f'spectra_{data_conf_id}'
-            )
-            if self.use_cache and os.path.exists(spectra_cache_file):
-                logging.info(f'Using cached {data_conf_id} spectra...')
-                spectra = packing.load_from_file(spectra_cache_file)
-                yield data_conf_id, spectra
-                continue
-
-            logging.info(
-                f'Processing {data_conf_id}: {data_conf.spectra_file}...'
-            )
-            spec_file_path = os.path.join(
-                data_conf.data_dir, data_conf.spectra_file
-            )
-
-            if not os.path.isfile(spec_file_path):
-                raise FileNotFoundError(
-                    f"Spectra file {spec_file_path} not found"
-                )
+        for ms_file in self.config.spec_files:
+            logging.info(f'Loading mass spectra from {ms_file} ...')
 
             spectra = {
                 spec_id: spectrum.centroid().remove_itraq()
                 for spec_id, spectrum in read_spectra_file(spec_file_path)
             }
-
-            logging.info(f'Caching {data_conf_id} spectra...')
-            packing.save_to_file(spectra, spectra_cache_file)
-
-            yield data_conf_id, spectra
 
     def _classify(self, psms: List[PSM]):
         """
@@ -309,39 +297,6 @@ class PathwayBase:
         scores = self.model.validate(psms)
         for psm, _scores in zip(psms, scores):
             psm.ml_scores = _scores
-
-    def _has_target_residue(self, seq: str) -> bool:
-        """
-        Determines whether the given peptide `seq` contains the
-        configured `target_residue`.
-
-        Args:
-            seq: The peptide sequence.
-
-        Returns:
-            Boolean indicating whether the configured residue was found in
-            `seq`.
-
-        """
-        return self.config.target_residue in seq
-
-    def _has_target_mod(self, mods: Sequence[ModSite], seq: str) -> bool:
-        """
-        Determines whether the given peptide modifications include the target
-        modification.
-
-        Args:
-            mods: Peptide modifications.
-            seq: Peptide sequence.
-
-        Returns:
-            Boolean indicating whether the configured modification was found in
-            `mods`.
-
-        """
-        return any(ms.mod == self.modification and isinstance(ms.site, int)
-                   and seq[ms.site - 1] == self.config.target_residue
-                   for ms in mods)
 
     def _valid_peptide_length(self, seq: str) -> bool:
         """Evaluates whether the peptide `seq` is within the required length

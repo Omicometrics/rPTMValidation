@@ -18,7 +18,7 @@ from .mass_spectrum import Spectrum
 from .peptide_spectrum_match import PSM
 from .psm_container import PSMContainer
 from .results import write_psm_results
-from .rptmdetermine_config import RPTMDetermineConfig
+from .modminer_config import RPTMDetermineConfig
 from .validation_model import ValidationModel
 
 

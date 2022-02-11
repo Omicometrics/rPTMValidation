@@ -4,34 +4,21 @@ Validate PTM identifications derived from shotgun proteomics tandem mass
 spectra.
 
 """
-import functools
 import itertools
 import logging
 import os
 import re
-from typing import (
-    Callable,
-    Iterable,
-    Optional,
-    Sequence,
-    Set,
-)
+from typing import Callable, Iterable, Optional, Sequence, Set, List
 
 from pepfrag import Peptide
 
-from . import (
-    localization,
-    readers,
-    utilities,
-    packing,
-    pathway_base,
-)
+from . import localization, readers, utilities, packing, pathway_base
 from .constants import RESIDUES
 from .peptide_spectrum_match import PSM
 from .psm_container import PSMContainer
-from .readers import PeptideType
+from .readers import SearchResult, PeptideType
 from .results import write_psm_results
-from .rptmdetermine_config import DataSetConfig, RPTMDetermineConfig
+from .modminer_config import ModMinerConfig
 from .machinelearning import ValidationModel
 
 
@@ -51,77 +38,69 @@ class Validator(pathway_base.PathwayBase):
     encompasses the main functionality of the procedure.
 
     """
-    def __init__(self, config: RPTMDetermineConfig):
+    def __init__(self, config: ModMinerConfig):
         """
         Initialize the Validator object.
 
         Args:
-            config (RPTMDetermineConfig): The RPTMDetermineConfig from JSON.
+            config (ModMinerConfig): The ModMinerConfig from parameters.
 
         """
         super().__init__(config, "validate.log")
 
         # The PSMContainers are stored in this manner to make it easy to add
         # additional containers while working interactively.
-        self.psm_containers = {
-            'psms': PSMContainer(),
-            'neg_psms': PSMContainer(),
-            'unmod_psms': PSMContainer(),
-            'decoy_psms': PSMContainer(),
-            'neg_unmod_psms': PSMContainer()
+        self._psms = {
+            'mod_psms': [],
+            'pos_unmod_psms': [],
+            'decoy_psms': [],
+            'neg_unmod_psms': []
         }
 
         self._container_output_names = {
-            'psms': 'Positives',
-            'neg_psms': 'Negatives',
-            'unmod_psms': 'UnmodifiedPositives',
+            'mod_psms': 'ModifiedPSMs',
+            'pos_unmod_psms': 'UnmodifiedPositives',
             'neg_unmod_psms': 'UnmodifiedNegatives',
             'decoy_psms': 'Decoys'
         }
 
     @property
-    def psms(self) -> PSMContainer[PSM]:
-        return self.psm_containers['psms']
+    def psms(self) -> List[PSM]:
+        return (self._psms['mod_psms']
+                + self._psms['pos_unmod_psms']
+                + self._psms['neg_unmod_psms'])
 
     @psms.setter
-    def psms(self, value: Iterable[PSM]):
-        self.psm_containers['psms'] = PSMContainer(value)
+    def psms(self, value: Sequence[PSM]):
+        self._psms['psms'] = value
 
     @property
-    def neg_psms(self) -> PSMContainer[PSM]:
-        return self.psm_containers['neg_psms']
+    def mod_psms(self) -> List[PSM]:
+        return self._psms['mod_psms']
 
-    @neg_psms.setter
-    def neg_psms(self, value: Iterable[PSM]):
-        self.psm_containers['neg_psms'] = PSMContainer(value)
-
-    @property
-    def unmod_psms(self) -> PSMContainer[PSM]:
-        return self.psm_containers['unmod_psms']
-
-    @unmod_psms.setter
-    def unmod_psms(self, value: Iterable[PSM]):
-        self.psm_containers['unmod_psms'] = PSMContainer(value)
+    @mod_psms.setter
+    def mod_psms(self, value: Iterable[PSM]):
+        self._psms['mod_psms'] = value
 
     @property
-    def decoy_psms(self) -> PSMContainer[PSM]:
-        return self.psm_containers['decoy_psms']
+    def unmod_psms(self) -> List[PSM]:
+        return self._psms['pos_unmod_psms'] + self._psms['neg_unmod_psms']
+
+    @property
+    def decoy_psms(self) -> List[PSM]:
+        return self._psms['decoy_psms']
 
     @decoy_psms.setter
     def decoy_psms(self, value: Iterable[PSM]):
-        self.psm_containers['decoy_psms'] = PSMContainer(value)
+        self._psms['decoy_psms'] = value
 
     @property
-    def neg_unmod_psms(self) -> PSMContainer[PSM]:
-        return self.psm_containers['neg_unmod_psms']
+    def neg_unmod_psms(self) -> List[PSM]:
+        return self._psms['neg_unmod_psms']
 
     @neg_unmod_psms.setter
     def neg_unmod_psms(self, value: Iterable[PSM]):
-        self.psm_containers['neg_unmod_psms'] = PSMContainer(value)
-
-    ########################
-    # Validation
-    ########################
+        self._psms['neg_unmod_psms'] = value
 
     def validate(
             self,
@@ -136,18 +115,27 @@ class Validator(pathway_base.PathwayBase):
 
         """
         # Process the input files to extract the modification identifications
-        logging.info("Reading database search identifications...")
-        self._read_results()
-        self._get_mod_identifications()
-        allowed_mods = get_parallel_mods(self.psms, self.modification)
-        self._get_unmod_identifications(allowed_mods)
-        self._get_decoy_identifications(allowed_mods)
+        logging.info("Reading database search identifications for "
+                     "model construction ...")
+        self._read_results(self.config.res_model_files, "model")
+
+        # Split search results
+        self._get_unmodified_identifications()
+
+        # load mass spectra for feature calculation
         self._process_mass_spectra()
 
         logging.info('Calculating PSM features...')
         self._calculate_features()
 
         self._construct_cv_model()
+
+        # read modified peptide identifications
+        mod_res_files = set(self.config.mod_res_files).difference(
+            self.config.res_model_files)
+        if mod_res_files:
+            logging.info("Reading modified peptide identifications ...")
+            self._read_results(self.config.res_model_files, "modification")
 
         logging.info('Classifying identifications...')
         for label, psm_container in self.psm_containers.items():
@@ -251,150 +239,42 @@ class Validator(pathway_base.PathwayBase):
 
             write_psm_results(container, output_file)
 
-    def _get_identifications(
-            self,
-            handler: Callable[[Sequence[readers.SearchResult], str],
-                              PSMContainer],
-            pos_container_name: str,
-            neg_container_name: str
-    ):
+    def _get_unmodified_identifications(self):
         """
-        Parses the database search results to extract identifications, filtered
-        using `handler`.
-
-        Args:
-            handler: A function to process the search results from each
-                     configured data set. This will be passed, in turn, the
-                     positive and negative identifications, as judged by FDR
-                     control.
-            pos_container_name: The name of the PSMContainer on this class to
-                                update with the positive identifications.
-            neg_container_name: The name of the PSMContainer on this class to
-                                update with the negative identifications.
+        Gets unmodified identifications for model construction and
+        corrections of modifications.
 
         """
-        for set_id, set_info in self.config.data_sets.items():
-            # Apply database search FDR control to the results
-            pos_idents, neg_idents = self._split_fdr(
-                self.search_results[set_id],
-                set_info
-            )
-            getattr(self, pos_container_name).extend(
-                handler(pos_idents, set_id)
-            )
-            getattr(self, neg_container_name).extend(
-                handler(neg_idents, set_id)
-            )
+        # get the first ranked results
+        search_results = [
+            r for r in itertools.chain(*self.search_results.values())
+            if r.rank == 1]
 
-        setattr(
-            self,
-            pos_container_name,
-            utilities.deduplicate(getattr(self, pos_container_name))
-        )
-        setattr(
-            self,
-            neg_container_name,
-            utilities.deduplicate(getattr(self, neg_container_name))
-        )
+        # split search results based on FDR or probability
+        pos_idents, neg_idents, decoy_idents = self._split_fdr(search_results)
+
+        # SearchResult to PSM
+        self._psms['pos_unmod_psms'].extend(
+            self._results_to_unmod_psms(pos_idents,
+                                        allowed_mods=self.config.mod_excludes))
+        self._psms['neg_unmod_psms'].extend(
+            self._results_to_unmod_psms(neg_idents,
+                                        allowed_mods=self.config.mod_excludes))
+        self._psms['decoy_psms'].extend(
+            self._results_to_unmod_psms(decoy_idents,
+                                        allowed_mods=self.config.mod_excludes))
 
     def _get_mod_identifications(self):
         """
-
-        """
-        self._get_identifications(
-            self._results_to_mod_psms, 'psms', 'neg_psms'
-        )
-
-    def _get_unmod_identifications(self, allowed_mods: Iterable[str]):
-        """
-        Parses the database search results to extract identifications with
-        peptides containing the residues targeted by the modification under
-        validation.
-
-        Args:
-            allowed_mods: The modifications allowed to exist in the "unmodified"
-                          peptides.
-
-        """
-        # noinspection PyTypeChecker
-        self._get_identifications(
-            functools.partial(
-                self._results_to_unmod_psms,
-                allowed_mods=allowed_mods
-            ),
-            'unmod_psms',
-            'neg_unmod_psms'
-        )
-
-    def _get_decoy_identifications(self, allowed_mods: Iterable[str]):
+        Loads modified peptide identifications and converts to
+        modified PSMs
         """
 
-        """
-        decoy_psm_cache = os.path.join(
-            self.cache_dir, 'decoy_identifications'
-        )
-        if self.use_cache and os.path.exists(decoy_psm_cache):
-            logging.info('Using cached decoy identifications')
-            self.decoy_psms = packing.load_from_file(decoy_psm_cache)
-            return
-
-        self.decoy_psms = PSMContainer()
-        for set_id, set_info in self.config.data_sets.items():
-            if set_info.decoy_results is not None:
-                logging.info(
-                    'Reading decoy identifications from '
-                    f'{set_info.decoy_results}'
-                )
-                self.decoy_psms.extend(
-                    self._get_decoys_from_file(set_id, set_info, allowed_mods)
-                )
-            else:
-                # TODO: decoys from self.search_results
-                raise NotImplementedError()
-
-        logging.info('Caching decoy identifications')
-        packing.save_to_file(self.decoy_psms, decoy_psm_cache)
-
-    def _get_decoys_from_file(
-        self,
-        data_id: str,
-        data_config: DataSetConfig,
-        allowed_mods: Iterable[str]
-    ) -> PSMContainer[PSM]:
-        """
-        Reads the decoy identifications from the configured `decoy_results`
-        file.
-
-        Args:
-            data_id: The data set ID.
-            data_config: The data set configuration
-
-        """
-        decoy_psms = PSMContainer()
-        res_file = os.path.join(data_config.data_dir, data_config.decoy_results)
-        for ident in self.decoy_reader.read(
-                res_file,
-                predicate=lambda r: r.pep_type is readers.PeptideType.decoy
-        ):
-            if (self._has_target_residue(ident.seq) and
-                    all(mod.mod in allowed_mods for mod in ident.mods) and
-                    self._valid_peptide_length(ident.seq) and
-                    RESIDUES.issuperset(ident.seq)):
-                decoy_psms.append(
-                    PSM(
-                        data_id,
-                        ident.spectrum,
-                        Peptide(ident.seq, ident.charge, ident.mods),
-                        target=False
-                    )
-                )
-        return decoy_psms
 
     def _results_to_mod_psms(
         self,
-        search_res: Iterable[readers.SearchResult],
-        data_id: str,
-    ) -> PSMContainer[PSM]:
+        search_res: Iterable[SearchResult],
+    ) -> List[PSM]:
         """
         Converts `SearchResult`s to `PSM`s after filtering.
 
@@ -405,23 +285,21 @@ class Validator(pathway_base.PathwayBase):
 
         Args:
             search_res: The database search results.
-            data_id: The ID of the data set.
 
         Returns:
             PSMContainer.
 
         """
-        psms: PSMContainer[PSM] = PSMContainer()
+        psms: List[PSM] = []
         allowed_ranks = {1, 2}
         # Keep track of the top-ranking identification for the spectrum, since
         # rank 2 identifications will be retained if they are only different
         # by I/L
         current_spectrum: Optional[str] = None
-        top_rank_ident: Optional[readers.SearchResult] = None
+        top_rank_ident: Optional[SearchResult] = None
         for ident in search_res:
-            if (ident.pep_type is readers.PeptideType.decoy or
-                    ident.rank not in allowed_ranks or
-                    not RESIDUES.issuperset(ident.seq)):
+            if (ident.pep_type is PeptideType.decoy or
+                    ident.rank not in allowed_ranks):
                 # Filter to rank 1/2, target identifications for validation
                 # and ignore placeholder amino acid residue identifications
                 continue
@@ -459,12 +337,11 @@ class Validator(pathway_base.PathwayBase):
 
         return psms
 
+    @staticmethod
     def _results_to_unmod_psms(
-        self,
-        search_res: Iterable[readers.SearchResult],
-        data_id: str,
-        allowed_mods: Iterable[str]
-    ) -> PSMContainer[PSM]:
+            search_res: Iterable[SearchResult],
+            allowed_mods: Optional[Set[str, str]] = None
+    ) -> List[PSM]:
         """
         Converts `SearchResult`s to `PSM`s after filtering for unmodified PSMs.
 
@@ -473,7 +350,6 @@ class Validator(pathway_base.PathwayBase):
 
         Args:
             search_res: The database search results.
-            data_id: The ID of the data set.
             allowed_mods: The modifications which may be included in
                           "unmodified" peptide identifications.
 
@@ -481,27 +357,18 @@ class Validator(pathway_base.PathwayBase):
             PSMContainer.
 
         """
-        psms: PSMContainer[PSM] = PSMContainer()
-        for ident in search_res:
-            if (not self._has_target_residue(ident.seq) or
-                    not RESIDUES.issuperset(ident.seq)):
-                continue
-            for mod in ident.mods:
-                if (mod.mod not in allowed_mods or
-                        (isinstance(mod.site, int) and
-                         ident.seq[mod.site - 1] ==
-                         self.config.target_residue)):
-                    break
-            else:
-                if self._valid_peptide_length(ident.seq):
-                    psms.append(
-                        PSM(
-                            data_id,
-                            ident.spectrum,
-                            Peptide(ident.seq, ident.charge, ident.mods),
-                            target=(ident.pep_type == PeptideType.normal)
-                        )
-                    )
+        if allowed_mods is None:
+            allowed_mods = {}
+
+        psms: List[PSM] = []
+        for res in search_res:
+            if (not res.mods
+                    or all(isinstance(m.site, int)
+                           and (m.mod, res.seq[m.site - 1])
+                           in allowed_mods for m in res.mods)):
+                psms.append(PSM(res.dataset,
+                                res.spectrum,
+                                Peptide(res.seq, res.charge, res.mods)))
 
         return psms
 
