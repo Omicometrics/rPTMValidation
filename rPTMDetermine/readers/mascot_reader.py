@@ -3,6 +3,7 @@
 This module provides a class for reading Mascot dat (MIME) files.
 
 """
+import os
 import collections
 import dataclasses
 import email.parser
@@ -25,7 +26,7 @@ QUERY_NUM_REGEX = re.compile(r"[a-z]+(\d+)")
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
-class MascotSearchResult(SearchResult):  # pylint: disable=too-few-public-methods
+class MascotSearchResult(SearchResult):
 
     __slots__ = ("ionscore", "deltamass", "proteins", "num_matches",)
 
@@ -87,8 +88,7 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
             for p in file_content.walk()}
 
         # Read the relevant parameters
-        error_tol_search, decoy_search =\
-            self._parse_parameters(payloads["parameters"])
+        params = self._parse_parameters(payloads["parameters"])
 
         # Parse the fixed and variable masses in the MIME content
         var_mods, fixed_mods = self._parse_masses(payloads["masses"])
@@ -96,28 +96,29 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
         # Extract query information
         res: Dict[str, Dict[str, Any]] = collections.defaultdict(dict)
         self._parse_summary(payloads["summary"], res)
-        if decoy_search:
+        if params["DECOY"] == "1":
             self._parse_summary(payloads["decoy_summary"], res,
                                 pep_type="decoy")
 
-        # Assign spectrum IDs to the querys
+        # Assign spectrum IDs to the queries
         for query_id in res.keys():
             query = payloads[f"query{query_id}"]
             res[query_id]["spectrumid"] = self._get_spectrum_id(query)
 
         # Extract the identified peptides for each spectrum query
         self._parse_peptides(payloads["peptides"], res, var_mods, fixed_mods,
-                             error_tol_search=error_tol_search)
-        if decoy_search:
+                             error_tol_search=params["ERRORTOLERANT"] == "1")
+        if params["DECOY"] == "1":
             self._parse_peptides(payloads["decoy_peptides"], res, var_mods,
-                                 fixed_mods, pep_type="decoy",
-                                 error_tol_search=error_tol_search)
+                                 fixed_mods, pep_type="decoy")
 
-        return self._build_search_results(res, predicate)
+        spectrum_filename = self._get_spectrum_file(params["FILE"])
+        return self._build_search_results(res, spectrum_filename, predicate)
 
     def _build_search_results(
             self,
             res,
+            data_id: str,
             predicate: Optional[Callable[[SearchResult], bool]]) \
             -> List[MascotSearchResult]:
         """
@@ -134,21 +135,22 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
 
             spec_id = query["spectrumid"]
             results.extend(self._build_search_result(
-                query["target"], spec_id, PeptideType.normal,
+                query["target"], data_id, spec_id, PeptideType.normal,
                 predicate))
             if "decoy" in query:
                 if "peptides" not in query["decoy"]:
                     continue
 
                 results.extend(self._build_search_result(
-                    query["decoy"], spec_id, PeptideType.decoy,
+                    query["decoy"], data_id, spec_id, PeptideType.decoy,
                     predicate))
 
         return results
 
+    @staticmethod
     def _build_search_result(
-            self,
             query: Dict[str, Any],
+            data_id: str,
             spec_id: str,
             pep_type: PeptideType,
             predicate: Optional[Callable[[SearchResult], bool]]) \
@@ -172,7 +174,7 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
                 mods=peptide["modifications"],
                 charge=query["charge"],
                 spectrum=spec_id,
-                dataset=None,
+                dataset=data_id,
                 rank=int(rank),
                 pep_type=pep_type,
                 theor_mz=query["mz"],
@@ -184,7 +186,7 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
         return (results if predicate is None
                 else [r for r in results if predicate(r)])
 
-    def _parse_parameters(self, payload: str) -> Tuple[bool, bool]:
+    def _parse_parameters(self, payload: str) -> Dict[str, str]:
         """
         Parses the 'parameters' payload.
 
@@ -195,8 +197,7 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
             Two booleans: error tolerant search and decoy search indicators.
 
         """
-        params = self._payload_to_dict(payload)
-        return params["ERRORTOLERANT"] == "1", params["DECOY"] == "1"
+        return self._payload_to_dict(payload)
 
     def _parse_masses(self, payload: str)\
             -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
@@ -361,15 +362,12 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
 
             peptide["modifications"] = tuple(mods)
 
-    def _parse_identification(self, info_str: str, var_mods, fixed_mods)\
+    @staticmethod
+    def _parse_identification(info_str: str, var_mods, fixed_mods)\
             -> Tuple[str, List[ModSite], float, float]:
         """
         Parses a peptide identification string to extract sequence,
         modifications and score.
-
-        Args:
-
-        Returns:
 
         """
         split_str = info_str.split(",")
@@ -400,7 +398,7 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
             try:
                 var_mod = var_mods[char]
             except KeyError:
-                raise ParserException(f'Unknown modification character: {c}')
+                raise ParserException(f'Unknown modification char: {char}.')
             mod_mass, mod_name = var_mod["mass"], var_mod["name"]
             if idx == 0:
                 term_mods.append(ModSite(mod_mass, "nterm", mod_name))
@@ -428,7 +426,8 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
 
         return pep_str, mods, score, delta
 
-    def _get_mod_info(self, mod_str: str) -> Sequence[str]:
+    @staticmethod
+    def _get_mod_info(mod_str: str) -> Sequence[str]:
         """
         Extracts the modification name and residue from a string.
 
@@ -457,21 +456,17 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
             The title spectrum ID as a string.
 
         """
-        title = urllib.parse.unquote(self._payload_to_dict(payload)["title"])
-        if len(title.split(" ")) == 1 and ":" in title:
-            return title.split(":")[1]
+        return urllib.parse.unquote(self._payload_to_dict(payload)["title"])
 
-        match = re.search(r"Locus:([\d\.]+)", title)
-        if match:
-            return match.group(1)
+    @staticmethod
+    def _get_spectrum_file(file_path: str) -> str:
+        """
+        Parses url of file path to get file name used for searching.
+        """
+        return os.path.basename(file_path)
 
-        match = re.search(r"NativeID:\"([^\"]*)\"", title)
-        if match:
-            return ".".join(re.findall(r"\w+=(\d+)", match.group(1)))
-
-        raise ParserException(f"Unrecognized spectrum ID format: {title}")
-
-    def _get_query_num_rank(self, string: str) -> Sequence[str]:
+    @staticmethod
+    def _get_query_num_rank(string: str) -> Sequence[str]:
         """
         Extracts the query number and peptide rank from a payload key.
 
@@ -491,7 +486,8 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
                 f"Invalid string passed to _get_query_num_rank: {string}")
         return match.groups()
 
-    def _payload_to_dict(self, payload: str) -> Dict[str, str]:
+    @staticmethod
+    def _payload_to_dict(payload: str) -> Dict[str, str]:
         """
         Converts a payload, newline-separated string into a dictionary.
 
