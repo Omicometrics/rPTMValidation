@@ -7,7 +7,7 @@ search identification.
 import dataclasses
 import enum
 import itertools
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
 
 from pepfrag import ModSite
 
@@ -19,6 +19,15 @@ class PeptideType(enum.Enum):
     """
     normal = enum.auto()
     decoy = enum.auto()
+
+
+class SpectrumIDType(enum.Enum):
+    """
+    An enumeration to represent the spectrum ID type.
+
+    """
+    native = enum.auto()
+    scan = enum.auto()
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
@@ -37,7 +46,8 @@ class SearchResult:  # pylint: disable=too-few-public-methods
     mods: Tuple[ModSite, ...]
     charge: int
     spectrum: str
-    dataset: Optional[str]
+    spectrum_id_type: SpectrumIDType
+    dataset: Optional[Any]
     rank: int
     pep_type: PeptideType
     theor_mz: Optional[float]

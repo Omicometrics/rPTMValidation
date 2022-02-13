@@ -10,6 +10,7 @@ from overrides import overrides
 
 from .ptmdb import PTMDB
 from .tpp_reader_base import TPPBaseReader, TPPSearchResult
+from .search_result import SpectrumIDType
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
@@ -36,15 +37,15 @@ class MSFraggerReader(TPPBaseReader):
         super().__init__(ptmdb)
 
     @overrides
-    def _get_id(self, query_element) -> str:
+    def _get_id(self, query_element) -> Tuple[str, SpectrumIDType]:
         """
         Extracts the spectrum ID from the query XML element.
 
         """
         spec_id = query_element.get('native_id')
         if spec_id is None:
-            return query_element.get('start_scan')
-        return spec_id
+            return query_element.get('start_scan'), SpectrumIDType.scan
+        return spec_id, SpectrumIDType.native
 
     @overrides
     def _extract_hit(self, hit_element, charge: int) -> Dict[str, Any]:
@@ -59,6 +60,7 @@ class MSFraggerReader(TPPBaseReader):
     @staticmethod
     @overrides
     def _build_search_result(spec_id: str,
+                             id_type: SpectrumIDType,
                              hit: Dict[str, Any],
                              dataset: Optional[Tuple[str, str]] = None)\
             -> MSFraggerSearchResult:
@@ -74,6 +76,7 @@ class MSFraggerReader(TPPBaseReader):
             mods=hit['mods'],
             charge=hit['charge'],
             spectrum=spec_id,
+            spectrum_id_type=id_type,
             dataset=dataset,
             rank=hit['rank'],
             pep_type=hit['pep_type'],

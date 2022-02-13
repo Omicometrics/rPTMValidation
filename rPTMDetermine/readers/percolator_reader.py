@@ -17,7 +17,7 @@ from pepfrag import ModSite
 from .base_reader import Reader
 from .parser_exception import ParserException
 from .ptmdb import PTMDB
-from .search_result import PeptideType, SearchResult
+from .search_result import PeptideType, SearchResult, SpectrumIDType
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
@@ -82,7 +82,8 @@ class PercolatorReader(Reader):  # pylint: disable=too-few-public-methods
                     seq=seq,
                     mods=tuple(mods),
                     charge=charge,
-                    spectrum=f"0.1.{scan}",
+                    spectrum=scan,
+                    spectrum_id_type=SpectrumIDType.scan,
                     dataset=None,
                     rank=rank,
                     pep_type=pep_type,
@@ -146,7 +147,7 @@ class PercolatorReader(Reader):  # pylint: disable=too-few-public-methods
         # /MsgfplusReader.cpp
         # Format is <FILEPATH>_SII_<MSGF ID>_<SCAN#>_<CHARGE>_<RANK>
         content = psm_id.split("_")[-3:]
-        return (content[0], int(content[1]), int(content[2]))
+        return content[0], int(content[1]), int(content[2])
 
     def _get_tag(self, element, tag: str) -> str:
         """
@@ -214,7 +215,8 @@ class PercolatorTextReader(Reader):  # pylint: disable=too-few-public-methods
                         seq=seq,
                         mods=tuple(mods),
                         charge=int(r["charge"]),
-                        spectrum=f"0.1.{r['scan']}",
+                        spectrum=r["scan"],
+                        spectrum_id_type=SpectrumIDType.scan,
                         dataset=file_index[r["file_idx"]],
                         rank=1,
                         pep_type=pep_type,
@@ -262,7 +264,8 @@ class PercolatorTextReader(Reader):  # pylint: disable=too-few-public-methods
             peptide_seq = self.mod_regex.sub("", peptide_seq, count=1)
         return peptide_seq, mods
         
-    def _get_file_from_index(self, filename):
+    @staticmethod
+    def _get_file_from_index(filename):
         """
         Get file name from the log file to translate the index
         to file name.
@@ -279,6 +282,12 @@ class PercolatorTextReader(Reader):  # pylint: disable=too-few-public-methods
                 if "Assigning index" in line:
                     idx, full_path = re.findall("INFO: Assigning index (.*) to (.*).",
                                                 line.rstrip())[0]
-                    res_files[idx] = os.path.basename(full_path)
+                    res_file_name = os.path.basename(full_path)
+                    if res_file_name.endswith("pep.xml"):
+                        res_files[idx] = (
+                            re.sub(r"\.pep.xml$", "", res_file_name), "pep.xml"
+                        )
+                    else:
+                        res_files[idx] = tuple(os.path.splitext(res_file_name))
 
         return res_files

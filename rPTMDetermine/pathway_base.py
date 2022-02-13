@@ -144,8 +144,8 @@ class PathwayBase:
 
         logging.info(f"Using configuration: {str(self.config)}")
 
-        # Determine whether the configuration has changed since the last run and
-        # thus, whether cached files may be used
+        # Determine whether the configuration has changed since the last run
+        # and thus, whether cached files may be used
         self.cache_dir = os.path.join(output_dir, '.cache')
         if not os.path.isdir(self.cache_dir):
             os.mkdir(self.cache_dir)
@@ -171,7 +171,7 @@ class PathwayBase:
             self.config.model_search_res_engine, self.ptmdb
         )
 
-        self.search_results: Dict[List[Type[SearchResult]]] = {}
+        self.search_results: Dict[str, List[Type[SearchResult]]] = {}
 
         self.model_features = Features.all_feature_names()
 
@@ -270,7 +270,8 @@ class PathwayBase:
         splitter = lambda r, s: score_getter(r) >= s
         return split_res(search_results, score, splitter)
 
-    def read_mass_spectra(self):
+    @staticmethod
+    def read_mass_spectra(spec_file):
         """
         Reads the mass spectra from the configured spectra_files.
 
@@ -278,13 +279,8 @@ class PathwayBase:
 
 
         """
-        for ms_file in self.config.spec_files:
-            logging.info(f'Loading mass spectra from {ms_file} ...')
-
-            spectra = {
-                spec_id: spectrum.centroid().remove_itraq()
-                for spec_id, spectrum in read_spectra_file(spec_file_path)
-            }
+        logging.info(f'Loading mass spectra from {spec_file} ...')
+        yield from read_spectra_file(spec_file)
 
     def _classify(self, psms: List[PSM]):
         """
@@ -297,9 +293,3 @@ class PathwayBase:
         scores = self.model.validate(psms)
         for psm, _scores in zip(psms, scores):
             psm.ml_scores = _scores
-
-    def _valid_peptide_length(self, seq: str) -> bool:
-        """Evaluates whether the peptide `seq` is within the required length
-        range."""
-        return self.config.min_peptide_length <= len(seq) \
-               <= self.config.max_peptide_length

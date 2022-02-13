@@ -45,6 +45,16 @@ files = *.pep.xml
 # Mass spectra files used for database search. `mgf`, `mzXML` or `mzML` file
 # type is accepted. These can be a list of files separated by `;`, or simply
 # `*.mgf`, `*.mzXML` and `*.mzML` for all `mgf`, `mzXML` and `mzML` files.
+# These should be the files used for database search, i.e., same .mgf files
+# used for database search.
+# ** For those mass spectra files not recognized here, e.g., .raw from Thermal
+#    Fisher, .wiff from SCIEX, they should be converted using tools like
+#    Proteowizard, but must keep same file names.
+# ** For the search using ProteinPilot which can combine multiple files to
+#    search simultaneously and output a combined search results, the mass
+#    spectra files should be exported using the software with .mgf format,
+#    and the name must be same with the exported search results file (.txt
+#    or .xml)
 # --> Directory where mass spectra files locate. Leave empty to use same
 #     directory as for database search results above.
 mass_spec_path = D:\syn_PTM_search\mgfs_cid_hcd

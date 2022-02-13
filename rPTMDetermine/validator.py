@@ -8,7 +8,7 @@ import itertools
 import logging
 import os
 import re
-from typing import Callable, Iterable, Optional, Sequence, Set, List
+from typing import Callable, Iterable, Optional, Sequence, Set, List, Dict
 
 from pepfrag import Peptide
 
@@ -19,6 +19,7 @@ from .psm_container import PSMContainer
 from .readers import SearchResult, PeptideType
 from .results import write_psm_results
 from .modminer_config import ModMinerConfig
+from .psm_spectrum_id_mapper import SpectrumIDMapper
 from .machinelearning import ValidationModel
 
 
@@ -122,8 +123,11 @@ class Validator(pathway_base.PathwayBase):
         # Split search results
         self._get_unmodified_identifications()
 
+        # search results type for constructing spectrum ID mapper
+
+
         # load mass spectra for feature calculation
-        self._process_mass_spectra()
+        self._load_mass_spectra(self.unmod_psms + self.decoy_psms)
 
         logging.info('Calculating PSM features...')
         self._calculate_features()
@@ -263,13 +267,15 @@ class Validator(pathway_base.PathwayBase):
         self._psms['decoy_psms'].extend(
             self._results_to_unmod_psms(decoy_idents,
                                         allowed_mods=self.config.mod_excludes))
+        # clear the cache
+        self.search_results.clear()
 
     def _get_mod_identifications(self):
         """
         Loads modified peptide identifications and converts to
         modified PSMs
         """
-
+        pass
 
     def _results_to_mod_psms(
         self,
@@ -361,30 +367,41 @@ class Validator(pathway_base.PathwayBase):
             allowed_mods = {}
 
         psms: List[PSM] = []
-        for res in search_res:
-            if (not res.mods
-                    or all(isinstance(m.site, int)
-                           and (m.mod, res.seq[m.site - 1])
-                           in allowed_mods for m in res.mods)):
-                psms.append(PSM(res.dataset,
-                                res.spectrum,
-                                Peptide(res.seq, res.charge, res.mods)))
+        for r in search_res:
+            if (not r.mods or all(
+                    isinstance(m.site, int) and (m.mod, r.seq[m.site - 1])
+                    in allowed_mods for m in r.mods)):
+                psm = PSM(r.dataset,
+                          r.spectrum,
+                          Peptide(r.seq, r.charge, r.mods))
+                if r.pep_type == PeptideType.decoy:
+                    psm.target = False
+                psms.append(psm)
 
         return psms
 
-    ########################
-    # Utility functions
-    ########################
-
-    def _process_mass_spectra(self):
+    def _load_mass_spectra(self,
+                           search_results: Sequence[PSM],
+                           tag: str = "unmod"):
         """
         Processes the input mass spectra to match to their peptides.
 
+        Args:
+            search_results: List of PSMs
+            tag: A tag indicates that results are for model construction
+                 (using unmodified PSMs) or validation (for modified PSMs).
+                 For the unmodified PSMs, mass spectra of negative and decoy
+                 PSMs are clear to clean the cache.
+
         """
-        indices = [
-            container.get_index(('data_id', 'spec_id'))
-            for container in self.psm_containers.values()
-        ]
+        # all search results files
+        search_results_file_names = set(res.data_id for res in search_results)
+
+        # list of mass spectra files
+        mass_spec_files: Dict[str, str] = {}
+        for spec_file in self.config.spec_files:
+            name_split = os.path.split(os.path.basename(spec_file))
+            mass_spec_files[name_split[0]] = spec_file
 
         for data_id, spectra in self.read_mass_spectra():
             for container, index in zip(self.psm_containers.values(), indices):
@@ -394,14 +411,6 @@ class Validator(pathway_base.PathwayBase):
 
     def _calculate_features(self):
         """Computes features for all PSMContainers."""
-        # def _calculate(psm):
-        #     psm.extract_features()
-        #     psm.peptide.clean_fragment_ions()
-        #
-        # Parallel(n_jobs=self.config.num_cores)(
-        #     delayed(_calculate)(psm)
-        #     for container in self.psm_containers.values() for psm in container
-        # )
 
         for psm_container in self.psm_containers.values():
             for psm in psm_container:

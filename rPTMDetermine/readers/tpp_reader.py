@@ -9,6 +9,7 @@ from overrides import overrides
 
 from .ptmdb import PTMDB
 from .tpp_reader_base import TPPBaseReader, TPPSearchResult
+from .search_result import SpectrumIDType
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
@@ -91,11 +92,11 @@ class TPPReader(TPPBaseReader):
         return pprophet_probs, iprophet_probs
 
     @staticmethod
-    def _build_search_result(
-            spec_id: str,
-            hit: Dict[str, Any],
-            dataset: Optional[Tuple[str, str]] = None
-    ) -> TPPSearchResult:
+    def _build_search_result(spec_id: str,
+                             id_type: SpectrumIDType,
+                             hit: Dict[str, Any],
+                             dataset: Optional[Tuple[str, str]] = None)\
+            -> TPPSearchResult:
         """
         Converts a search result to a standard SearchResult.
 
@@ -108,6 +109,7 @@ class TPPReader(TPPBaseReader):
             mods=hit['mods'],
             charge=hit['charge'],
             spectrum=spec_id,
+            spectrum_id_type=id_type,
             dataset=dataset,
             rank=hit['rank'],
             pep_type=hit['pep_type'],

@@ -4,6 +4,7 @@ This module provides functions for reading ProteinPilot results
 (PeptideSummary/XML) files.
 
 """
+import os
 import csv
 import dataclasses
 import re
@@ -19,7 +20,7 @@ from . import (
     utilities
 )
 from .base_reader import Reader
-from .search_result import PeptideType, SearchResult
+from .search_result import PeptideType, SearchResult, SpectrumIDType
 from .ptmdb import PTMDB, ModificationNotFoundException
 
 
@@ -102,6 +103,7 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
             The read information as a list of ProteinPilotSearchResults.
 
         """
+        data_id = os.path.basename(filename)
         with open(filename, newline='') as fh:
             reader = csv.DictReader(fh, delimiter='\t')
             results = []
@@ -113,7 +115,7 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
                 if read_itraq_peaks and not itraq_peak_cols:
                     itraq_peak_cols = self._get_itraq_peak_cols(row)
                 result = self._build_search_result(
-                    row, itraq_cols, itraq_peak_cols
+                    data_id, row, itraq_cols, itraq_peak_cols
                 )
                 if result is None:
                     continue
@@ -141,6 +143,7 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
 
     def _build_search_result(
             self,
+            data_id: str,
             row: Dict[str, Any],
             itraq_cols: List[str],
             itraq_peak_cols: List[str]
@@ -170,7 +173,8 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
             mods=tuple(parsed_mods),
             charge=int(row["Theor z"]),
             spectrum=row["Spectrum"],
-            dataset=None,
+            spectrum_id_type=SpectrumIDType.native,
+            dataset=data_id,
             rank=1,
             pep_type=(PeptideType.decoy if "REVERSED" in row["Names"]
                       else PeptideType.normal),
@@ -178,16 +182,12 @@ class ProteinPilotReader(Reader):  # pylint: disable=too-few-public-methods
             time=row["Acq Time"],
             confidence=float(row["Conf"]) / 100,
             prec_mz=float(row["Obs m/z"]),
-            itraq_peaks=(
-                {k: float(row[k]) for k in itraq_peak_cols if row[k]}
-                if itraq_peak_cols else None
-            ),
+            itraq_peaks=({k: float(row[k]) for k in itraq_peak_cols if row[k]}
+                         if itraq_peak_cols else None),
             proteins=row["Names"],
             accessions=row["Accessions"],
-            itraq_ratios=(
-                {k: float(row[k]) for k in itraq_cols if row[k]}
-                if itraq_cols else None
-            ),
+            itraq_ratios=({k: float(row[k]) for k in itraq_cols if row[k]}
+                          if itraq_cols else None),
             background=(
                 float(row["Background"]) if 'Background' in row else None
             ),
@@ -257,6 +257,7 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
         match_protein_map: Dict[str, List[str]] = {}
         context = etree.iterparse(filename, events=["end"], recover=True,
                                   encoding="iso-8859-1")
+        data_id = tuple(os.path.splitext(os.path.basename(filename)))
         for event, element in context:
             if element.tag == "SPECTRUM":
                 # Remove the last number from the ProteinPilot spectrum ID
@@ -286,8 +287,9 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
                         seq=match_element.get("seq"),
                         mods=tuple(mods),
                         charge=int(match_element.get("charge")),
+                        dataset=data_id,
                         spectrum=spec_id,
-                        dataset=None,
+                        spectrum_id_type=SpectrumIDType.native,
                         rank=rank,
                         pep_type=pep_type,
                         theor_mz=None,
@@ -329,23 +331,8 @@ class ProteinPilotXMLReader(Reader):  # pylint: disable=too-few-public-methods
         res: List[ProteinPilotXMLSearchResult] = []
         for match_id, r in temp_res.items():
             res.append(ProteinPilotXMLSearchResult(
-                    seq=r.seq,
-                    mods=r.mods,
-                    charge=r.charge,
-                    spectrum=r.spectrum,
-                    dataset=None,
-                    rank=r.rank,
-                    theor_mz=None,
-                    pep_type=r.pep_type,
-                    time=r.time,
-                    confidence=r.confidence,
-                    prec_mz=r.prec_mz,
-                    accessions=tuple(match_protein_map.get(match_id, [])),
-                    byscore=r.byscore,
-                    eval=r.eval,
-                    mod_prob=r.mod_prob,
-                    itraq_peaks=r.itraq_peaks
-            ))
+                accessions=tuple(match_protein_map.get(match_id, [])),
+                **r.__dict__))
 
         return res
 

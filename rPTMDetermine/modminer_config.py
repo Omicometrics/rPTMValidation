@@ -28,6 +28,7 @@ class ParamConfigurator:
         ConfigField('files', False, None),
         ConfigField('mass_spec_path', False, None),
         ConfigField('mass_spec_files', False, None),
+        ConfigField("spec_files", True, ''),
         ConfigField('model_search_res_path', True, ''),
         ConfigField('model_search_res_files', True, ''),
         ConfigField('model_res_files', True, []),

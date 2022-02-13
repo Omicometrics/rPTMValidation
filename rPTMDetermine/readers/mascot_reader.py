@@ -19,7 +19,7 @@ from pepfrag import ModSite
 from .base_reader import Reader
 from .parser_exception import ParserException
 from .ptmdb import PTMDB
-from .search_result import PeptideType, SearchResult
+from .search_result import PeptideType, SearchResult, SpectrumIDType
 
 
 QUERY_NUM_REGEX = re.compile(r"[a-z]+(\d+)")
@@ -174,6 +174,7 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
                 mods=peptide["modifications"],
                 charge=query["charge"],
                 spectrum=spec_id,
+                spectrum_id_type = SpectrumIDType.native,
                 dataset=data_id,
                 rank=int(rank),
                 pep_type=pep_type,
@@ -240,8 +241,6 @@ class MascotReader(Reader):  # pylint: disable=too-few-public-methods
                 var_mods[mod_id] = mod_props
             elif key_prefix == "FixedMod":
                 fixed_mods[mod_id] = mod_props
-            else:
-                continue
 
         return var_mods, fixed_mods
 

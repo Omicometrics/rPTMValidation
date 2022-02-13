@@ -14,7 +14,7 @@ from pepfrag import AA_MASSES, ModSite
 from .base_reader import Reader
 from .parser_exception import ParserException
 from .ptmdb import ModificationNotFoundException, PTMDB
-from .search_result import PeptideType, SearchResult
+from .search_result import PeptideType, SearchResult, SpectrumIDType
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
@@ -71,7 +71,7 @@ class TPPBaseReader(Reader):
                 raw_file = parent.get("base_name")
                 raw_ext = parent.get("raw_data")
                 charge = int(element.get("assumed_charge"))
-                spec_id = self._get_id(element)
+                spec_id, id_type = self._get_id(element)
                 hits = [self._extract_hit(h, charge)
                         for h in element.xpath('x:search_result/x:search_hit',
                                                namespaces=self.ns_map)]
@@ -80,7 +80,7 @@ class TPPBaseReader(Reader):
                 # such that it may be overridden for specific TPPReader
                 # subclasses, e.g. Comet or X! Tandem, in future
                 res.extend([
-                    self._build_search_result(spec_id, hit,
+                    self._build_search_result(spec_id, id_type, hit,
                                               dataset=(raw_file, raw_ext))
                     for hit in hits
                 ])
@@ -94,15 +94,15 @@ class TPPBaseReader(Reader):
 
         return res if not predicate else [r for r in res if predicate(r)]
 
-    def _get_id(self, query_element) -> str:
+    def _get_id(self, query_element) -> Tuple[str, SpectrumIDType]:
         """
         Extracts the spectrum ID from the query XML element.
 
         """
         spec_id = query_element.get("spectrumNativeID")
         if spec_id is None:
-            return query_element.get('start_scan')
-        return unescape(spec_id)
+            return query_element.get('start_scan'), SpectrumIDType.scan
+        return unescape(spec_id), SpectrumIDType.native
 
     def _extract_hit(self, hit_element, charge: int) -> Dict[str, Any]:
         """
@@ -190,11 +190,11 @@ class TPPBaseReader(Reader):
         return mods
 
     @staticmethod
-    def _build_search_result(
-            spec_id: str,
-            hit: Dict[str, Any],
-            dataset: Optional[Tuple[str, str]] = None
-    ) -> TPPSearchResult:
+    def _build_search_result(spec_id: str,
+                             id_type: SpectrumIDType,
+                             hit: Dict[str, Any],
+                             dataset: Optional[Tuple[str, str]] = None)\
+            -> TPPSearchResult:
         """
         Converts a search result to a standard SearchResult.
 
@@ -207,6 +207,7 @@ class TPPBaseReader(Reader):
             mods=hit['mods'],
             charge=hit['charge'],
             spectrum=spec_id,
+            spectrum_id_type=id_type,
             dataset=dataset,
             rank=hit['rank'],
             pep_type=hit['pep_type'],
