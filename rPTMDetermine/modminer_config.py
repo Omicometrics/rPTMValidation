@@ -253,6 +253,22 @@ class ParamConfigurator:
                 f"Missing required config options: {'; '.join(unfound_params)}"
             )
 
+    def _check_spectrum_file_types(self):
+        """
+        Checks that file types of mass spectra.
+
+        Raises:
+            ValueError
+        """
+        # mass spectral file extensions
+        spec_file_exts = set()
+        for spec_file in self.spec_files:
+            spec_file_exts.add(os.path.splitext(spec_file)[1][1:])
+        if len(spec_file_exts) > 1:
+            raise ValueError("Multiple mass spectrum file types: "
+                             f"{', '.join(spec_file_exts)} are found. "
+                             "Should convert them to same file type.")
+
 
 class ModMinerConfig(Config):
     """

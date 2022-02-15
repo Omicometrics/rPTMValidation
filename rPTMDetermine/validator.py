@@ -8,29 +8,39 @@ import itertools
 import logging
 import os
 import re
-from typing import Callable, Iterable, Optional, Sequence, Set, List, Dict
+import collections
+from typing import (Callable, Iterable, Optional, Sequence,
+                    Set, List, Dict, Tuple, NamedTuple)
+from multiprocessing import Pool
 
-from pepfrag import Peptide
+from pepfrag import Peptide as PeptideBase
 
 from . import localization, readers, utilities, packing, pathway_base
 from .constants import RESIDUES
 from .peptide_spectrum_match import PSM
 from .psm_container import PSMContainer
 from .readers import SearchResult, PeptideType
+from .spectra_readers import read_spectra_file
 from .results import write_psm_results
 from .modminer_config import ModMinerConfig
-from .psm_spectrum_id_mapper import SpectrumIDMapper
+from .modification import Mod
 from .machinelearning import ValidationModel
 
 
-def get_parallel_mods(
-        psms: PSMContainer[PSM],
-        target_mod: str
-) -> Set[str]:
-    """Finds all unique modifications present in `psms`."""
+class Peptide(PeptideBase):
+    def __init__(self, seq: str, charge: int, mods: Sequence[Mod], **kwargs):
+        super().__init__(seq, charge, mods, **kwargs)
+
+
+def get_parallel_mods(psms: Sequence[PSM], target_mod: str) -> Set[str]:
+    """ Finds all unique modifications present in `psms`. """
     return {
         mod.mod for psm in psms for mod in psm.mods if mod.mod != target_mod
     }
+
+
+def extract_features(psm):
+    psm.extract_features()
 
 
 class Validator(pathway_base.PathwayBase):
@@ -49,14 +59,12 @@ class Validator(pathway_base.PathwayBase):
         """
         super().__init__(config, "validate.log")
 
-        # The PSMContainers are stored in this manner to make it easy to add
-        # additional containers while working interactively.
-        self._psms = {
-            'mod_psms': [],
-            'pos_unmod_psms': [],
-            'decoy_psms': [],
-            'neg_unmod_psms': []
-        }
+        # The PSMs are stored in this manner to make it easy to add
+        # additional psms while working interactively.
+        self._psms = {'mod_psms': [],
+                      'pos_unmod_psms': [],
+                      'decoy_psms': [],
+                      'neg_unmod_psms': []}
 
         self._container_output_names = {
             'mod_psms': 'ModifiedPSMs',
@@ -64,6 +72,9 @@ class Validator(pathway_base.PathwayBase):
             'neg_unmod_psms': 'UnmodifiedNegatives',
             'decoy_psms': 'Decoys'
         }
+
+        # Set of psm IDs that retain mass spectra
+        self._psm_spectrum_retains = {}
 
     @property
     def psms(self) -> List[PSM]:
@@ -115,19 +126,25 @@ class Validator(pathway_base.PathwayBase):
                                         modified identifications.
 
         """
-        # Process the input files to extract the modification identifications
+        # process the input files to extract the modification identifications
         logging.info("Reading database search identifications for "
                      "model construction ...")
         self._read_results(self.config.res_model_files, "model")
 
-        # Split search results
+        # split search results
         self._get_unmodified_identifications()
 
-        # search results type for constructing spectrum ID mapper
+        # get modified peptide search results
+        self._get_mod_identifications()
 
+        # clear the cache
+        self.search_results.clear()
+
+        # search results type for constructing spectrum ID mapper
+        self._create_spectrum_id_mapper(self.config.model_search_res_engine)
 
         # load mass spectra for feature calculation
-        self._load_mass_spectra(self.unmod_psms + self.decoy_psms)
+        self._load_mass_spectra(list(itertools.chain(*self._psms.values())))
 
         logging.info('Calculating PSM features...')
         self._calculate_features()
@@ -267,20 +284,29 @@ class Validator(pathway_base.PathwayBase):
         self._psms['decoy_psms'].extend(
             self._results_to_unmod_psms(decoy_idents,
                                         allowed_mods=self.config.mod_excludes))
-        # clear the cache
-        self.search_results.clear()
+
+        # Mass spectra in positive PSMs are retained.
+        self._psm_spectrum_retains.update(
+            (p.data_id[0], p.spec_id) for p in self._psms['pos_unmod_psms']
+        )
 
     def _get_mod_identifications(self):
         """
         Loads modified peptide identifications and converts to
         modified PSMs
         """
-        pass
+        mod_idents = self._results_to_mod_psms(
+            itertools.chain(*self.search_results.values()),
+            self.config.mod_excludes)
+        self._psms["mod_psms"].extend(mod_idents)
+        self._psm_spectrum_retains.update(
+            (p.data_id[0], p.spec_id) for p in mod_idents
+        )
 
-    def _results_to_mod_psms(
-        self,
-        search_res: Iterable[SearchResult],
-    ) -> List[PSM]:
+    @staticmethod
+    def _results_to_mod_psms(search_res: Iterable[SearchResult],
+                             allowed_mods: Optional[Set[str, str]] = None)\
+            -> List[PSM]:
         """
         Converts `SearchResult`s to `PSM`s after filtering.
 
@@ -296,6 +322,9 @@ class Validator(pathway_base.PathwayBase):
             PSMContainer.
 
         """
+        if allowed_mods is None:
+            allowed_mods = {}
+
         psms: List[PSM] = []
         allowed_ranks = {1, 2}
         # Keep track of the top-ranking identification for the spectrum, since
@@ -303,43 +332,42 @@ class Validator(pathway_base.PathwayBase):
         # by I/L
         current_spectrum: Optional[str] = None
         top_rank_ident: Optional[SearchResult] = None
-        for ident in search_res:
-            if (ident.pep_type is PeptideType.decoy or
-                    ident.rank not in allowed_ranks):
+        for r in search_res:
+            if (r.pep_type is PeptideType.decoy
+                    or r.rank not in allowed_ranks
+                    or not r.mods):
                 # Filter to rank 1/2, target identifications for validation
-                # and ignore placeholder amino acid residue identifications
+                # ignore placeholder amino acid residue identifications, and
+                # filter empty modification
                 continue
 
-            if ident.rank == 1:
-                current_spectrum = ident.spectrum
-                top_rank_ident = ident
+            # Filter unknown modification and modifications excluded
+            mods = [Mod(**m.__dict__) for m in r.mods]
+            if (any(m.mass is None for m in mods)
+                    or all((m.mod, r.seq[m.int_site - 1]) in allowed_mods
+                           for m in mods)):
+                continue
+
+            if r.rank == 1:
+                current_spectrum = r.spectrum
+                top_rank_ident = r
             else:
-                if current_spectrum != ident.spectrum:
+                if current_spectrum != r.spectrum:
                     current_spectrum = None
                     top_rank_ident = None
                     continue
-                m = re.fullmatch(
-                    # Construct the pattern by replace I and L in the top rank
-                    # peptide sequence with [IL] for regex matching
-                    re.sub(r'[IL]', '[IL]', top_rank_ident.seq),
-                    ident.seq
-                )
+                # Construct the pattern by replace I and L in the top rank
+                # peptide sequence with [IL] for regex matching
+                m = re.fullmatch(re.sub(r'[IL]', '[IL]', top_rank_ident.seq),
+                                 r.seq)
                 if m is None:
                     # Lower rank sequence is not an I/L isoform of the top
                     # ranking sequence
                     continue
 
-            dataset = \
-                ident.dataset if ident.dataset is not None else data_id
-
-            if self._has_target_mod(ident.mods, ident.seq):
-                psms.append(
-                    PSM(
-                        dataset,
-                        ident.spectrum,
-                        Peptide(ident.seq, ident.charge, ident.mods)
-                    )
-                )
+            psms.append(
+                PSM(r.dataset, r.spectrum, Peptide(r.seq, r.charge, mods))
+            )
 
         return psms
 
@@ -373,16 +401,16 @@ class Validator(pathway_base.PathwayBase):
                     in allowed_mods for m in r.mods)):
                 psm = PSM(r.dataset,
                           r.spectrum,
-                          Peptide(r.seq, r.charge, r.mods))
-                if r.pep_type == PeptideType.decoy:
+                          Peptide(r.seq, r.charge,
+                                  [Mod(**m.__dict__) for m in r.mods])
+                          )
+                if r.pep_type is PeptideType.decoy:
                     psm.target = False
                 psms.append(psm)
 
         return psms
 
-    def _load_mass_spectra(self,
-                           search_results: Sequence[PSM],
-                           tag: str = "unmod"):
+    def _load_mass_spectra(self, search_results: Sequence[PSM]):
         """
         Processes the input mass spectra to match to their peptides.
 
@@ -394,28 +422,42 @@ class Validator(pathway_base.PathwayBase):
                  PSMs are clear to clean the cache.
 
         """
-        # all search results files
-        search_results_file_names = set(res.data_id for res in search_results)
+        # Search results grouped by file names and spectrum IDs
+        psm_collection: Dict[str, Dict[str, List[PSM]]] =\
+            collections.defaultdict(lambda: collections.defaultdict(list))
+        for p in search_results:
+            name, _ = p.data_id
+            psm_collection[name][p.spec_id].append(p)
 
-        # list of mass spectra files
-        mass_spec_files: Dict[str, str] = {}
-        for spec_file in self.config.spec_files:
-            name_split = os.path.split(os.path.basename(spec_file))
-            mass_spec_files[name_split[0]] = spec_file
+        # Raise errors if search results files are not found in list of
+        # mass spectrum files.
+        self._check_file_consistency(tuple(psm_collection.keys()),
+                                     tuple(self._spectrum_files.keys()))
 
-        for data_id, spectra in self.read_mass_spectra():
-            for container, index in zip(self.psm_containers.values(), indices):
-                for spec_id, spectrum in spectra.items():
-                    for psm_idx in index[(data_id, spec_id)]:
-                        container[psm_idx].spectrum = spectrum
+        for name in psm_collection.keys():
+            spec_file = self._spectrum_files[name]
+            logging.info(f'Loading mass spectra from {spec_file} ...')
 
-    def _calculate_features(self):
+            for spec_id, spectrum in read_spectra_file(spec_file):
+                corr_id = self.spectrum_id_mapper(spec_id)
+                for p in psm_collection[name][corr_id]:
+                    p.spectrum = spectrum
+
+            # extract features
+            self._calculate_features(
+                list(itertools.chain(*psm_collection[name].values()))
+            )
+
+            # clear the spectra for PSMs not in defined list
+            for spec_id in psm_collection[name].keys():
+                if (name, spec_id) not in self._psm_spectrum_retains:
+                    for p in psm_collection[name][spec_id]:
+                        p.spectrum = None
+
+    def _calculate_features(self, psms: Sequence[PSM]):
         """Computes features for all PSMContainers."""
-
-        for psm_container in self.psm_containers.values():
-            for psm in psm_container:
-                psm.extract_features()
-                psm.peptide.clean_fragment_ions()
+        with Pool(processes=self.config.num_cores) as pool:
+            pool.map(extract_features, psms)
 
     def _filter_psms(self, predicate: Callable[[PSM], bool]):
         """Filters PSMs using the provided `predicate`.

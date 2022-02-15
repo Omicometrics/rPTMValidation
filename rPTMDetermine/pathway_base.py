@@ -10,21 +10,19 @@ import os
 import sys
 import collections
 import operator
-from typing import (Dict, Generator, Iterable, List,
-                    Optional, Sequence, Tuple, Type)
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Type
 
 from modification import Mod
 
 from . import mass_spectrum, packing, peptides, proteolysis, readers
 
-from .spectra_readers import read_spectra_file
 from .base import (ScoreGetter, ScoreGetterMap,
                    PositiveGetterMap, PositiveChecker)
 from .features import Features
-from .readers import SearchResult, PeptideType
+from .readers import SearchResult, PeptideType, SearchEngine, SpectrumIDType
+from .psm_spectrum_id_mapper import SpectrumIDMapper
 from .modminer_config import ModMinerConfig
 from .peptide_spectrum_match import PSM
-from .machinelearning import ValidationModel
 
 
 def split_res(
@@ -175,6 +173,8 @@ class PathwayBase:
 
         self.model_features = Features.all_feature_names()
 
+        self._spectrum_files = self._parse_spectrum_files()
+
     def _valid_cache(self) -> bool:
         """
         Determines whether any cached files may be used, based on the
@@ -270,26 +270,43 @@ class PathwayBase:
         splitter = lambda r, s: score_getter(r) >= s
         return split_res(search_results, score, splitter)
 
+    def _create_spectrum_id_mapper(self, engine: SearchEngine):
+        """ A mapper that matches mass spectrum ID to """
+        for res_file in self.search_results.keys():
+            res = self.search_results[res_file][0]
+            break
+
+        # mass spectral file extensions
+        spec_file_exts = set()
+        for spec_file in self.config.spec_files:
+            spec_file_exts.add(os.path.splitext(spec_file)[1][1:])
+
+        self.spectrum_id_mapper = SpectrumIDMapper(
+            engine, next(iter(spec_file_exts)), res.spectrum_id_type)
+
+    def _parse_spectrum_files(self) -> Dict[str, str]:
+        """ Parses mass spectrum files with names. """
+        # List of mass spectra files
+        mass_spec_files: Dict[str, str] = {}
+        for spec_file in self.config.spec_files:
+            name_split = os.path.splitext(os.path.basename(spec_file))
+            mass_spec_files[name_split[0]] = spec_file
+        return mass_spec_files
+
     @staticmethod
-    def read_mass_spectra(spec_file):
+    def _check_file_consistency(res_files: Sequence[str],
+                                spectrum_files: Sequence[str]):
         """
-        Reads the mass spectra from the configured spectra_files.
+        Checks file consistencies.
 
-        Returns:
-
-
+        Raises:
+            ValueError
         """
-        logging.info(f'Loading mass spectra from {spec_file} ...')
-        yield from read_spectra_file(spec_file)
-
-    def _classify(self, psms: List[PSM]):
-        """
-        Classifies all PSMs in `container`.
-
-        Args:
-            container: The PSMContainer containing PSMs to classify.
-
-        """
-        scores = self.model.validate(psms)
-        for psm, _scores in zip(psms, scores):
-            psm.ml_scores = _scores
+        # Check consistencies between mass spectral files and search results
+        unmatch_files = [
+            n for n in res_files if n not in spectrum_files
+        ]
+        if unmatch_files:
+            raise ValueError("Can't find search result file(s) with name(s): "
+                             f"{', '.join(unmatch_files)} in list of mass "
+                             "spectrum files.")

@@ -5,7 +5,7 @@ identification results.
 """
 import re
 
-from .readers import SearchEngine
+from .readers import SearchEngine, SpectrumIDType
 
 
 class SpectrumIDMapper:
@@ -15,7 +15,7 @@ class SpectrumIDMapper:
     def __init__(self,
                  search_engine: SearchEngine,
                  file_type: str,
-                 id_type: str):
+                 id_type: SpectrumIDType):
         self.engine = search_engine
         self.spectrum_file_type = file_type
         self.spectrum_id_type = id_type
@@ -45,7 +45,8 @@ class SpectrumIDMapper:
         """
         if (self.engine in (SearchEngine.Comet,
                             SearchEngine.Mascot,
-                            SearchEngine.MSFragger)
+                            SearchEngine.MSFragger,
+                            SearchEngine.TPP)
                 and self.spectrum_file_type in ("mgf", "mzML")):
             self._converter = lambda x: x
 
@@ -57,6 +58,7 @@ class SpectrumIDMapper:
                 else:
                     raise ValueError("Unrecognized mass spectrum file type: "
                                      f"{self.spectrum_file_type}")
+            return
 
         if self.engine in (SearchEngine.ProteinPilotXML,
                            SearchEngine.ProteinPilot):

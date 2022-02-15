@@ -28,7 +28,7 @@ from .protein_pilot_reader import (
 )
 from .ptmdb import PTMDB
 from .readers import get_reader, read_fasta_sequences, SearchEngine
-from .search_result import PeptideType, SearchResult
+from .search_result import PeptideType, SearchResult, SpectrumIDType
 from .tpp_reader import TPPReader, TPPSearchResult
 # from .uniprot import read_uniprot_ptms
 
@@ -60,6 +60,7 @@ __all__ = [
     "PeptideType",
     "SearchEngine",
     "SearchResult",
+    "SpectrumIDType",
     "TPPReader",
     "TPPSearchResult",
     # "read_uniprot_ptms",
